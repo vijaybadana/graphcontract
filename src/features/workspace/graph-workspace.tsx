@@ -7,6 +7,7 @@ import {
   Edge,
   MiniMap,
   ReactFlow,
+  useNodesState,
   useReactFlow,
 } from '@xyflow/react';
 import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
@@ -69,6 +70,7 @@ export function GraphWorkspace() {
     () => projectGraphToCanvas(graph, proposal, selection),
     [graph, proposal, selection],
   );
+  const [canvasNodes, setCanvasNodes, onNodesChange] = useNodesState<ContractFlowNode>(canvas.nodes);
   const editable = graph.status === 'draft' && !proposal;
   const { fitGraph } = useCoalescedFitView<ContractFlowNode, Edge>({
     enabled: hasHydrated,
@@ -112,6 +114,10 @@ export function GraphWorkspace() {
     const timeout = window.setTimeout(clearNotice, 4000);
     return () => window.clearTimeout(timeout);
   }, [notice, clearNotice]);
+
+  useEffect(() => {
+    setCanvasNodes(canvas.nodes);
+  }, [canvas.nodes, setCanvasNodes]);
 
   useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
@@ -217,9 +223,10 @@ export function GraphWorkspace() {
 
         <section className="relative min-w-0 flex-1">
         <ReactFlow<ContractFlowNode, Edge>
-          nodes={canvas.nodes}
+          nodes={canvasNodes}
           edges={canvas.edges}
           nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
           onConnect={onConnect}
           onSelectionChange={({ nodes, edges }) => {
             const nodeIds = nodes.map((node) => node.id);
