@@ -7,7 +7,6 @@ import {
   Edge,
   MiniMap,
   ReactFlow,
-  useNodesInitialized,
   useReactFlow,
 } from '@xyflow/react';
 import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
@@ -17,6 +16,7 @@ import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/web
 import { NodeKind, validateGraph } from '@/src/domain';
 import { ContractFlowNode, ContractNode } from '@/src/features/canvas/contract-node';
 import { NodePalette, readDroppedNodeKind } from '@/src/features/canvas/node-palette';
+import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
 import { ContextInspector } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
@@ -24,12 +24,6 @@ import { useGraphStore } from '@/src/state/workspace-store';
 
 type WebMcpStatus = 'unavailable' | 'registering' | 'connected' | 'error';
 const nodeTypes = { contractNode: ContractNode };
-const FIT_VIEW_OPTIONS = {
-  padding: { top: '10%' as const, right: '8%' as const, bottom: '12%' as const, left: '8%' as const },
-  minZoom: 0.2,
-  maxZoom: 1.15,
-  duration: 260,
-};
 const minimapColors: Record<NodeKind, string> = {
   start: '#34d399',
   agent: '#d79049',
@@ -68,8 +62,7 @@ export function GraphWorkspace() {
   const [showPalette, setShowPalette] = useState(true);
   const [showInspector, setShowInspector] = useState(true);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
-  const { screenToFlowPosition, fitView } = useReactFlow<ContractFlowNode, Edge>();
-  const nodesInitialized = useNodesInitialized();
+  const { screenToFlowPosition } = useReactFlow<ContractFlowNode, Edge>();
 
   const validationIssues = useMemo(() => validateGraph(graph), [graph]);
   const canvas = useMemo(
@@ -77,13 +70,11 @@ export function GraphWorkspace() {
     [graph, proposal, selection],
   );
   const editable = graph.status === 'draft' && !proposal;
-  const fitGraph = useCallback(() => {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        void fitView(FIT_VIEW_OPTIONS);
-      });
-    });
-  }, [fitView]);
+  const { fitGraph } = useCoalescedFitView<ContractFlowNode, Edge>({
+    enabled: hasHydrated,
+    revision: fitViewRevision,
+    containerLayoutKey: `${showPalette}:${showInspector}`,
+  });
 
   useEffect(() => {
     void Promise.resolve(useGraphStore.persist.rehydrate()).then(() => setHasHydrated(true));
@@ -121,11 +112,6 @@ export function GraphWorkspace() {
     const timeout = window.setTimeout(clearNotice, 4000);
     return () => window.clearTimeout(timeout);
   }, [notice, clearNotice]);
-
-  useEffect(() => {
-    if (!hasHydrated || !nodesInitialized) return;
-    fitGraph();
-  }, [fitGraph, fitViewRevision, hasHydrated, nodesInitialized, showInspector, showPalette]);
 
   useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
@@ -261,8 +247,6 @@ export function GraphWorkspace() {
           multiSelectionKeyCode={["Meta", "Control"]}
           snapToGrid
           snapGrid={[12, 12]}
-          fitView
-          fitViewOptions={FIT_VIEW_OPTIONS}
           minZoom={0.18}
           maxZoom={2.5}
           deleteKeyCode={null}

@@ -41,7 +41,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
 
   return (
     <div
-      className={`min-w-36 rounded-2xl border-2 px-4 py-3 shadow-md transition ${colors[data.kind]} ${
+      className={`h-[104px] w-44 rounded-2xl border-2 px-4 py-3 shadow-md transition ${colors[data.kind]} ${
         selected ? 'ring-4 ring-black/10' : ''
       } ${proposalClass}`}
     >
@@ -57,7 +57,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
           <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] opacity-55">
             {kindLabel[data.kind]}
           </p>
-          <p className="mt-1 max-w-36 text-sm font-semibold leading-5">{data.label}</p>
+          <p className="mt-1 line-clamp-2 max-w-36 text-sm font-semibold leading-5">{data.label}</p>
         </div>
         {data.hitl?.enabled && (
           <span
