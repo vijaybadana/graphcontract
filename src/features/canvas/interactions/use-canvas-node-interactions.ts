@@ -1,6 +1,6 @@
 'use client';
 
-import { OnNodeDrag, useNodesState } from '@xyflow/react';
+import { Edge, OnNodeDrag, useEdgesState, useNodesState } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ContractFlowNode } from '@/src/features/canvas/contract-node';
@@ -8,6 +8,7 @@ import { AlignmentGuides, CanvasPosition, snapNodeToAlignment } from './canvas-g
 
 type CanvasNodeInteractionsOptions = {
   projectedNodes: ContractFlowNode[];
+  projectedEdges: Edge[];
   editable: boolean;
   onCommitPositions: (positions: Record<string, CanvasPosition>) => void;
 };
@@ -16,12 +17,64 @@ type DragSnapshot = {
   positions: Record<string, CanvasPosition>;
 };
 
-export function useCanvasNodeInteractions({
+const transientNodeFields = new Set(['selected', 'measured', 'dragging']);
+const nodeProjectionKey = (node: ContractFlowNode) =>
+  JSON.stringify(node, (key, value) => (transientNodeFields.has(key) ? undefined : value));
+const edgeProjectionKey = (edge: Edge) =>
+  JSON.stringify(edge, (key, value) => (key === 'selected' ? undefined : value));
+
+function reconcileProjectedNodes(
+  currentNodes: ContractFlowNode[],
+  projectedNodes: ContractFlowNode[],
+) {
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  let changed = currentNodes.length !== projectedNodes.length;
+  const reconciled = projectedNodes.map((projectedNode, index) => {
+    const currentNode = currentById.get(projectedNode.id);
+    if (!currentNode) {
+      changed = true;
+      return projectedNode;
+    }
+    if (currentNodes[index]?.id !== projectedNode.id) changed = true;
+    if (nodeProjectionKey(currentNode) === nodeProjectionKey(projectedNode)) return currentNode;
+    changed = true;
+    return {
+      ...projectedNode,
+      selected: currentNode.selected,
+      measured: currentNode.measured,
+    };
+  });
+  return changed ? reconciled : currentNodes;
+}
+
+// Canonical graph projections flow into this layer, while React Flow retains
+// transient measurement and selection fields. Preserving that one-way boundary
+// prevents controlled props from feeding React Flow's own updates back into it.
+function reconcileProjectedEdges(currentEdges: Edge[], projectedEdges: Edge[]) {
+  const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
+  let changed = currentEdges.length !== projectedEdges.length;
+  const reconciled = projectedEdges.map((projectedEdge, index) => {
+    const currentEdge = currentById.get(projectedEdge.id);
+    if (!currentEdge) {
+      changed = true;
+      return projectedEdge;
+    }
+    if (currentEdges[index]?.id !== projectedEdge.id) changed = true;
+    if (edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge)) return currentEdge;
+    changed = true;
+    return { ...projectedEdge, selected: currentEdge.selected };
+  });
+  return changed ? reconciled : currentEdges;
+}
+
+export function useCanvasInteractions({
   projectedNodes,
+  projectedEdges,
   editable,
   onCommitPositions,
 }: CanvasNodeInteractionsOptions) {
   const [nodes, setNodes, onNodesChange] = useNodesState<ContractFlowNode>(projectedNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(projectedEdges);
   const [guides, setGuides] = useState<AlignmentGuides>({});
   const [collisionNodeIds, setCollisionNodeIds] = useState<string[]>([]);
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
@@ -29,8 +82,14 @@ export function useCanvasNodeInteractions({
   const lastDragRef = useRef<DragSnapshot | null>(null);
 
   useEffect(() => {
-    if (!draggingRef.current) setNodes(projectedNodes);
+    if (!draggingRef.current) {
+      setNodes((currentNodes) => reconcileProjectedNodes(currentNodes, projectedNodes));
+    }
   }, [projectedNodes, setNodes]);
+
+  useEffect(() => {
+    setEdges((currentEdges) => reconcileProjectedEdges(currentEdges, projectedEdges));
+  }, [projectedEdges, setEdges]);
 
   const onNodeDragStart = useCallback<OnNodeDrag<ContractFlowNode>>((_, node, draggedNodes) => {
     draggingRef.current = true;
@@ -99,6 +158,8 @@ export function useCanvasNodeInteractions({
   );
 
   const renderedNodes = useMemo(() => {
+    if (collisionNodeIds.length === 0 && draggedNodeId === null) return nodes;
+
     const collisions = new Set(collisionNodeIds);
     return nodes.map((node) => ({
       ...node,
@@ -114,8 +175,10 @@ export function useCanvasNodeInteractions({
 
   return {
     nodes: renderedNodes,
+    edges,
     guides,
     onNodesChange,
+    onEdgesChange,
     onNodeDragStart,
     onNodeDrag,
     onNodeDragStop,

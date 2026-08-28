@@ -46,7 +46,7 @@ export function NodePalette({
   };
 
   return (
-    <aside className="workspace-panel relative z-20 m-3 w-[210px] shrink-0 self-start p-3">
+    <aside className="workspace-panel absolute left-3 top-3 z-30 max-h-[calc(100%-1.5rem)] w-[210px] overflow-y-auto p-3">
       <div className="flex items-center justify-between">
         <p className="eyebrow">Node palette</p>
         <div className="flex items-center gap-2">

@@ -5,8 +5,10 @@ import {
   Connection,
   ConnectionLineType,
   Controls,
+  DefaultEdgeOptions,
   Edge,
   MiniMap,
+  OnSelectionChangeParams,
   OnReconnect,
   ReactFlow,
   SelectionMode,
@@ -19,7 +21,7 @@ import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/web
 import { evaluateConnection } from '@/src/application/connection-policy';
 import { NodeKind, validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
-import { useCanvasNodeInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
+import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { ContractFlowNode, ContractNode } from '@/src/features/canvas/contract-node';
 import { NodePalette, readDroppedNodeKind } from '@/src/features/canvas/node-palette';
 import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
@@ -34,6 +36,12 @@ import { useGraphStore } from '@/src/state/workspace-store';
 
 type WebMcpStatus = 'unavailable' | 'registering' | 'connected' | 'error';
 const nodeTypes = { contractNode: ContractNode };
+const snapGrid: [number, number] = [12, 12];
+const panOnDrag = [1];
+const defaultEdgeOptions: DefaultEdgeOptions = {
+  type: 'smoothstep',
+  pathOptions: { borderRadius: 16, offset: 28 },
+};
 const minimapColors: Record<NodeKind, string> = {
   start: '#34d399',
   agent: '#d79049',
@@ -82,8 +90,9 @@ export function GraphWorkspace() {
     [graph, proposal, selection],
   );
   const editable = graph.status === 'draft' && !proposal;
-  const canvasInteractions = useCanvasNodeInteractions({
+  const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
+    projectedEdges: canvas.edges,
     editable,
     onCommitPositions: moveNodes,
   });
@@ -181,19 +190,60 @@ export function GraphWorkspace() {
     [editable, updateEdge],
   );
 
-  const addAtCenter = (kind: NodeKind) => {
-    addNode(
-      kind,
-      screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
-    );
-  };
+  const handleSelectionChange = useCallback(
+    ({ nodes, edges }: OnSelectionChangeParams<ContractFlowNode, Edge>) => {
+      const nodeIds = nodes.map((node) => node.id);
+      const edgeIds = edges.map((edge) => edge.id);
+      const currentPrimary = useGraphStore.getState().selection.primary;
+      const currentPrimaryStillSelected = currentPrimary
+        ? currentPrimary.type === 'node'
+          ? nodeIds.includes(currentPrimary.id)
+          : edgeIds.includes(currentPrimary.id)
+        : false;
+      const primary = currentPrimaryStillSelected
+        ? currentPrimary
+        : nodeIds.length
+          ? { type: 'node' as const, id: nodeIds[nodeIds.length - 1] }
+          : edgeIds.length
+            ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
+            : null;
+      setSelection({ nodeIds, edgeIds, primary });
+    },
+    [setSelection],
+  );
 
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+  const addAtCenter = useCallback(
+    (kind: NodeKind) => {
+      addNode(
+        kind,
+        screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
+      );
+    },
+    [addNode, screenToFlowPosition],
+  );
+
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const kind = readDroppedNodeKind(event);
+      if (!kind || !editable) return;
+      addNode(kind, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+    },
+    [addNode, editable, screenToFlowPosition],
+  );
+
+  const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const kind = readDroppedNodeKind(event);
-    if (!kind || !editable) return;
-    addNode(kind, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
-  };
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onReconnectStart = useCallback((_: unknown, edge: Edge) => {
+    reconnectingEdgeIdRef.current = edge.id;
+  }, []);
+
+  const onReconnectEnd = useCallback(() => {
+    reconnectingEdgeIdRef.current = null;
+  }, []);
 
   const handleFreeze = () => {
     const result = freezeGraph();
@@ -237,7 +287,7 @@ export function GraphWorkspace() {
 
       {notice && <div className="fixed left-1/2 top-[4.25rem] z-50 -translate-x-1/2 rounded-full bg-[#18211d] px-4 py-2 text-xs font-semibold text-white shadow-xl">{notice}</div>}
 
-      <section className="flex h-[calc(100dvh-3.5rem)] min-w-0">
+      <section className="relative h-[calc(100dvh-3.5rem)] min-w-0">
         {showPalette && (
           <NodePalette
             graph={graph}
@@ -248,7 +298,7 @@ export function GraphWorkspace() {
             onCollapse={() => setShowPalette(false)}
           />
         )}
-        <section className="relative min-w-0 flex-1">
+        <section className="absolute inset-0 min-w-0">
           {!showPalette && (
             <PanelExpandButton
               side="left"
@@ -265,37 +315,22 @@ export function GraphWorkspace() {
           )}
           <ReactFlow<ContractFlowNode, Edge>
             nodes={canvasInteractions.nodes}
-            edges={canvas.edges}
+            edges={canvasInteractions.edges}
             nodeTypes={nodeTypes}
             onNodesChange={canvasInteractions.onNodesChange}
+            onEdgesChange={canvasInteractions.onEdgesChange}
             onConnect={onConnect}
             isValidConnection={isValidConnection}
             onReconnect={onReconnect}
-            onReconnectStart={(_, edge) => {
-              reconnectingEdgeIdRef.current = edge.id;
-            }}
-            onReconnectEnd={() => {
-              reconnectingEdgeIdRef.current = null;
-            }}
-            onSelectionChange={({ nodes, edges }) => {
-              const nodeIds = nodes.map((node) => node.id);
-              const edgeIds = edges.map((edge) => edge.id);
-              const primary = nodeIds.length
-                ? { type: 'node' as const, id: nodeIds[nodeIds.length - 1] }
-                : edgeIds.length
-                  ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
-                  : null;
-              setSelection({ nodeIds, edgeIds, primary });
-            }}
+            onReconnectStart={onReconnectStart}
+            onReconnectEnd={onReconnectEnd}
+            onSelectionChange={handleSelectionChange}
             onPaneClick={clearSelection}
             onNodeDragStart={canvasInteractions.onNodeDragStart}
             onNodeDrag={canvasInteractions.onNodeDrag}
             onNodeDragStop={canvasInteractions.onNodeDragStop}
             onDrop={onDrop}
-            onDragOver={(event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
-            }}
+            onDragOver={onDragOver}
             nodesDraggable={editable}
             nodesConnectable={editable}
             edgesReconnectable={editable}
@@ -303,7 +338,7 @@ export function GraphWorkspace() {
             selectionOnDrag
             selectionMode={SelectionMode.Partial}
             panOnScroll
-            panOnDrag={[1]}
+            panOnDrag={panOnDrag}
             autoPanOnNodeDrag
             autoPanOnConnect
             autoPanOnSelection
@@ -312,15 +347,12 @@ export function GraphWorkspace() {
             nodeDragThreshold={2}
             connectionDragThreshold={3}
             connectionLineType={ConnectionLineType.SmoothStep}
-            defaultEdgeOptions={{
-              type: 'smoothstep',
-              pathOptions: { borderRadius: 16, offset: 28 },
-            }}
+            defaultEdgeOptions={defaultEdgeOptions}
             zoomOnDoubleClick={false}
             selectionKeyCode="Shift"
             multiSelectionKeyCode={['Meta', 'Control']}
             snapToGrid
-            snapGrid={[12, 12]}
+            snapGrid={snapGrid}
             minZoom={0.18}
             maxZoom={2.5}
             deleteKeyCode={null}
@@ -363,7 +395,7 @@ export function GraphWorkspace() {
         </section>
 
         {showInspector && (
-          <aside className="workspace-panel relative z-20 m-3 ml-0 w-[340px] shrink-0 overflow-y-auto p-3">
+          <aside className="workspace-panel absolute bottom-3 right-3 top-3 z-30 w-[340px] overflow-y-auto p-3">
             <div className="mb-3 flex items-center gap-2">
               <div className="grid min-w-0 flex-1 grid-cols-2 rounded-xl bg-black/5 p-1">
                 <button onClick={() => setRightTab('review')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${rightTab === 'review' ? 'bg-white shadow-sm' : 'text-black/50'}`}>Edit &amp; review</button>
