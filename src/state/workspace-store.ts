@@ -49,6 +49,13 @@ type WorkspaceStore = WorkspaceCore & {
 };
 
 const emptySelection = (): WorkspaceSelection => ({ nodeIds: [], edgeIds: [], primary: null });
+const sameIds = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((id, index) => id === right[index]);
+const sameSelection = (left: WorkspaceSelection, right: WorkspaceSelection) =>
+  sameIds(left.nodeIds, right.nodeIds) &&
+  sameIds(left.edgeIds, right.edgeIds) &&
+  left.primary?.type === right.primary?.type &&
+  left.primary?.id === right.primary?.id;
 const coreOf = (state: WorkspaceCore): WorkspaceCore => ({
   graph: structuredClone(state.graph),
   proposal: structuredClone(state.proposal),
@@ -118,7 +125,8 @@ export const useGraphStore = create<WorkspaceStore>()(
         removeEdge: (id) =>
           commit(workspace.removeEdge(currentCore(), id), { selection: emptySelection() }),
 
-        setSelection: (selection) => set({ selection }),
+        setSelection: (selection) =>
+          set((state) => (sameSelection(state.selection, selection) ? state : { selection })),
         clearSelection: () => set({ selection: emptySelection() }),
 
         deleteSelection: () => {
