@@ -36,11 +36,14 @@ function reconcileProjectedNodes(
       return projectedNode;
     }
     if (currentNodes[index]?.id !== projectedNode.id) changed = true;
-    if (nodeProjectionKey(currentNode) === nodeProjectionKey(projectedNode)) return currentNode;
+    if (nodeProjectionKey(currentNode) === nodeProjectionKey(projectedNode)) {
+      if (Boolean(currentNode.selected) === Boolean(projectedNode.selected)) return currentNode;
+      changed = true;
+      return { ...currentNode, selected: projectedNode.selected };
+    }
     changed = true;
     return {
       ...projectedNode,
-      selected: currentNode.selected,
       measured: currentNode.measured,
     };
   });
@@ -48,8 +51,9 @@ function reconcileProjectedNodes(
 }
 
 // Canonical graph projections flow into this layer, while React Flow retains
-// transient measurement and selection fields. Preserving that one-way boundary
-// prevents controlled props from feeding React Flow's own updates back into it.
+// transient measurement fields. Selection is mirrored explicitly so store-driven
+// actions (clear, add, delete, undo) cannot leave React Flow with stale selected
+// elements, while referential equality still prevents controlled-prop loops.
 function reconcileProjectedEdges(currentEdges: Edge[], projectedEdges: Edge[]) {
   const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
   let changed = currentEdges.length !== projectedEdges.length;
@@ -60,9 +64,13 @@ function reconcileProjectedEdges(currentEdges: Edge[], projectedEdges: Edge[]) {
       return projectedEdge;
     }
     if (currentEdges[index]?.id !== projectedEdge.id) changed = true;
-    if (edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge)) return currentEdge;
+    if (edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge)) {
+      if (Boolean(currentEdge.selected) === Boolean(projectedEdge.selected)) return currentEdge;
+      changed = true;
+      return { ...currentEdge, selected: projectedEdge.selected };
+    }
     changed = true;
-    return { ...projectedEdge, selected: currentEdge.selected };
+    return projectedEdge;
   });
   return changed ? reconciled : currentEdges;
 }
