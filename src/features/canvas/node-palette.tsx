@@ -1,6 +1,6 @@
 import { DragEvent } from 'react';
 
-import { NodeKind, nodeKinds, WorkflowGraph } from '@/src/domain';
+import { GraphProposal, NodeKind, nodeKinds, WorkflowGraph } from '@/src/domain';
 
 const palette: Array<{ kind: NodeKind; label: string; color: string }> = [
   { kind: 'start', label: 'Start', color: 'bg-emerald-500' },
@@ -11,15 +11,30 @@ const palette: Array<{ kind: NodeKind; label: string; color: string }> = [
   { kind: 'end', label: 'End', color: 'bg-zinc-700' },
 ];
 
+export function getContractHealthLabel(
+  graph: WorkflowGraph,
+  proposal: GraphProposal | null,
+  validationIssueCount: number,
+) {
+  if (proposal?.status === 'pending') return 'Valid — proposal awaiting review.';
+  if (proposal) return 'Proposal needs changes.';
+  if (validationIssueCount) {
+    return `${validationIssueCount} issue${validationIssueCount === 1 ? '' : 's'}`;
+  }
+  return graph.status === 'frozen' ? 'Frozen' : 'Ready to freeze';
+}
+
 export function NodePalette({
   graph,
   disabled,
   validationIssueCount,
+  proposal,
   onAdd,
 }: {
   graph: WorkflowGraph;
   disabled: boolean;
   validationIssueCount: number;
+  proposal: GraphProposal | null;
   onAdd: (kind: NodeKind) => void;
 }) {
   const onDragStart = (event: DragEvent<HTMLButtonElement>, kind: NodeKind) => {
@@ -28,12 +43,18 @@ export function NodePalette({
   };
 
   return (
-    <aside className="workspace-panel absolute left-3 top-3 z-20 w-[210px] p-3">
+    <aside className="workspace-panel relative z-20 m-3 w-[210px] shrink-0 self-start p-3">
       <div className="flex items-center justify-between">
         <p className="eyebrow">Node palette</p>
-        <span className={`health-dot ${validationIssueCount ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+        <span className={`health-dot ${proposal?.status === 'pending' || !validationIssueCount ? 'bg-emerald-500' : 'bg-amber-500'}`} />
       </div>
-      <p className="mt-1 text-[10px] leading-4 text-black/45">Drag onto the canvas or click to add.</p>
+      <p className="mt-1 text-[10px] leading-4 text-black/45">
+        {proposal
+          ? 'Palette locked while a proposal awaits review. Approve or reject it to continue editing.'
+          : graph.status === 'frozen'
+            ? 'Palette locked while the contract is frozen.'
+            : 'Drag onto the canvas or click to add.'}
+      </p>
       <div className="mt-3 grid gap-1.5">
         {palette.map((item) => {
           const singletonExists =
@@ -57,7 +78,7 @@ export function NodePalette({
       <div className="mt-3 rounded-xl bg-[#18211d] p-3 text-white">
         <p className="text-[9px] font-bold uppercase tracking-widest text-white/45">Contract health</p>
         <p className="mt-1 text-xs font-semibold">
-          {validationIssueCount ? `${validationIssueCount} issue${validationIssueCount === 1 ? '' : 's'}` : 'Ready to freeze'}
+          {getContractHealthLabel(graph, proposal, validationIssueCount)}
         </p>
       </div>
       <p className="mt-3 text-[9px] leading-4 text-black/40">

@@ -122,7 +122,7 @@ export async function registerWebMcpTools(
         execute: async () => {
           const { graph, proposal } = port.getSnapshot();
           const issues = validateGraph(graph);
-          return JSON.stringify({
+          return {
             ok: true,
             graph,
             validation: { validForFreeze: issues.length === 0, issues },
@@ -134,7 +134,7 @@ export async function registerWebMcpTools(
                   createdAt: proposal.createdAt,
                 }
               : undefined,
-          });
+          };
         },
       },
       { signal },
@@ -156,7 +156,7 @@ export async function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, destructiveHint: false },
-        execute: async (input) => JSON.stringify(port.submitProposal(input)),
+        execute: async (input) => port.submitProposal(input),
       },
       { signal },
     ),
@@ -171,23 +171,23 @@ export async function registerWebMcpTools(
         execute: async () => {
           const { graph, scenarios } = port.getSnapshot();
           if (graph.status !== 'frozen') {
-            return JSON.stringify({
+            return {
               ok: false,
               error: { code: 'GRAPH_NOT_FROZEN', message: 'The human has not frozen the graph.' },
-            });
+            };
           }
           const issues = validateGraph(graph);
           if (issues.length > 0) {
-            return JSON.stringify({
+            return {
               ok: false,
               error: { code: 'GRAPH_INVALID', message: 'The frozen graph is invalid.', issues },
-            });
+            };
           }
-          return JSON.stringify({
+          return {
             ok: true,
             graphId: graph.id,
             scenarios: scenarios.length > 0 ? scenarios : enumerateScenarios(graph),
-          });
+          };
         },
       },
       { signal },

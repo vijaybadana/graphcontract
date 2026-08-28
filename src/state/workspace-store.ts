@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import { migrateWorkspaceV2 } from '@/src/adapters/persistence/migrate-workspace';
 import {
   createWorkspaceService,
   FreezeResult,
@@ -24,6 +25,7 @@ type WorkspaceStore = WorkspaceCore & {
   past: WorkspaceCore[];
   future: WorkspaceCore[];
   notice: string | null;
+  fitViewRevision: number;
   addNode: (kind: NodeKind, position?: { x: number; y: number }) => void;
   moveNode: (id: string, position: { x: number; y: number }) => void;
   updateNode: (id: string, patch: Partial<Omit<GraphNode, 'id'>>) => void;
@@ -95,6 +97,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         past: [],
         future: [],
         notice: null,
+        fitViewRevision: 0,
 
         addNode: (kind, position = { x: 360, y: 180 }) => {
           const transition = workspace.addNode(currentCore(), kind, position);
@@ -203,6 +206,9 @@ export const useGraphStore = create<WorkspaceStore>()(
         approveProposal: () => {
           const transition = workspace.approveProposal(currentCore());
           commit(transition, { history: false, selection: emptySelection() });
+          if (transition.result?.ok) {
+            set((state) => ({ fitViewRevision: state.fitViewRevision + 1 }));
+          }
           return transition.result!;
         },
 
@@ -223,7 +229,7 @@ export const useGraphStore = create<WorkspaceStore>()(
 
         resetGraph: () => {
           commit(workspace.resetGraph(), { selection: emptySelection() });
-          set({ clipboardNodeIds: [] });
+          set((state) => ({ clipboardNodeIds: [], fitViewRevision: state.fitViewRevision + 1 }));
         },
 
         clearNotice: () => set({ notice: null }),
@@ -231,8 +237,11 @@ export const useGraphStore = create<WorkspaceStore>()(
     },
     {
       name: 'graphcontract-workspace-v1',
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
+      migrate: (persistedState) =>
+        migrateWorkspaceV2(persistedState, workspace.createInitial) as WorkspaceStore,
       partialize: (state) => ({
         graph: state.graph,
         proposal: state.proposal,

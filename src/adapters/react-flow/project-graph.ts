@@ -43,6 +43,8 @@ export function projectGraphToCanvas(
       id: patched.id,
       type: 'contractNode',
       position: patched.position,
+      initialWidth: 176,
+      initialHeight: proposalState ? 92 : 72,
       data: { ...patched, proposalState },
       selected: selection.nodeIds.includes(patched.id),
     };

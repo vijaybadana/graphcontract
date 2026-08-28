@@ -12,6 +12,7 @@ import {
   ValidationIssue,
   WorkflowGraph,
 } from '@/src/domain';
+import { layoutWorkflowGraph } from './layout-workflow';
 
 export type WorkspaceCore = {
   graph: WorkflowGraph;
@@ -285,7 +286,13 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           },
         };
       }
-      const graph = { ...applied.graph, status: 'draft' as const, updatedAt: dependencies.now() };
+      const hasStructuralChanges = proposal.operations.some((operation) =>
+        ['add_node', 'remove_node', 'add_edge', 'remove_edge'].includes(operation.type),
+      );
+      const acceptedGraph = hasStructuralChanges
+        ? layoutWorkflowGraph(applied.graph)
+        : applied.graph;
+      const graph = { ...acceptedGraph, status: 'draft' as const, updatedAt: dependencies.now() };
       return {
         state: { graph, proposal: null, scenarios: [] },
         changed: true,
