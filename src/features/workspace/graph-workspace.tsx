@@ -26,6 +26,10 @@ import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-vie
 import { ContextInspector } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
+import {
+  CollapsedPanelRail,
+  PanelCollapseButton,
+} from '@/src/features/workspace/panel-collapse-control';
 import { useGraphStore } from '@/src/state/workspace-store';
 
 type WebMcpStatus = 'unavailable' | 'registering' | 'connected' | 'error';
@@ -242,6 +246,14 @@ export function GraphWorkspace() {
             disabled={!editable}
             validationIssueCount={validationIssues.length}
             onAdd={addAtCenter}
+            onCollapse={() => setShowPalette(false)}
+          />
+        )}
+        {!showPalette && (
+          <CollapsedPanelRail
+            side="left"
+            label="Palette"
+            onExpand={() => setShowPalette(true)}
           />
         )}
 
@@ -347,12 +359,26 @@ export function GraphWorkspace() {
 
         {showInspector && (
           <aside className="workspace-panel relative z-20 m-3 ml-0 w-[340px] shrink-0 overflow-y-auto p-3">
-            <div className="mb-3 grid grid-cols-2 rounded-xl bg-black/5 p-1">
-              <button onClick={() => setRightTab('review')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${rightTab === 'review' ? 'bg-white shadow-sm' : 'text-black/50'}`}>Edit &amp; review</button>
-              <button onClick={() => setRightTab('scenarios')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${rightTab === 'scenarios' ? 'bg-white shadow-sm' : 'text-black/50'}`}>Scenarios {scenarios.length ? `(${scenarios.length})` : ''}</button>
+            <div className="mb-3 flex items-center gap-2">
+              <div className="grid min-w-0 flex-1 grid-cols-2 rounded-xl bg-black/5 p-1">
+                <button onClick={() => setRightTab('review')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${rightTab === 'review' ? 'bg-white shadow-sm' : 'text-black/50'}`}>Edit &amp; review</button>
+                <button onClick={() => setRightTab('scenarios')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${rightTab === 'scenarios' ? 'bg-white shadow-sm' : 'text-black/50'}`}>Scenarios {scenarios.length ? `(${scenarios.length})` : ''}</button>
+              </div>
+              <PanelCollapseButton
+                side="right"
+                onCollapse={() => setShowInspector(false)}
+                label="Collapse inspector"
+              />
             </div>
             {rightTab === 'review' ? <div className="space-y-3"><ContextInspector /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
           </aside>
+        )}
+        {!showInspector && (
+          <CollapsedPanelRail
+            side="right"
+            label="Inspector"
+            onExpand={() => setShowInspector(true)}
+          />
         )}
       </section>
     </main>

@@ -1,6 +1,7 @@
 import { DragEvent } from 'react';
 
 import { GraphProposal, NodeKind, nodeKinds, WorkflowGraph } from '@/src/domain';
+import { PanelCollapseButton } from '@/src/features/workspace/panel-collapse-control';
 
 const palette: Array<{ kind: NodeKind; label: string; color: string }> = [
   { kind: 'start', label: 'Start', color: 'bg-emerald-500' },
@@ -30,12 +31,14 @@ export function NodePalette({
   validationIssueCount,
   proposal,
   onAdd,
+  onCollapse,
 }: {
   graph: WorkflowGraph;
   disabled: boolean;
   validationIssueCount: number;
   proposal: GraphProposal | null;
   onAdd: (kind: NodeKind) => void;
+  onCollapse: () => void;
 }) {
   const onDragStart = (event: DragEvent<HTMLButtonElement>, kind: NodeKind) => {
     event.dataTransfer.setData('application/graphcontract-node', kind);
@@ -46,7 +49,14 @@ export function NodePalette({
     <aside className="workspace-panel relative z-20 m-3 w-[210px] shrink-0 self-start p-3">
       <div className="flex items-center justify-between">
         <p className="eyebrow">Node palette</p>
-        <span className={`health-dot ${proposal?.status === 'pending' || !validationIssueCount ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+        <div className="flex items-center gap-2">
+          <span className={`health-dot ${proposal?.status === 'pending' || !validationIssueCount ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          <PanelCollapseButton
+            side="left"
+            onCollapse={onCollapse}
+            label="Collapse node palette"
+          />
+        </div>
       </div>
       <p className="mt-1 text-[10px] leading-4 text-black/45">
         {proposal
