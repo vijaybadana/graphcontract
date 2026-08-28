@@ -2,12 +2,10 @@ import { Edge, MarkerType } from '@xyflow/react';
 
 import { applyGraphOperations, GraphOperation, GraphProposal, WorkflowGraph } from '@/src/domain';
 import { ContractFlowNode } from '@/src/features/canvas/contract-node';
-import { WorkspaceSelection } from '@/src/state/workspace-store';
 
 export function projectGraphToCanvas(
   graph: WorkflowGraph,
   proposal: GraphProposal | null,
-  selection: WorkspaceSelection,
 ): { nodes: ContractFlowNode[]; edges: Edge[] } {
   const visibleProposal =
     proposal?.status === 'pending' || proposal?.status === 'invalid' ? proposal : null;
@@ -46,7 +44,6 @@ export function projectGraphToCanvas(
       initialWidth: 176,
       initialHeight: 104,
       data: { ...patched, proposalState },
-      selected: selection.nodeIds.includes(patched.id),
     };
   });
 
@@ -77,10 +74,6 @@ export function projectGraphToCanvas(
       target: patched.target,
       label: patched.label || (patched.mode === 'fallback' ? 'fallback' : undefined),
       markerEnd: { type: MarkerType.ArrowClosed, color },
-      selected: selection.edgeIds.includes(patched.id),
-      className: selection.edgeIds.includes(patched.id)
-        ? 'contract-edge--selected'
-        : undefined,
       animated: Boolean(added),
       reconnectable: graph.status === 'draft' && !visibleProposal,
       interactionWidth: 28,

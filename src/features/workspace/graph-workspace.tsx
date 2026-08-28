@@ -8,10 +8,12 @@ import {
   DefaultEdgeOptions,
   Edge,
   MiniMap,
+  NodeMouseHandler,
   OnSelectionChangeParams,
   OnReconnect,
   ReactFlow,
   SelectionMode,
+  EdgeMouseHandler,
   useReactFlow,
 } from '@xyflow/react';
 import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -85,14 +87,13 @@ export function GraphWorkspace() {
   const { screenToFlowPosition } = useReactFlow<ContractFlowNode, Edge>();
 
   const validationIssues = useMemo(() => validateGraph(graph), [graph]);
-  const canvas = useMemo(
-    () => projectGraphToCanvas(graph, proposal, selection),
-    [graph, proposal, selection],
-  );
+  const canvas = useMemo(() => projectGraphToCanvas(graph, proposal), [graph, proposal]);
   const editable = graph.status === 'draft' && !proposal;
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
     projectedEdges: canvas.edges,
+    selectedNodeIds: selection.nodeIds,
+    selectedEdgeIds: selection.edgeIds,
     editable,
     onCommitPositions: moveNodes,
   });
@@ -192,8 +193,8 @@ export function GraphWorkspace() {
 
   const handleSelectionChange = useCallback(
     ({ nodes, edges }: OnSelectionChangeParams<ContractFlowNode, Edge>) => {
-      const nodeIds = nodes.map((node) => node.id);
-      const edgeIds = edges.map((edge) => edge.id);
+      const nodeIds = nodes.map((node) => node.id).sort();
+      const edgeIds = edges.map((edge) => edge.id).sort();
       const currentPrimary = useGraphStore.getState().selection.primary;
       const currentPrimaryStillSelected = currentPrimary
         ? currentPrimary.type === 'node'
@@ -210,6 +211,28 @@ export function GraphWorkspace() {
       setSelection({ nodeIds, edgeIds, primary });
     },
     [setSelection],
+  );
+
+  const makePrimary = useCallback((primary: { type: 'node' | 'edge'; id: string }) => {
+    queueMicrotask(() => {
+      const currentSelection = useGraphStore.getState().selection;
+      const stillSelected =
+        primary.type === 'node'
+          ? currentSelection.nodeIds.includes(primary.id)
+          : currentSelection.edgeIds.includes(primary.id);
+      if (!stillSelected) return;
+      useGraphStore.getState().setSelection({ ...currentSelection, primary });
+    });
+  }, []);
+
+  const handleNodeClick = useCallback<NodeMouseHandler<ContractFlowNode>>(
+    (_, node) => makePrimary({ type: 'node', id: node.id }),
+    [makePrimary],
+  );
+
+  const handleEdgeClick = useCallback<EdgeMouseHandler<Edge>>(
+    (_, edge) => makePrimary({ type: 'edge', id: edge.id }),
+    [makePrimary],
   );
 
   const addAtCenter = useCallback(
@@ -325,6 +348,8 @@ export function GraphWorkspace() {
             onReconnectStart={onReconnectStart}
             onReconnectEnd={onReconnectEnd}
             onSelectionChange={handleSelectionChange}
+            onNodeClick={handleNodeClick}
+            onEdgeClick={handleEdgeClick}
             onPaneClick={clearSelection}
             onNodeDragStart={canvasInteractions.onNodeDragStart}
             onNodeDrag={canvasInteractions.onNodeDrag}

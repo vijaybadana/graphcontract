@@ -9,6 +9,8 @@ import { AlignmentGuides, CanvasPosition, snapNodeToAlignment } from './canvas-g
 type CanvasNodeInteractionsOptions = {
   projectedNodes: ContractFlowNode[];
   projectedEdges: Edge[];
+  selectedNodeIds: string[];
+  selectedEdgeIds: string[];
   editable: boolean;
   onCommitPositions: (positions: Record<string, CanvasPosition>) => void;
 };
@@ -26,6 +28,7 @@ const edgeProjectionKey = (edge: Edge) =>
 function reconcileProjectedNodes(
   currentNodes: ContractFlowNode[],
   projectedNodes: ContractFlowNode[],
+  selectedNodeIds: string[],
 ) {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
   let changed = currentNodes.length !== projectedNodes.length;
@@ -33,44 +36,40 @@ function reconcileProjectedNodes(
     const currentNode = currentById.get(projectedNode.id);
     if (!currentNode) {
       changed = true;
-      return projectedNode;
+      return { ...projectedNode, selected: selectedNodeIds.includes(projectedNode.id) };
     }
     if (currentNodes[index]?.id !== projectedNode.id) changed = true;
-    if (nodeProjectionKey(currentNode) === nodeProjectionKey(projectedNode)) {
-      if (Boolean(currentNode.selected) === Boolean(projectedNode.selected)) return currentNode;
-      changed = true;
-      return { ...currentNode, selected: projectedNode.selected };
-    }
+    if (nodeProjectionKey(currentNode) === nodeProjectionKey(projectedNode)) return currentNode;
     changed = true;
     return {
       ...projectedNode,
+      selected: currentNode.selected,
       measured: currentNode.measured,
     };
   });
   return changed ? reconciled : currentNodes;
 }
 
-// Canonical graph projections flow into this layer, while React Flow retains
-// transient measurement fields. Selection is mirrored explicitly so store-driven
-// actions (clear, add, delete, undo) cannot leave React Flow with stale selected
-// elements, while referential equality still prevents controlled-prop loops.
-function reconcileProjectedEdges(currentEdges: Edge[], projectedEdges: Edge[]) {
+// Canonical graph projections flow into this layer, while React Flow owns
+// transient selection and measurement. Feeding mirrored selection back through
+// controlled props creates a StoreUpdater loop during rectangle selection.
+function reconcileProjectedEdges(
+  currentEdges: Edge[],
+  projectedEdges: Edge[],
+  selectedEdgeIds: string[],
+) {
   const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
   let changed = currentEdges.length !== projectedEdges.length;
   const reconciled = projectedEdges.map((projectedEdge, index) => {
     const currentEdge = currentById.get(projectedEdge.id);
     if (!currentEdge) {
       changed = true;
-      return projectedEdge;
+      return { ...projectedEdge, selected: selectedEdgeIds.includes(projectedEdge.id) };
     }
     if (currentEdges[index]?.id !== projectedEdge.id) changed = true;
-    if (edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge)) {
-      if (Boolean(currentEdge.selected) === Boolean(projectedEdge.selected)) return currentEdge;
-      changed = true;
-      return { ...currentEdge, selected: projectedEdge.selected };
-    }
+    if (edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge)) return currentEdge;
     changed = true;
-    return projectedEdge;
+    return { ...projectedEdge, selected: currentEdge.selected };
   });
   return changed ? reconciled : currentEdges;
 }
@@ -78,6 +77,8 @@ function reconcileProjectedEdges(currentEdges: Edge[], projectedEdges: Edge[]) {
 export function useCanvasInteractions({
   projectedNodes,
   projectedEdges,
+  selectedNodeIds,
+  selectedEdgeIds,
   editable,
   onCommitPositions,
 }: CanvasNodeInteractionsOptions) {
@@ -88,15 +89,23 @@ export function useCanvasInteractions({
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const draggingRef = useRef(false);
   const lastDragRef = useRef<DragSnapshot | null>(null);
+  const selectedNodeIdsRef = useRef(selectedNodeIds);
+  const selectedEdgeIdsRef = useRef(selectedEdgeIds);
+  selectedNodeIdsRef.current = selectedNodeIds;
+  selectedEdgeIdsRef.current = selectedEdgeIds;
 
   useEffect(() => {
     if (!draggingRef.current) {
-      setNodes((currentNodes) => reconcileProjectedNodes(currentNodes, projectedNodes));
+      setNodes((currentNodes) =>
+        reconcileProjectedNodes(currentNodes, projectedNodes, selectedNodeIdsRef.current),
+      );
     }
   }, [projectedNodes, setNodes]);
 
   useEffect(() => {
-    setEdges((currentEdges) => reconcileProjectedEdges(currentEdges, projectedEdges));
+    setEdges((currentEdges) =>
+      reconcileProjectedEdges(currentEdges, projectedEdges, selectedEdgeIdsRef.current),
+    );
   }, [projectedEdges, setEdges]);
 
   const onNodeDragStart = useCallback<OnNodeDrag<ContractFlowNode>>((_, node, draggedNodes) => {

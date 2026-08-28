@@ -53,7 +53,7 @@ type WorkspaceStore = WorkspaceCore & {
 
 const emptySelection = (): WorkspaceSelection => ({ nodeIds: [], edgeIds: [], primary: null });
 const sameIds = (left: string[], right: string[]) =>
-  left.length === right.length && left.every((id, index) => id === right[index]);
+  left.length === right.length && left.every((id) => right.includes(id));
 const sameSelection = (left: WorkspaceSelection, right: WorkspaceSelection) =>
   sameIds(left.nodeIds, right.nodeIds) &&
   sameIds(left.edgeIds, right.edgeIds) &&
