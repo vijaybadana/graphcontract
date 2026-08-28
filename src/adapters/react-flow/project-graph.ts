@@ -78,6 +78,9 @@ export function projectGraphToCanvas(
       label: patched.label || (patched.mode === 'fallback' ? 'fallback' : undefined),
       markerEnd: { type: MarkerType.ArrowClosed, color },
       selected: selection.edgeIds.includes(patched.id),
+      className: selection.edgeIds.includes(patched.id)
+        ? 'contract-edge--selected'
+        : undefined,
       animated: Boolean(added),
       reconnectable: graph.status === 'draft' && !visibleProposal,
       interactionWidth: 28,

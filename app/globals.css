@@ -133,6 +133,22 @@ textarea:focus-visible {
   box-shadow: 0 0 0 6px rgb(16 185 129 / 20%);
 }
 
+.react-flow__edge.contract-edge--selected .react-flow__edge-path {
+  stroke: #0284c7 !important;
+  stroke-width: 3.5 !important;
+  filter: drop-shadow(0 0 4px rgb(14 165 233 / 45%));
+}
+
+.react-flow__edge.contract-edge--selected .react-flow__edge-textbg {
+  fill: #e0f2fe;
+  stroke: #38bdf8;
+  stroke-width: 1;
+}
+
+.react-flow__edge.contract-edge--selected .react-flow__edge-text {
+  fill: #075985;
+}
+
 .canvas-alignment-guide {
   position: absolute;
   background: #7c3aed;

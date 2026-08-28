@@ -1,7 +1,31 @@
 import { ReactNode } from 'react';
 
 import { GraphEdge, GraphNode } from '@/src/domain';
+import {
+  InspectorSelect,
+  InspectorSelectOption,
+} from '@/src/features/inspector/inspector-select';
 import { useGraphStore } from '@/src/state/workspace-store';
+
+const hitlTimingOptions: readonly InspectorSelectOption<
+  NonNullable<GraphNode['hitl']>['timing']
+>[] = [
+  { value: 'before', label: 'Before' },
+  { value: 'after', label: 'After' },
+  { value: 'conditional', label: 'Conditional' },
+];
+const hitlInputOptions: readonly InspectorSelectOption<
+  NonNullable<GraphNode['hitl']>['inputType']
+>[] = [
+  { value: 'approval', label: 'Approval' },
+  { value: 'text', label: 'Text' },
+  { value: 'selection', label: 'Selection' },
+];
+const edgeModeOptions: readonly InspectorSelectOption<GraphEdge['mode']>[] = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'conditional', label: 'Conditional' },
+  { value: 'fallback', label: 'Fallback' },
+];
 
 export function ContextInspector() {
   const graph = useGraphStore((state) => state.graph);
@@ -51,14 +75,24 @@ export function ContextInspector() {
               {node.hitl?.enabled && (
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <Field label="Timing">
-                    <select disabled={!editable} className="input" value={node.hitl.timing ?? 'before'} onChange={(event) => updateNode(node.id, { hitl: { ...node.hitl!, timing: event.target.value as NonNullable<GraphNode['hitl']>['timing'] } })}>
-                      <option value="before">Before</option><option value="after">After</option><option value="conditional">Conditional</option>
-                    </select>
+                    <InspectorSelect
+                      disabled={!editable}
+                      value={node.hitl.timing ?? 'before'}
+                      options={hitlTimingOptions}
+                      onChange={(timing) =>
+                        updateNode(node.id, { hitl: { ...node.hitl!, timing } })
+                      }
+                    />
                   </Field>
                   <Field label="Input">
-                    <select disabled={!editable} className="input" value={node.hitl.inputType ?? 'approval'} onChange={(event) => updateNode(node.id, { hitl: { ...node.hitl!, inputType: event.target.value as NonNullable<GraphNode['hitl']>['inputType'] } })}>
-                      <option value="approval">Approval</option><option value="text">Text</option><option value="selection">Selection</option>
-                    </select>
+                    <InspectorSelect
+                      disabled={!editable}
+                      value={node.hitl.inputType ?? 'approval'}
+                      options={hitlInputOptions}
+                      onChange={(inputType) =>
+                        updateNode(node.id, { hitl: { ...node.hitl!, inputType } })
+                      }
+                    />
                   </Field>
                 </div>
               )}
@@ -70,9 +104,17 @@ export function ContextInspector() {
       {edge && (
         <div className="mt-3 space-y-3">
           <Field label="Routing mode">
-            <select value={edge.mode} disabled={!editable} onChange={(event) => updateEdge(edge.id, { mode: event.target.value as GraphEdge['mode'], label: event.target.value === 'normal' ? undefined : edge.label })} className="input">
-              <option value="normal">Normal</option><option value="conditional">Conditional</option><option value="fallback">Fallback</option>
-            </select>
+            <InspectorSelect
+              value={edge.mode}
+              options={edgeModeOptions}
+              disabled={!editable}
+              onChange={(mode) =>
+                updateEdge(edge.id, {
+                  mode,
+                  label: mode === 'normal' ? undefined : edge.label,
+                })
+              }
+            />
           </Field>
           {edge.mode !== 'normal' && (
             <Field label={edge.mode === 'fallback' ? 'Fallback label' : 'Unique branch label'}>
