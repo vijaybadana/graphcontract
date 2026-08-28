@@ -17,6 +17,9 @@ export const metadata: Metadata = {
   title: 'GraphContract — Human-approved agent workflows',
   description:
     'Design agent workflows visually, review agent-proposed changes, and generate exhaustive execution-path contracts.',
+  icons: {
+    icon: '/favicon.svg',
+  },
   openGraph: {
     title: 'GraphContract',
     description: 'Human-approved agent workflows',

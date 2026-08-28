@@ -9,12 +9,16 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.5",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
@@ -33,6 +37,7 @@
     "typescript": "5.9.3",
     "vinext": "1.0.0-beta.3",
     "vite": "8.0.13",
+    "vitest": "^4.1.11",
     "wrangler": "4.92.0"
   },
   "type": "module"

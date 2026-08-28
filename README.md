@@ -6,7 +6,9 @@ This repository is being built for [The WebMCP Challenge](https://webmcp.devpost
 
 ## Current status
 
-The repository currently contains the hosting and WebMCP compatibility spike: a recognizable GraphContract workspace and a native, read-only `get_graph` WebMCP tool.
+The repository contains a locally verified MVP with visual graph editing, validation, human-reviewed agent proposals, contract freezing, exhaustive scenario generation, and three downloadable artifacts. All three WebMCP tools are registered in the browser; production WebMCP discovery is the next verification gate.
+
+The public Sites URL currently hosts the earlier compatibility spike and may lag the latest `main` branch until the next verified deployment.
 
 Public app: [graphcontract.vijaybadana.chatgpt.site](https://graphcontract.vijaybadana.chatgpt.site)
 
