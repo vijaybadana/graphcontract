@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://graphcontract.openai.chatgpt.site'),
+  metadataBase: new URL('https://graphcontract.vijaybadana.chatgpt.site'),
   title: 'GraphContract — Human-approved agent workflows',
   description:
     'Design agent workflows visually, review agent-proposed changes, and generate exhaustive execution-path contracts.',
