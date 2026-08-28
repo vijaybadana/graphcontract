@@ -8,6 +8,15 @@ This repository is being built for [The WebMCP Challenge](https://webmcp.devpost
 
 The repository currently contains the hosting and WebMCP compatibility spike: a recognizable GraphContract workspace and a native, read-only `get_graph` WebMCP tool.
 
+Public app: [graphcontract.vijaybadana.chatgpt.site](https://graphcontract.vijaybadana.chatgpt.site)
+
+## Project documents
+
+- [Product scope](docs/product-scope.md)
+- [Architecture](docs/architecture.md)
+- [Data and WebMCP contracts](docs/contracts.md)
+- [Implementation checklist](docs/implementation-checklist.md)
+
 ## Local development
 
 Requirements: Node.js 22.13 or newer.
