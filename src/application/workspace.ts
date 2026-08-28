@@ -1,0 +1,354 @@
+import {
+  applyGraphOperations,
+  BranchScenario,
+  createProposal,
+  enumerateScenarios,
+  GraphEdge,
+  GraphNode,
+  GraphProposal,
+  NodeKind,
+  sampleGraph,
+  validateGraph,
+  ValidationIssue,
+  WorkflowGraph,
+} from '@/src/domain';
+
+export type WorkspaceCore = {
+  graph: WorkflowGraph;
+  proposal: GraphProposal | null;
+  scenarios: BranchScenario[];
+};
+
+export type ProposalResult =
+  | { ok: true; proposal: GraphProposal }
+  | { ok: false; error: { code: string; message: string; issues?: ValidationIssue[] } };
+
+export type FreezeResult =
+  | { ok: true; scenarios: BranchScenario[] }
+  | { ok: false; issues: ValidationIssue[] };
+
+export type WorkspaceTransition<Result = undefined> = {
+  state: WorkspaceCore;
+  changed: boolean;
+  notice?: string;
+  result?: Result;
+};
+
+export type WorkspaceDependencies = {
+  now: () => string;
+  makeId: (prefix: string) => string;
+};
+
+const labels: Record<NodeKind, string> = {
+  start: 'Start',
+  agent: 'New Agent',
+  action: 'New Action',
+  tool: 'New Tool',
+  human_input: 'Human Input',
+  end: 'End',
+};
+
+const clone = <T,>(value: T): T => structuredClone(value);
+
+export function createWorkspaceService(dependencies: WorkspaceDependencies) {
+  const createInitial = (): WorkspaceCore => ({
+    graph: { ...clone(sampleGraph), updatedAt: dependencies.now() },
+    proposal: null,
+    scenarios: [],
+  });
+
+  const editable = (state: WorkspaceCore) =>
+    state.graph.status === 'draft' && state.proposal === null;
+
+  const blocked = (state: WorkspaceCore): WorkspaceTransition => ({
+    state,
+    changed: false,
+    notice:
+      state.graph.status === 'frozen'
+        ? 'Unfreeze the contract before editing.'
+        : 'Approve or reject the agent proposal before editing the accepted graph.',
+  });
+
+  const changeGraph = (
+    state: WorkspaceCore,
+    updater: (graph: WorkflowGraph) => WorkflowGraph,
+    notice?: string,
+  ): WorkspaceTransition => {
+    if (!editable(state)) return blocked(state);
+    const graph = updater(clone(state.graph));
+    graph.updatedAt = dependencies.now();
+    graph.status = 'draft';
+    return { state: { graph, proposal: null, scenarios: [] }, changed: true, notice };
+  };
+
+  return {
+    createInitial,
+
+    addNode(
+      state: WorkspaceCore,
+      kind: NodeKind,
+      position: { x: number; y: number },
+    ): WorkspaceTransition<{ nodeId: string }> {
+      if (!editable(state)) return { ...blocked(state), result: undefined };
+      const nodeId = dependencies.makeId(kind);
+      const transition = changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          nodes: [
+            ...graph.nodes,
+            {
+              id: nodeId,
+              kind,
+              label: labels[kind],
+              position,
+              ...(['agent', 'action', 'tool'].includes(kind)
+                ? { hitl: { enabled: false } }
+                : {}),
+            },
+          ],
+        }),
+        'Node added. Configure it in the inspector.',
+      );
+      return { ...transition, result: { nodeId } };
+    },
+
+    moveNode(state: WorkspaceCore, nodeId: string, position: GraphNode['position']) {
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        nodes: graph.nodes.map((node) => (node.id === nodeId ? { ...node, position } : node)),
+      }));
+    },
+
+    updateNode(
+      state: WorkspaceCore,
+      nodeId: string,
+      patch: Partial<Omit<GraphNode, 'id'>>,
+    ) {
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        nodes: graph.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
+      }));
+    },
+
+    removeNode(state: WorkspaceCore, nodeId: string) {
+      return changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          nodes: graph.nodes.filter((node) => node.id !== nodeId),
+          edges: graph.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+        }),
+        'Node and connected edges removed.',
+      );
+    },
+
+    addEdge(state: WorkspaceCore, source: string, target: string) {
+      if (source === target) return { state, changed: false };
+      const edgeId = dependencies.makeId('edge');
+      const transition = changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          edges: [...graph.edges, { id: edgeId, source, target, mode: 'normal' }],
+        }),
+        'Edge added. Choose its routing mode in the inspector.',
+      );
+      return { ...transition, result: transition.changed ? { edgeId } : undefined };
+    },
+
+    updateEdge(
+      state: WorkspaceCore,
+      edgeId: string,
+      patch: Partial<Omit<GraphEdge, 'id'>>,
+    ) {
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        edges: graph.edges.map((edge) => (edge.id === edgeId ? { ...edge, ...patch } : edge)),
+      }));
+    },
+
+    removeEdge(state: WorkspaceCore, edgeId: string) {
+      return changeGraph(
+        state,
+        (graph) => ({ ...graph, edges: graph.edges.filter((edge) => edge.id !== edgeId) }),
+        'Edge removed.',
+      );
+    },
+
+    deleteElements(state: WorkspaceCore, nodeIds: string[], edgeIds: string[]) {
+      const removedNodes = new Set(nodeIds);
+      const removedEdges = new Set(edgeIds);
+      return changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          nodes: graph.nodes.filter((node) => !removedNodes.has(node.id)),
+          edges: graph.edges.filter(
+            (edge) =>
+              !removedEdges.has(edge.id) &&
+              !removedNodes.has(edge.source) &&
+              !removedNodes.has(edge.target),
+          ),
+        }),
+        'Selected elements removed.',
+      );
+    },
+
+    duplicateNodes(state: WorkspaceCore, nodeIds: string[], offset = { x: 36, y: 36 }) {
+      if (!editable(state)) return { ...blocked(state), result: undefined };
+      const selected = state.graph.nodes.filter((node) => nodeIds.includes(node.id));
+      if (selected.length === 0) return { state, changed: false, result: undefined };
+      const idMap = new Map(selected.map((node) => [node.id, dependencies.makeId(node.kind)]));
+      const copies = selected.map((node) => ({
+        ...clone(node),
+        id: idMap.get(node.id)!,
+        label: `${node.label} copy`,
+        position: { x: node.position.x + offset.x, y: node.position.y + offset.y },
+      }));
+      const internalEdges = state.graph.edges
+        .filter((edge) => idMap.has(edge.source) && idMap.has(edge.target))
+        .map((edge) => ({
+          ...clone(edge),
+          id: dependencies.makeId('edge'),
+          source: idMap.get(edge.source)!,
+          target: idMap.get(edge.target)!,
+        }));
+      const transition = changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          nodes: [...graph.nodes, ...copies],
+          edges: [...graph.edges, ...internalEdges],
+        }),
+        `${copies.length} node${copies.length === 1 ? '' : 's'} duplicated.`,
+      );
+      return { ...transition, result: { nodeIds: copies.map((node) => node.id) } };
+    },
+
+    submitProposal(state: WorkspaceCore, input: unknown): WorkspaceTransition<ProposalResult> {
+      if (state.proposal) {
+        const error = {
+          code: 'PENDING_PROPOSAL_EXISTS',
+          message: 'Review the current proposal before submitting another one.',
+        };
+        return { state, changed: false, result: { ok: false, error } };
+      }
+      const result = createProposal(state.graph, input);
+      if (!result.proposal) {
+        return { state, changed: false, result: { ok: false, error: result.error! } };
+      }
+      return {
+        state: { ...state, proposal: result.proposal },
+        changed: true,
+        notice:
+          result.proposal.status === 'pending'
+            ? 'A new agent proposal is ready for human review.'
+            : 'The agent proposal is invalid. Review its validation issues.',
+        result: { ok: true, proposal: result.proposal },
+      };
+    },
+
+    approveProposal(state: WorkspaceCore): WorkspaceTransition<ProposalResult> {
+      const proposal = state.proposal;
+      if (!proposal || proposal.status !== 'pending') {
+        const error = {
+          code: 'PROPOSAL_INVALID',
+          message: 'There is no valid pending proposal to approve.',
+        };
+        return { state, changed: false, result: { ok: false, error } };
+      }
+      if (proposal.baseUpdatedAt !== state.graph.updatedAt) {
+        const stale = { ...proposal, status: 'stale' as const };
+        const error = {
+          code: 'PROPOSAL_STALE',
+          message: 'The graph changed after this proposal was created.',
+        };
+        return {
+          state: { ...state, proposal: stale },
+          changed: true,
+          notice: 'Proposal is stale. Ask the agent to read the graph again.',
+          result: { ok: false, error },
+        };
+      }
+      const applied = applyGraphOperations(state.graph, proposal.operations);
+      const issues = [...applied.errors, ...validateGraph(applied.graph)];
+      if (issues.length > 0) {
+        const invalid = { ...proposal, status: 'invalid' as const, validationErrors: issues };
+        return {
+          state: { ...state, proposal: invalid },
+          changed: true,
+          notice: 'The proposal no longer produces a valid graph.',
+          result: {
+            ok: false,
+            error: { code: 'PROPOSAL_INVALID', message: 'The proposed graph is invalid.', issues },
+          },
+        };
+      }
+      const graph = { ...applied.graph, status: 'draft' as const, updatedAt: dependencies.now() };
+      return {
+        state: { graph, proposal: null, scenarios: [] },
+        changed: true,
+        notice: 'Proposal approved and applied to the accepted graph.',
+        result: { ok: true, proposal: { ...proposal, status: 'approved' } },
+      };
+    },
+
+    rejectProposal(state: WorkspaceCore): WorkspaceTransition {
+      if (!state.proposal) return { state, changed: false };
+      return {
+        state: { ...state, proposal: null },
+        changed: true,
+        notice: 'Proposal rejected. The accepted graph was not changed.',
+      };
+    },
+
+    freezeGraph(state: WorkspaceCore): WorkspaceTransition<FreezeResult> {
+      if (state.proposal) {
+        const issues = [{
+          code: 'PENDING_PROPOSAL_EXISTS',
+          message: 'Approve or reject the proposal before freezing.',
+        }];
+        return { state, changed: false, notice: issues[0].message, result: { ok: false, issues } };
+      }
+      const issues = validateGraph(state.graph);
+      if (issues.length > 0) {
+        return {
+          state,
+          changed: false,
+          notice: 'Resolve validation issues before freezing.',
+          result: { ok: false, issues },
+        };
+      }
+      const graph = { ...state.graph, status: 'frozen' as const, updatedAt: dependencies.now() };
+      const scenarios = enumerateScenarios(graph);
+      return {
+        state: { graph, proposal: null, scenarios },
+        changed: true,
+        notice: `Contract frozen with ${scenarios.length} reachable paths.`,
+        result: { ok: true, scenarios },
+      };
+    },
+
+    unfreezeGraph(state: WorkspaceCore): WorkspaceTransition {
+      if (state.graph.status !== 'frozen') return { state, changed: false };
+      return {
+        state: {
+          graph: { ...state.graph, status: 'draft', updatedAt: dependencies.now() },
+          proposal: null,
+          scenarios: [],
+        },
+        changed: true,
+        notice: 'Contract returned to draft mode.',
+      };
+    },
+
+    resetGraph(): WorkspaceTransition {
+      return {
+        state: createInitial(),
+        changed: true,
+        notice: 'Sample workflow restored.',
+      };
+    },
+  };
+}

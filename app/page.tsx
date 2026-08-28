@@ -2,12 +2,12 @@
 
 import { ReactFlowProvider } from '@xyflow/react';
 
-import { GraphEditor } from '@/components/graph-editor';
+import { GraphWorkspace } from '@/src/features/workspace/graph-workspace';
 
 export default function Home() {
   return (
     <ReactFlowProvider>
-      <GraphEditor />
+      <GraphWorkspace />
     </ReactFlowProvider>
   );
 }

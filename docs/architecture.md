@@ -21,6 +21,18 @@ The MVP deliberately has no required backend. A deployed site remains available 
 
 ## Layers
 
+The implementation mirrors these boundaries directly:
+
+```text
+src/domain        Canonical graph model, validation, operations, scenarios
+src/application   Framework-free workspace use cases and authority rules
+src/state         Zustand persistence and interaction history adapter
+src/adapters      React Flow projection, WebMCP registration, file exports
+src/features      Canvas, inspector, proposal, scenario, and workspace UI
+```
+
+Both the human interface and WebMCP adapter enter through the same application/state actions. React Flow data is a projection of the canonical domain graph, not a second graph model.
+
 ### Graph domain layer
 
 Owns the canonical accepted workflow:
