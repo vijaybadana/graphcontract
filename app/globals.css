@@ -85,6 +85,19 @@ textarea:focus-visible {
   backdrop-filter: blur(16px);
 }
 
+.horizontal-flow-controls {
+  flex-direction: row;
+}
+
+.horizontal-flow-controls .react-flow__controls-button {
+  border-right: 1px solid #eee;
+  border-bottom: 0;
+}
+
+.horizontal-flow-controls .react-flow__controls-button:last-child {
+  border-right: 0;
+}
+
 .eyebrow {
   font-size: 0.625rem;
   font-weight: 800;

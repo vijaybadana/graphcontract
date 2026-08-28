@@ -263,7 +263,11 @@ export function GraphWorkspace() {
             maskColor="rgb(24 33 29 / 10%)"
             className="!h-28 !w-44 !rounded-xl !border !border-black/10 !bg-white"
           />
-          <Controls showInteractive={false} position="bottom-center" className="!overflow-hidden !rounded-xl !border-black/10 !shadow-sm" />
+          <Controls
+            showInteractive={false}
+            position="bottom-center"
+            className="horizontal-flow-controls !overflow-hidden !rounded-xl !border-black/10 !shadow-sm"
+          />
         </ReactFlow>
 
         <div className="workspace-toolbar absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1 p-1">
