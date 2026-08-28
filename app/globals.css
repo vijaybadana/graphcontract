@@ -98,6 +98,76 @@ textarea:focus-visible {
   border-right: 0;
 }
 
+.react-flow__node-draggable {
+  cursor: grab;
+}
+
+.react-flow__node.dragging {
+  cursor: grabbing;
+  z-index: 1000 !important;
+}
+
+.react-flow__node.dragging .contract-node-shell {
+  transform: scale(1.025);
+  box-shadow: 0 22px 48px rgb(24 33 29 / 20%);
+}
+
+.react-flow__node.canvas-node--collision-target .contract-node-shell,
+.react-flow__node.canvas-node--collision-source .contract-node-shell {
+  outline: 3px solid rgb(244 63 94 / 65%);
+  outline-offset: 4px;
+}
+
+.react-flow__handle {
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.react-flow__handle:hover,
+.react-flow__handle.connectingfrom {
+  transform: scale(1.35);
+  box-shadow: 0 0 0 5px rgb(56 189 248 / 18%);
+}
+
+.react-flow__handle.connectingto.valid {
+  background: #10b981 !important;
+  box-shadow: 0 0 0 6px rgb(16 185 129 / 20%);
+}
+
+.canvas-alignment-guide {
+  position: absolute;
+  background: #7c3aed;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 75%);
+}
+
+.node-action-toolbar {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid rgb(0 0 0 / 10%);
+  border-radius: 0.7rem;
+  background: rgb(251 250 247 / 97%);
+  box-shadow: 0 12px 30px rgb(24 33 29 / 16%);
+}
+
+.node-action-toolbar button {
+  border-right: 1px solid rgb(0 0 0 / 8%);
+  padding: 0.42rem 0.58rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.node-action-toolbar button:hover {
+  background: rgb(0 0 0 / 5%);
+}
+
+.node-action-toolbar button:last-child {
+  border-right: 0;
+}
+
+.node-action-toolbar button.danger {
+  color: #be123c;
+}
+
 .eyebrow {
   font-size: 0.625rem;
   font-weight: 800;

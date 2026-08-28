@@ -13,6 +13,7 @@ import {
   WorkflowGraph,
 } from '@/src/domain';
 import { layoutWorkflowGraph } from './layout-workflow';
+import { createDraftEdge } from './connection-policy';
 
 export type WorkspaceCore = {
   graph: WorkflowGraph;
@@ -121,6 +122,15 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       }));
     },
 
+    moveNodes(state: WorkspaceCore, positions: Record<string, GraphNode['position']>) {
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        nodes: graph.nodes.map((node) =>
+          positions[node.id] ? { ...node, position: positions[node.id] } : node,
+        ),
+      }));
+    },
+
     updateNode(
       state: WorkspaceCore,
       nodeId: string,
@@ -151,9 +161,9 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         state,
         (graph) => ({
           ...graph,
-          edges: [...graph.edges, { id: edgeId, source, target, mode: 'normal' }],
+          edges: [...graph.edges, createDraftEdge(graph, edgeId, source, target)],
         }),
-        'Edge added. Choose its routing mode in the inspector.',
+        'Edge added. Configure its routing in the inspector.',
       );
       return { ...transition, result: transition.changed ? { edgeId } : undefined };
     },

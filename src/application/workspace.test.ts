@@ -49,6 +49,24 @@ describe('workspace application service', () => {
     expect(edit.state.graph.nodes.find((node) => node.id === 'diagnostic')?.label).toBe('Diagnostic Action');
   });
 
+  it('commits a multi-node drag as one graph transition', () => {
+    const initial = service.createInitial();
+    const moved = service.moveNodes(initial, {
+      billing: { x: 600, y: 80 },
+      diagnostic: { x: 600, y: 240 },
+    });
+
+    expect(moved.changed).toBe(true);
+    expect(moved.state.graph.nodes.find((node) => node.id === 'billing')?.position).toEqual({
+      x: 600,
+      y: 80,
+    });
+    expect(moved.state.graph.nodes.find((node) => node.id === 'diagnostic')?.position).toEqual({
+      x: 600,
+      y: 240,
+    });
+  });
+
   it('lays out the accepted graph after approving structural operations', () => {
     const initial = service.createInitial();
     const proposed = service.submitProposal(initial, {

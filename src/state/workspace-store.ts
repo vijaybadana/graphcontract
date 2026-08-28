@@ -28,6 +28,7 @@ type WorkspaceStore = WorkspaceCore & {
   fitViewRevision: number;
   addNode: (kind: NodeKind, position?: { x: number; y: number }) => void;
   moveNode: (id: string, position: { x: number; y: number }) => void;
+  moveNodes: (positions: Record<string, { x: number; y: number }>) => void;
   updateNode: (id: string, patch: Partial<Omit<GraphNode, 'id'>>) => void;
   removeNode: (id: string) => void;
   addEdge: (source: string, target: string) => void;
@@ -110,6 +111,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         },
 
         moveNode: (id, position) => commit(workspace.moveNode(currentCore(), id, position)),
+        moveNodes: (positions) => commit(workspace.moveNodes(currentCore(), positions)),
         updateNode: (id, patch) => commit(workspace.updateNode(currentCore(), id, patch)),
         removeNode: (id) =>
           commit(workspace.removeNode(currentCore(), id), { selection: emptySelection() }),

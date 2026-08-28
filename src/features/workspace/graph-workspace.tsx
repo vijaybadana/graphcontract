@@ -3,18 +3,23 @@
 import {
   Background,
   Connection,
+  ConnectionLineType,
   Controls,
   Edge,
   MiniMap,
+  OnReconnect,
   ReactFlow,
-  useNodesState,
+  SelectionMode,
   useReactFlow,
 } from '@xyflow/react';
-import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { projectGraphToCanvas } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
+import { evaluateConnection } from '@/src/application/connection-policy';
 import { NodeKind, validateGraph } from '@/src/domain';
+import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
+import { useCanvasNodeInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { ContractFlowNode, ContractNode } from '@/src/features/canvas/contract-node';
 import { NodePalette, readDroppedNodeKind } from '@/src/features/canvas/node-palette';
 import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
@@ -44,8 +49,9 @@ export function GraphWorkspace() {
   const future = useGraphStore((state) => state.future);
   const fitViewRevision = useGraphStore((state) => state.fitViewRevision);
   const addNode = useGraphStore((state) => state.addNode);
-  const moveNode = useGraphStore((state) => state.moveNode);
+  const moveNodes = useGraphStore((state) => state.moveNodes);
   const addEdge = useGraphStore((state) => state.addEdge);
+  const updateEdge = useGraphStore((state) => state.updateEdge);
   const setSelection = useGraphStore((state) => state.setSelection);
   const clearSelection = useGraphStore((state) => state.clearSelection);
   const deleteSelection = useGraphStore((state) => state.deleteSelection);
@@ -63,6 +69,7 @@ export function GraphWorkspace() {
   const [showPalette, setShowPalette] = useState(true);
   const [showInspector, setShowInspector] = useState(true);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
+  const reconnectingEdgeIdRef = useRef<string | null>(null);
   const { screenToFlowPosition } = useReactFlow<ContractFlowNode, Edge>();
 
   const validationIssues = useMemo(() => validateGraph(graph), [graph]);
@@ -70,8 +77,12 @@ export function GraphWorkspace() {
     () => projectGraphToCanvas(graph, proposal, selection),
     [graph, proposal, selection],
   );
-  const [canvasNodes, setCanvasNodes, onNodesChange] = useNodesState<ContractFlowNode>(canvas.nodes);
   const editable = graph.status === 'draft' && !proposal;
+  const canvasInteractions = useCanvasNodeInteractions({
+    projectedNodes: canvas.nodes,
+    editable,
+    onCommitPositions: moveNodes,
+  });
   const { fitGraph } = useCoalescedFitView<ContractFlowNode, Edge>({
     enabled: hasHydrated,
     revision: fitViewRevision,
@@ -85,12 +96,11 @@ export function GraphWorkspace() {
   useEffect(() => {
     if (!hasHydrated) return;
     const modelContext = getDocumentModelContext();
-    if (!modelContext) {
-      setWebMcpStatus('unavailable');
-      return;
-    }
+    if (!modelContext) return;
     const controller = new AbortController();
-    setWebMcpStatus('registering');
+    void Promise.resolve().then(() => {
+      if (!controller.signal.aborted) setWebMcpStatus('registering');
+    });
     void registerWebMcpTools(
       modelContext,
       {
@@ -116,17 +126,14 @@ export function GraphWorkspace() {
   }, [notice, clearNotice]);
 
   useEffect(() => {
-    setCanvasNodes(canvas.nodes);
-  }, [canvas.nodes, setCanvasNodes]);
-
-  useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return;
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        event.shiftKey ? redo() : undo();
+        if (event.shiftKey) redo();
+        else undo();
       } else if (command && event.key.toLowerCase() === 'y') {
         event.preventDefault();
         redo();
@@ -152,6 +159,23 @@ export function GraphWorkspace() {
       if (connection.source && connection.target) addEdge(connection.source, connection.target);
     },
     [addEdge],
+  );
+
+  const isValidConnection = useCallback(
+    (connection: Connection) =>
+      editable &&
+      evaluateConnection(graph, connection, {
+        reconnectingEdgeId: reconnectingEdgeIdRef.current,
+      }).valid,
+    [editable, graph],
+  );
+
+  const onReconnect = useCallback<OnReconnect<Edge>>(
+    (edge, connection) => {
+      if (!editable || !connection.source || !connection.target) return;
+      updateEdge(edge.id, { source: connection.source, target: connection.target });
+    },
+    [editable, updateEdge],
   );
 
   const addAtCenter = (kind: NodeKind) => {
@@ -222,60 +246,87 @@ export function GraphWorkspace() {
         )}
 
         <section className="relative min-w-0 flex-1">
-        <ReactFlow<ContractFlowNode, Edge>
-          nodes={canvasNodes}
-          edges={canvas.edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onConnect={onConnect}
-          onSelectionChange={({ nodes, edges }) => {
-            const nodeIds = nodes.map((node) => node.id);
-            const edgeIds = edges.map((edge) => edge.id);
-            const primary = nodeIds.length
-              ? { type: 'node' as const, id: nodeIds[nodeIds.length - 1] }
-              : edgeIds.length
-                ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
-                : null;
-            setSelection({ nodeIds, edgeIds, primary });
-          }}
-          onPaneClick={clearSelection}
-          onNodeDragStop={(_, node) => moveNode(node.id, node.position)}
-          onDrop={onDrop}
-          onDragOver={(event) => {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'move';
-          }}
-          nodesDraggable={editable}
-          nodesConnectable={editable}
-          elementsSelectable
-          selectionOnDrag
-          panOnScroll
-          selectionKeyCode="Shift"
-          multiSelectionKeyCode={["Meta", "Control"]}
-          snapToGrid
-          snapGrid={[12, 12]}
-          minZoom={0.18}
-          maxZoom={2.5}
-          deleteKeyCode={null}
-        >
-          <Background gap={24} size={1} color="#d8d6d0" />
-          <MiniMap
-            pannable
-            zoomable
-            position="bottom-left"
-            nodeColor={(node) => minimapColors[node.data.kind] ?? '#94a3b8'}
-            nodeStrokeColor="#ffffff"
-            nodeStrokeWidth={2}
-            nodeBorderRadius={10}
-            maskColor="rgb(24 33 29 / 10%)"
-            className="!h-28 !w-44 !rounded-xl !border !border-black/10 !bg-white"
-          />
-          <Controls
-            showInteractive={false}
-            position="bottom-center"
-            className="horizontal-flow-controls !overflow-hidden !rounded-xl !border-black/10 !shadow-sm"
-          />
-        </ReactFlow>
+          <ReactFlow<ContractFlowNode, Edge>
+            nodes={canvasInteractions.nodes}
+            edges={canvas.edges}
+            nodeTypes={nodeTypes}
+            onNodesChange={canvasInteractions.onNodesChange}
+            onConnect={onConnect}
+            isValidConnection={isValidConnection}
+            onReconnect={onReconnect}
+            onReconnectStart={(_, edge) => {
+              reconnectingEdgeIdRef.current = edge.id;
+            }}
+            onReconnectEnd={() => {
+              reconnectingEdgeIdRef.current = null;
+            }}
+            onSelectionChange={({ nodes, edges }) => {
+              const nodeIds = nodes.map((node) => node.id);
+              const edgeIds = edges.map((edge) => edge.id);
+              const primary = nodeIds.length
+                ? { type: 'node' as const, id: nodeIds[nodeIds.length - 1] }
+                : edgeIds.length
+                  ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
+                  : null;
+              setSelection({ nodeIds, edgeIds, primary });
+            }}
+            onPaneClick={clearSelection}
+            onNodeDragStart={canvasInteractions.onNodeDragStart}
+            onNodeDrag={canvasInteractions.onNodeDrag}
+            onNodeDragStop={canvasInteractions.onNodeDragStop}
+            onDrop={onDrop}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+            }}
+            nodesDraggable={editable}
+            nodesConnectable={editable}
+            edgesReconnectable={editable}
+            elementsSelectable
+            selectionOnDrag
+            selectionMode={SelectionMode.Partial}
+            panOnScroll
+            panOnDrag={[1]}
+            autoPanOnNodeDrag
+            autoPanOnConnect
+            autoPanOnSelection
+            autoPanSpeed={18}
+            connectionRadius={24}
+            nodeDragThreshold={2}
+            connectionDragThreshold={3}
+            connectionLineType={ConnectionLineType.SmoothStep}
+            defaultEdgeOptions={{
+              type: 'smoothstep',
+              pathOptions: { borderRadius: 16, offset: 28 },
+            }}
+            zoomOnDoubleClick={false}
+            selectionKeyCode="Shift"
+            multiSelectionKeyCode={['Meta', 'Control']}
+            snapToGrid
+            snapGrid={[12, 12]}
+            minZoom={0.18}
+            maxZoom={2.5}
+            deleteKeyCode={null}
+          >
+            <AlignmentGuides guides={canvasInteractions.guides} />
+            <Background gap={24} size={1} color="#d8d6d0" />
+            <MiniMap
+              pannable
+              zoomable
+              position="bottom-left"
+              nodeColor={(node) => minimapColors[node.data.kind] ?? '#94a3b8'}
+              nodeStrokeColor="#ffffff"
+              nodeStrokeWidth={2}
+              nodeBorderRadius={10}
+              maskColor="rgb(24 33 29 / 10%)"
+              className="!h-28 !w-44 !rounded-xl !border !border-black/10 !bg-white"
+            />
+            <Controls
+              showInteractive={false}
+              position="bottom-center"
+              className="horizontal-flow-controls !overflow-hidden !rounded-xl !border-black/10 !shadow-sm"
+            />
+          </ReactFlow>
 
         <div className="workspace-toolbar absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1 p-1">
           <ToolButton label="Palette" active={showPalette} onClick={() => setShowPalette((value) => !value)} />

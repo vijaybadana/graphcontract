@@ -72,12 +72,16 @@ export function projectGraphToCanvas(
     const color = added ? '#159160' : removed ? '#db4b55' : updated ? '#c47b24' : '#676b68';
     return {
       id: patched.id,
+      type: 'smoothstep',
       source: patched.source,
       target: patched.target,
       label: patched.label || (patched.mode === 'fallback' ? 'fallback' : undefined),
       markerEnd: { type: MarkerType.ArrowClosed, color },
       selected: selection.edgeIds.includes(patched.id),
       animated: Boolean(added),
+      reconnectable: graph.status === 'draft' && !visibleProposal,
+      interactionWidth: 28,
+      pathOptions: { borderRadius: 16, offset: 28 },
       style: {
         stroke: color,
         strokeWidth: added || removed || updated ? 2.5 : 1.7,

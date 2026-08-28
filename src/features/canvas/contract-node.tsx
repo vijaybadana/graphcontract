@@ -3,6 +3,7 @@
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 
 import { GraphNode } from '@/src/domain';
+import { ContractNodeToolbar } from './contract-node-toolbar';
 
 export type ContractNodeData = GraphNode & {
   [key: string]: unknown;
@@ -40,46 +41,51 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
           : '';
 
   return (
-    <div
-      className={`h-[104px] w-44 rounded-2xl border-2 px-4 py-3 shadow-md transition-[background-color,border-color,box-shadow,opacity] ${colors[data.kind]} ${
-        selected ? 'ring-4 ring-black/10' : ''
-      } ${proposalClass}`}
-    >
-      {data.kind !== 'start' && (
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-3 !w-3 !border-2 !border-white !bg-[#18211d]"
-        />
-      )}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] opacity-55">
-            {kindLabel[data.kind]}
-          </p>
-          <p className="mt-1 line-clamp-2 max-w-36 text-sm font-semibold leading-5">{data.label}</p>
+    <>
+      <ContractNodeToolbar node={data} selected={selected} />
+      <div
+        className={`contract-node-shell h-[104px] w-44 rounded-2xl border-2 px-4 py-3 shadow-md transition-[background-color,border-color,box-shadow,opacity,transform] ${colors[data.kind]} ${
+          selected ? 'ring-4 ring-black/10' : ''
+        } ${proposalClass}`}
+      >
+        {data.kind !== 'start' && (
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="!h-3 !w-3 !border-2 !border-white !bg-[#18211d]"
+          />
+        )}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] opacity-55">
+              {kindLabel[data.kind]}
+            </p>
+            <p className="mt-1 line-clamp-2 max-w-36 text-sm font-semibold leading-5">
+              {data.label}
+            </p>
+          </div>
+          {data.hitl?.enabled && (
+            <span
+              title={`Human input ${data.hitl.timing ?? 'before'} · ${data.hitl.inputType ?? 'approval'}`}
+              className="rounded-full border border-current/20 bg-white/80 px-1.5 py-1 text-[10px] font-bold"
+            >
+              HITL
+            </span>
+          )}
         </div>
-        {data.hitl?.enabled && (
-          <span
-            title={`Human input ${data.hitl.timing ?? 'before'} · ${data.hitl.inputType ?? 'approval'}`}
-            className="rounded-full border border-current/20 bg-white/80 px-1.5 py-1 text-[10px] font-bold"
-          >
-            HITL
-          </span>
+        {data.proposalState && (
+          <p className="mt-2 text-[9px] font-extrabold uppercase tracking-wider">
+            Proposed {data.proposalState}
+          </p>
+        )}
+        {data.kind !== 'end' && (
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!h-3 !w-3 !border-2 !border-white !bg-[#18211d]"
+          />
         )}
       </div>
-      {data.proposalState && (
-        <p className="mt-2 text-[9px] font-extrabold uppercase tracking-wider">
-          Proposed {data.proposalState}
-        </p>
-      )}
-      {data.kind !== 'end' && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-3 !w-3 !border-2 !border-white !bg-[#18211d]"
-        />
-      )}
-    </div>
+    </>
   );
 }
