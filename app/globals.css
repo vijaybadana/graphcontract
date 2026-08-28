@@ -189,37 +189,22 @@ textarea:focus-visible {
   color: #171918;
 }
 
-.collapsed-panel-rail {
-  width: 2.6rem;
-  align-self: stretch;
-  overflow: hidden;
-  padding: 0.3rem;
-}
-
-.collapsed-panel-rail__button {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.55rem;
-  border-radius: 0.7rem;
-  padding-block: 0.45rem;
+.collapsed-panel-trigger {
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  border-radius: 0.75rem;
   color: rgb(0 0 0 / 48%);
-  transition: background-color 120ms ease, color 120ms ease;
+  font-size: 1.2rem;
+  line-height: 1;
+  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
 
-.collapsed-panel-rail__button:hover {
-  background: rgb(0 0 0 / 5%);
+.collapsed-panel-trigger:hover {
+  transform: translateY(-1px);
+  background: white;
   color: #171918;
-}
-
-.collapsed-panel-rail__label {
-  writing-mode: vertical-rl;
-  font-size: 0.58rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
 }
 
 .eyebrow {

@@ -27,7 +27,7 @@ import { ContextInspector } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
 import {
-  CollapsedPanelRail,
+  PanelExpandButton,
   PanelCollapseButton,
 } from '@/src/features/workspace/panel-collapse-control';
 import { useGraphStore } from '@/src/state/workspace-store';
@@ -90,7 +90,6 @@ export function GraphWorkspace() {
   const { fitGraph } = useCoalescedFitView<ContractFlowNode, Edge>({
     enabled: hasHydrated,
     revision: fitViewRevision,
-    containerLayoutKey: `${showPalette}:${showInspector}`,
   });
 
   useEffect(() => {
@@ -249,15 +248,21 @@ export function GraphWorkspace() {
             onCollapse={() => setShowPalette(false)}
           />
         )}
-        {!showPalette && (
-          <CollapsedPanelRail
-            side="left"
-            label="Palette"
-            onExpand={() => setShowPalette(true)}
-          />
-        )}
-
         <section className="relative min-w-0 flex-1">
+          {!showPalette && (
+            <PanelExpandButton
+              side="left"
+              label="Palette"
+              onExpand={() => setShowPalette(true)}
+            />
+          )}
+          {!showInspector && (
+            <PanelExpandButton
+              side="right"
+              label="Inspector"
+              onExpand={() => setShowInspector(true)}
+            />
+          )}
           <ReactFlow<ContractFlowNode, Edge>
             nodes={canvasInteractions.nodes}
             edges={canvas.edges}
@@ -372,13 +377,6 @@ export function GraphWorkspace() {
             </div>
             {rightTab === 'review' ? <div className="space-y-3"><ContextInspector /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
           </aside>
-        )}
-        {!showInspector && (
-          <CollapsedPanelRail
-            side="right"
-            label="Inspector"
-            onExpand={() => setShowInspector(true)}
-          />
         )}
       </section>
     </main>

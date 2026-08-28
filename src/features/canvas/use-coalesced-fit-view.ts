@@ -12,24 +12,24 @@ const BASE_FIT_VIEW_OPTIONS = {
 type CoalescedFitViewOptions = {
   enabled: boolean;
   revision: number;
-  containerLayoutKey: string;
 };
 
 /**
  * Keeps viewport fitting outside React Flow's node ResizeObserver cycle.
  * Automatic fits are non-animated so multiple measurement passes cannot overlap
- * animated viewport updates. Manual fits retain a short animation.
+ * animated viewport updates. Manual fits retain a short animation. Container
+ * resizes deliberately do not trigger a fit, preserving the user's viewport
+ * when workspace panels open or close.
  */
 export function useCoalescedFitView<
   NodeType extends Node = Node,
   EdgeType extends Edge = Edge,
->({ enabled, revision, containerLayoutKey }: CoalescedFitViewOptions) {
+>({ enabled, revision }: CoalescedFitViewOptions) {
   const { fitView } = useReactFlow<NodeType, EdgeType>();
   const nodesInitialized = useNodesInitialized();
   const timeoutRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const lastHandledRevisionRef = useRef<number | null>(null);
-  const lastHandledContainerLayoutKeyRef = useRef(containerLayoutKey);
 
   const cancelScheduledFit = useCallback(() => {
     if (timeoutRef.current !== null) {
@@ -65,18 +65,6 @@ export function useCoalescedFitView<
     lastHandledRevisionRef.current = revision;
     scheduleFit(false);
   }, [enabled, nodesInitialized, revision, scheduleFit]);
-
-  useEffect(() => {
-    if (
-      !enabled ||
-      !nodesInitialized ||
-      lastHandledContainerLayoutKeyRef.current === containerLayoutKey
-    ) {
-      return;
-    }
-    lastHandledContainerLayoutKeyRef.current = containerLayoutKey;
-    scheduleFit(false);
-  }, [containerLayoutKey, enabled, nodesInitialized, scheduleFit]);
 
   return {
     fitGraph: useCallback(() => scheduleFit(true), [scheduleFit]),

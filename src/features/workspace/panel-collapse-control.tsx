@@ -1,12 +1,25 @@
 'use client';
 
+import { CaretLeftIcon, CaretRightIcon } from '@phosphor-icons/react';
+
 type PanelSide = 'left' | 'right';
 
-const arrowFor = (side: PanelSide, action: 'collapse' | 'expand') => {
+function DirectionalCaret({
+  side,
+  action,
+  size,
+}: {
+  side: PanelSide;
+  action: 'collapse' | 'expand';
+  size: number;
+}) {
   const pointsLeft = (side === 'left' && action === 'collapse') ||
     (side === 'right' && action === 'expand');
-  return pointsLeft ? '‹' : '›';
-};
+
+  return pointsLeft
+    ? <CaretLeftIcon aria-hidden="true" size={size} weight="bold" />
+    : <CaretRightIcon aria-hidden="true" size={size} weight="bold" />;
+}
 
 export function PanelCollapseButton({
   side,
@@ -25,12 +38,12 @@ export function PanelCollapseButton({
       title={label}
       className="panel-collapse-button"
     >
-      <span aria-hidden="true">{arrowFor(side, 'collapse')}</span>
+      <DirectionalCaret side={side} action="collapse" size={16} />
     </button>
   );
 }
 
-export function CollapsedPanelRail({
+export function PanelExpandButton({
   side,
   onExpand,
   label,
@@ -40,23 +53,16 @@ export function CollapsedPanelRail({
   label: string;
 }) {
   return (
-    <aside
-      className={`workspace-panel collapsed-panel-rail relative z-20 my-3 shrink-0 ${
-        side === 'left' ? 'ml-3 mr-0' : 'ml-0 mr-3'
+    <button
+      type="button"
+      onClick={onExpand}
+      aria-label={`Open ${label}`}
+      title={`Open ${label}`}
+      className={`workspace-panel collapsed-panel-trigger absolute top-3 z-30 ${
+        side === 'left' ? 'left-3' : 'right-3'
       }`}
     >
-      <button
-        type="button"
-        onClick={onExpand}
-        aria-label={`Open ${label}`}
-        title={`Open ${label}`}
-        className="collapsed-panel-rail__button"
-      >
-        <span className="text-lg" aria-hidden="true">
-          {arrowFor(side, 'expand')}
-        </span>
-        <span className="collapsed-panel-rail__label">{label}</span>
-      </button>
-    </aside>
+      <DirectionalCaret side={side} action="expand" size={18} />
+    </button>
   );
 }
