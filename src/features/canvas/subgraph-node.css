@@ -29,6 +29,29 @@
   box-shadow: 0 0 0 3px rgb(47 118 96 / 22%), 0 8px 18px rgb(15 23 42 / 14%);
 }
 
+.subgraph-node-shell.is-proposed-added {
+  border-color: #34b982;
+  box-shadow: 0 0 0 3px rgb(110 231 183 / 54%), 0 3px 12px rgb(15 23 42 / 8%);
+}
+
+.subgraph-node-shell.is-proposed-updated {
+  border-color: #d69d31;
+  box-shadow: 0 0 0 3px rgb(252 211 77 / 54%), 0 3px 12px rgb(15 23 42 / 8%);
+}
+
+.subgraph-node-shell.is-proposed-removed {
+  border-color: #e56b76;
+  border-style: dashed;
+  background: rgb(255 241 242 / 92%);
+  opacity: 0.58;
+  pointer-events: none;
+  box-shadow: 0 0 0 3px rgb(253 164 175 / 58%), 0 3px 12px rgb(15 23 42 / 8%);
+}
+
+.subgraph-node-shell.is-proposed-removed .subgraph-node-title {
+  text-decoration: line-through;
+}
+
 .subgraph-node-header {
   display: flex;
   align-items: flex-start;

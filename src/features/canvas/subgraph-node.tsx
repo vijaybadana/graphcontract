@@ -6,6 +6,8 @@ import { GraphSubgraph } from '@/src/domain';
 import './subgraph-node.css';
 
 export type SubgraphNodeData = GraphSubgraph & {
+  /** Review-only state projected from a pending graph proposal. */
+  proposalState?: 'added' | 'updated' | 'removed';
   /**
    * The canvas projection accepts this callback without owning the workspace
    * mutation. The workspace seam supplies it when subgraph editing is wired.
@@ -20,17 +22,22 @@ export type SubgraphFlowNode = Node<SubgraphNodeData, 'subgraph'>;
 
 export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
   const action = data.collapsed ? 'Expand' : 'Collapse';
+  const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
+  const removed = data.proposalState === 'removed';
 
   return (
     <div
-      className={`subgraph-node-shell ${data.collapsed ? 'is-collapsed' : 'is-expanded'} ${selected ? 'is-selected' : ''}`}
+      className={`subgraph-node-shell ${data.collapsed ? 'is-collapsed' : 'is-expanded'} ${selected ? 'is-selected' : ''} ${proposalClass}`}
       data-collapsed={data.collapsed}
+      data-proposal-state={data.proposalState}
     >
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="subgraph-node-handle"
-      />
+      {!removed && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="subgraph-node-handle"
+        />
+      )}
       <div className="subgraph-node-header">
         <div className="subgraph-node-heading">
           <span className="subgraph-node-indicator">Subgraph</span>
@@ -39,7 +46,7 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
         <button
           type="button"
           className="subgraph-node-toggle nodrag nopan"
-          disabled={!data.collapseEditable}
+          disabled={removed || !data.collapseEditable}
           aria-expanded={!data.collapsed}
           aria-label={`${action} subgraph ${data.label}`}
           onClick={(event) => {
@@ -53,11 +60,13 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
       {!data.collapsed && (
         <p className="subgraph-node-description">Container for related workflow steps</p>
       )}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="subgraph-node-handle"
-      />
+      {!removed && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="subgraph-node-handle"
+        />
+      )}
     </div>
   );
 }

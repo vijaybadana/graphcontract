@@ -53,6 +53,18 @@ function graphWithSubgraph(collapsed = false): WorkflowGraph {
   };
 }
 
+function graphWithTwoSubgraphs(): WorkflowGraph {
+  const graph = graphWithSubgraph();
+  graph.subgraphs.push({
+    id: 'approval-group',
+    label: 'Approval process',
+    position: { x: 980, y: 120 },
+    dimensions: { width: 680, height: 360 },
+    collapsed: false,
+  });
+  return graph;
+}
+
 describe('projectGraphToCanvas', () => {
   it('keeps node dimensions stable while previewing proposal badges', () => {
     const graph = structuredClone(sampleGraph);
@@ -114,6 +126,88 @@ describe('projectGraphToCanvas', () => {
       extent: 'parent',
     });
     expect(graph.nodes.find((node) => node.id === 'billing')?.parentId).toBeUndefined();
+  });
+
+  it('marks added, updated, and membership-affected candidate containers for proposal review', () => {
+    const addedProposal = createProposal(sampleGraph, {
+      rationale: 'Preview a new review container.',
+      operations: [
+        {
+          type: 'add_subgraph',
+          subgraph: {
+            id: 'new-review-group',
+            label: 'New review group',
+            position: { x: 300, y: 100 },
+            dimensions: { width: 640, height: 360 },
+            collapsed: false,
+          },
+        },
+      ],
+    }).proposal!;
+    const updatedGraph = graphWithSubgraph();
+    const updatedProposal = createProposal(updatedGraph, {
+      rationale: 'Rename the review container.',
+      operations: [
+        {
+          type: 'update_subgraph',
+          subgraphId: 'review-group',
+          patch: { label: 'Updated review process' },
+        },
+      ],
+    }).proposal!;
+    const membershipGraph = graphWithTwoSubgraphs();
+    const membershipProposal = createProposal(membershipGraph, {
+      rationale: 'Move review into approval.',
+      operations: [
+        {
+          type: 'assign_nodes_to_subgraph',
+          subgraphId: 'approval-group',
+          nodeIds: ['review'],
+        },
+      ],
+    }).proposal!;
+
+    const added = projectGraphToCanvas(sampleGraph, addedProposal)
+      .nodes.find((node) => node.id === 'new-review-group');
+    const updated = projectGraphToCanvas(updatedGraph, updatedProposal)
+      .nodes.find((node) => node.id === 'review-group');
+    const membership = projectGraphToCanvas(membershipGraph, membershipProposal);
+
+    expect(added).toMatchObject({ type: 'subgraph', data: { proposalState: 'added' } });
+    expect(updated).toMatchObject({
+      type: 'subgraph',
+      data: { label: 'Updated review process', proposalState: 'updated' },
+    });
+    expect(membership.nodes.find((node) => node.id === 'review-group')).toMatchObject({
+      data: { proposalState: 'updated' },
+    });
+    expect(membership.nodes.find((node) => node.id === 'approval-group')).toMatchObject({
+      data: { proposalState: 'updated' },
+    });
+  });
+
+  it('shows a dissolved container as a non-interactive ghost without using it for candidate edges', () => {
+    const graph = graphWithSubgraph();
+    const proposal = createProposal(graph, {
+      rationale: 'Dissolve the review container.',
+      operations: [{ type: 'dissolve_subgraph', subgraphId: 'review-group' }],
+    }).proposal!;
+
+    const canvas = projectGraphToCanvas(graph, proposal);
+    const ghost = canvas.nodes.find((node) => node.id === 'review-group');
+    const review = canvas.nodes.find((node) => node.id === 'review');
+
+    expect(ghost).toMatchObject({
+      type: 'subgraph',
+      selectable: false,
+      draggable: false,
+      focusable: false,
+      data: { proposalState: 'removed' },
+    });
+    expect(review).not.toHaveProperty('parentId');
+    expect(review).toMatchObject({ position: { x: 320, y: 240 } });
+    expect(canvas.edges.some((edge) => edge.source === 'review-group' || edge.target === 'review-group')).toBe(false);
+    expect(canvas.edges.some(isSubgraphProxyEdge)).toBe(false);
   });
 
   it('emits a subgraph parent before relative children in expanded projection', () => {

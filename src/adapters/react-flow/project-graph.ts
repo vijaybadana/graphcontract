@@ -130,9 +130,15 @@ function projectEdge(
   };
 }
 
-function subgraphFlowNode(subgraph: GraphSubgraph): CanvasFlowNode {
+type ProposalVisualState = 'added' | 'updated' | 'removed';
+
+function subgraphFlowNode(
+  subgraph: GraphSubgraph,
+  proposalState?: ProposalVisualState,
+): CanvasFlowNode {
   const width = subgraph.collapsed ? CONTRACT_NODE_WIDTH : subgraph.dimensions.width;
   const height = subgraph.collapsed ? CONTRACT_NODE_HEIGHT : subgraph.dimensions.height;
+  const removed = proposalState === 'removed';
   return {
     id: subgraph.id,
     type: 'subgraph',
@@ -141,19 +147,48 @@ function subgraphFlowNode(subgraph: GraphSubgraph): CanvasFlowNode {
     // A collapsed container is an interactive card and must stay above any
     // unrelated node occupying the same coordinates so its expand control
     // cannot redirect the click to the obscuring node.
-    zIndex: subgraph.collapsed ? 10 : -1,
+    zIndex: removed ? -1 : subgraph.collapsed ? 10 : -1,
     width,
     height,
     initialWidth: width,
     initialHeight: height,
     style: { width, height },
-    selectable: true,
-    draggable: true,
-    focusable: true,
+    selectable: !removed,
+    draggable: !removed,
+    focusable: !removed,
     connectable: false,
-    ariaLabel: `${subgraph.label} subgraph, ${subgraph.collapsed ? 'collapsed' : 'expanded'}`,
-    data: { ...subgraph },
+    ariaLabel: `${subgraph.label} subgraph, ${proposalState ? `proposed ${proposalState}, ` : ''}${subgraph.collapsed ? 'collapsed' : 'expanded'}`,
+    data: { ...subgraph, proposalState },
   };
+}
+
+function membershipAffectedSubgraphIds(
+  graph: WorkflowGraph,
+  operations: GraphProposal['operations'],
+): Set<string> {
+  const affected = new Set<string>();
+  let candidate = structuredClone(graph);
+
+  for (const operation of operations) {
+    if (operation.type === 'assign_nodes_to_subgraph') {
+      if (candidate.subgraphs.some((subgraph) => subgraph.id === operation.subgraphId)) {
+        affected.add(operation.subgraphId);
+      }
+      for (const nodeId of new Set(operation.nodeIds)) {
+        const node = candidate.nodes.find((candidateNode) => candidateNode.id === nodeId);
+        if (node?.parentId) affected.add(node.parentId);
+      }
+    }
+    if (operation.type === 'remove_nodes_from_subgraph') {
+      for (const nodeId of new Set(operation.nodeIds)) {
+        const node = candidate.nodes.find((candidateNode) => candidateNode.id === nodeId);
+        if (node?.parentId) affected.add(node.parentId);
+      }
+    }
+    candidate = applyGraphOperations(candidate, [operation]).graph;
+  }
+
+  return affected;
 }
 
 export function projectGraphToCanvas(
@@ -165,6 +200,27 @@ export function projectGraphToCanvas(
   const preview = visibleProposal
     ? applyGraphOperations(graph, visibleProposal.operations).graph
     : graph;
+  const diff = visibleProposal?.diff;
+  const membershipAffectedSubgraphs = visibleProposal
+    ? membershipAffectedSubgraphIds(graph, visibleProposal.operations)
+    : new Set<string>();
+  const subgraphProposalState = (subgraphId: string): ProposalVisualState | undefined => {
+    if (diff?.removedSubgraphIds?.includes(subgraphId)) return 'removed';
+    if (diff?.addedSubgraphIds?.includes(subgraphId)) return 'added';
+    if (diff?.updatedSubgraphIds?.includes(subgraphId) || membershipAffectedSubgraphs.has(subgraphId)) {
+      return 'updated';
+    }
+    return undefined;
+  };
+
+  // Candidate containers drive membership and edge projection. Base-only
+  // containers are review ghosts for dissolves and never become parents or
+  // proxy endpoints.
+  const previewSubgraphIds = new Set(preview.subgraphs.map((subgraph) => subgraph.id));
+  const sourceSubgraphs = [
+    ...preview.subgraphs,
+    ...graph.subgraphs.filter((subgraph) => !previewSubgraphIds.has(subgraph.id)),
+  ];
 
   // The candidate graph is the authoritative preview. Keep deleted accepted
   // elements as ghosts so the existing review UI can show removals, but never
@@ -177,10 +233,9 @@ export function projectGraphToCanvas(
 
   const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const nodes: CanvasFlowNode[] = [
-    ...preview.subgraphs.map(subgraphFlowNode),
+    ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(subgraph, subgraphProposalState(subgraph.id))),
     ...sourceNodes.map((node) => {
     const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
-    const diff = visibleProposal?.diff;
     const membershipChangedNodeIds = diff?.membershipChangedNodeIds ?? [];
     const proposalState = diff?.addedNodeIds.includes(node.id)
       ? 'added'

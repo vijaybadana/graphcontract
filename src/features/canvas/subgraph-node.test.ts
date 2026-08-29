@@ -61,4 +61,24 @@ describe('SubgraphNode', () => {
     expect(button?.props['aria-label']).toBe('Expand subgraph Review process');
     expect(button?.props.disabled).toBe(true);
   });
+
+  it('renders a removed proposal container as a non-interactive visual ghost', () => {
+    const element = SubgraphNode({
+      data: {
+        id: 'review-group',
+        label: 'Review process',
+        position: { x: 0, y: 0 },
+        dimensions: { width: 640, height: 360 },
+        collapsed: false,
+        proposalState: 'removed',
+        collapseEditable: true,
+      },
+      selected: false,
+    } as never as Parameters<typeof SubgraphNode>[0]);
+    const button = findButton(element);
+
+    expect(element.props.className).toContain('is-proposed-removed');
+    expect(element.props['data-proposal-state']).toBe('removed');
+    expect(button?.props.disabled).toBe(true);
+  });
 });
