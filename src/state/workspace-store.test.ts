@@ -95,6 +95,19 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
   });
 
+  it('loads Research Intake Routing as an undoable, explicitly requested replacement', () => {
+    const previousGraphId = useGraphStore.getState().graph.id;
+    useGraphStore.getState().loadResearchIntakeRoutingDemo();
+    expect(useGraphStore.getState().graph).toMatchObject({
+      id: 'research-intake-routing-demo',
+      name: 'Research Intake Routing',
+    });
+    expect(useGraphStore.getState().selection).toEqual(emptySelection());
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
+  });
+
   it('commits a normal-node drop and parent assignment as one history transition', () => {
     useGraphStore.getState().createSubgraph({
       position: { x: 400, y: 40 },

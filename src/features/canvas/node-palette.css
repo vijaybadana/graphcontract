@@ -24,5 +24,6 @@
 .node-palette__demo-button:focus-visible { outline: 2px solid #2f7660; outline-offset: 2px; }
 .node-palette__demo-button:disabled { cursor: not-allowed; opacity: .55; }
 .node-palette__demo p { margin-top: .35rem; color: rgb(15 23 42 / 58%); font-size: .58rem; line-height: 1.4; }
+.node-palette__demo p + .node-palette__demo-button { margin-top: .65rem; }
 @media (max-width: 640px) { .node-palette { width: min(232px, calc(100vw - 1.5rem)); } }
 @media (prefers-reduced-motion: reduce) { .node-palette *, .node-palette *::before, .node-palette *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

@@ -8,6 +8,7 @@ import {
   GraphProposal,
   GraphSubgraph,
   NodeKind,
+  researchIntakeRoutingGraph,
   researchSupervisorGraph,
   sampleGraph,
   validateGraph,
@@ -663,6 +664,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         state,
         () => clone(researchSupervisorGraph),
         'Research Supervisor demo loaded.',
+      );
+    },
+
+    loadResearchIntakeRoutingDemo(state: WorkspaceCore): WorkspaceTransition {
+      return changeGraph(
+        state,
+        () => clone(researchIntakeRoutingGraph),
+        'Research Intake Routing demo loaded.',
       );
     },
   };

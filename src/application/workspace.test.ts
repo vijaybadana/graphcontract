@@ -412,6 +412,32 @@ describe('workspace application service', () => {
     expect(service.loadResearchSupervisorDemo(frozen.state).changed).toBe(false);
   });
 
+  it('loads the canonical Research Intake Routing demo only while the accepted graph is editable', () => {
+    const demo = service.loadResearchIntakeRoutingDemo(service.createInitial());
+    expect(demo.changed).toBe(true);
+    expect(demo.state.graph).toMatchObject({
+      id: 'research-intake-routing-demo',
+      name: 'Research Intake Routing',
+    });
+    expect(validateGraph(demo.state.graph)).toEqual([]);
+
+    const proposed = service.submitProposal(demo.state, {
+      rationale: 'Review the command destination.',
+      operations: [
+        {
+          type: 'update_edge',
+          edgeId: 'clarify-write-brief',
+          patch: { label: 'ready for review' },
+        },
+      ],
+    });
+    expect(service.loadResearchIntakeRoutingDemo(proposed.state).changed).toBe(false);
+
+    const frozen = service.freezeGraph(demo.state);
+    expect(frozen.result?.ok).toBe(true);
+    expect(service.loadResearchIntakeRoutingDemo(frozen.state).changed).toBe(false);
+  });
+
   it('supports inspector-level subgraph label, size, membership, collapse, and dissolve edits', () => {
     const created = service.createSubgraph(service.createInitial(), {
       position: { x: 300, y: 100 },

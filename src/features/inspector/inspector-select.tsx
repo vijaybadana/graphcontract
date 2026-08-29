@@ -12,6 +12,7 @@ type InspectorSelectProps<Value extends string> = {
   value: Value;
   options: readonly InspectorSelectOption<Value>[];
   disabled?: boolean;
+  ariaLabel?: string;
   onChange: (value: Value) => void;
 };
 
@@ -19,6 +20,7 @@ export function InspectorSelect<Value extends string>({
   value,
   options,
   disabled = false,
+  ariaLabel,
   onChange,
 }: InspectorSelectProps<Value>) {
   const [open, setOpen] = useState(false);
@@ -97,6 +99,7 @@ export function InspectorSelect<Value extends string>({
         ref={triggerRef}
         type="button"
         disabled={disabled}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open && !disabled}
         aria-controls={listboxId}

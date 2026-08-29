@@ -191,8 +191,9 @@ describe('SubgraphNode in React Flow', () => {
     ]);
   });
 
-  it('requires a clear confirmation before loading the replacement demo', () => {
+  it('requires a clear confirmation before loading Research Intake Routing', () => {
     const onLoadResearchSupervisorDemo = vi.fn();
+    const onLoadResearchIntakeRoutingDemo = vi.fn();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(
       <NodePalette
@@ -202,19 +203,21 @@ describe('SubgraphNode in React Flow', () => {
         validationIssueCount={0}
         onAdd={vi.fn()}
         onLoadResearchSupervisorDemo={onLoadResearchSupervisorDemo}
+        onLoadResearchIntakeRoutingDemo={onLoadResearchIntakeRoutingDemo}
         onCollapse={vi.fn()}
       />,
     );
 
-    const demoButton = screen.getByRole('button', { name: 'Load Research Supervisor demo' });
+    const demoButton = screen.getByRole('button', { name: 'Load Research Intake Routing' });
     fireEvent.click(demoButton);
     expect(confirm).toHaveBeenLastCalledWith(
-      'Replace the current canvas with the Research Supervisor demo? This replaces the current workflow; one Undo restores it.',
+      'Replace the current canvas with Research Intake Routing? This replaces the current workflow; one Undo restores it.',
     );
-    expect(onLoadResearchSupervisorDemo).not.toHaveBeenCalled();
+    expect(onLoadResearchIntakeRoutingDemo).not.toHaveBeenCalled();
 
     fireEvent.click(demoButton);
-    expect(onLoadResearchSupervisorDemo).toHaveBeenCalledOnce();
+    expect(onLoadResearchIntakeRoutingDemo).toHaveBeenCalledOnce();
+    expect(onLoadResearchSupervisorDemo).not.toHaveBeenCalled();
   });
 
   it('prepares native Blob download links and releases their URLs after unmount', () => {

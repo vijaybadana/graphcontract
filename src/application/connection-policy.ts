@@ -14,7 +14,9 @@ export type ConnectionDecision = {
     | 'END_OUTGOING'
     | 'DUPLICATE_CONNECTION'
     | 'ROUTING_LIMIT'
-    | 'CYCLE_DETECTED';
+    | 'INVALID_SUBGRAPH_ENTRY'
+    | 'INVALID_SUBGRAPH_EXIT'
+    | 'SUBGRAPH_END_NORMAL_REQUIRED';
 };
 
 const invalid = (code: NonNullable<ConnectionDecision['code']>): ConnectionDecision => ({
@@ -24,9 +26,10 @@ const invalid = (code: NonNullable<ConnectionDecision['code']>): ConnectionDecis
 
 export function suggestedEdgeMode(graph: WorkflowGraph, source: string): EdgeMode {
   const outgoing = graph.edges.filter((edge) => edge.source === source);
-  return outgoing.some((edge) => edge.mode === 'conditional' || edge.mode === 'fallback')
-    ? 'conditional'
-    : 'normal';
+  if (outgoing.some((edge) => edge.mode === 'conditional' || edge.mode === 'fallback')) {
+    return 'conditional';
+  }
+  return outgoing.some((edge) => edge.mode === 'command') ? 'command' : 'normal';
 }
 
 export function evaluateConnection(
@@ -41,8 +44,20 @@ export function evaluateConnection(
   const sourceNode = graph.nodes.find((node) => node.id === source);
   const targetNode = graph.nodes.find((node) => node.id === target);
   if (!sourceNode || !targetNode) return invalid('MISSING_NODE');
-  if (sourceNode.kind === 'end') return invalid('END_OUTGOING');
-  if (targetNode.kind === 'start') return invalid('START_INCOMING');
+  if (sourceNode.kind === 'end' && !sourceNode.parentId) return invalid('END_OUTGOING');
+  if (targetNode.kind === 'start' && !targetNode.parentId) return invalid('START_INCOMING');
+
+  const crossesSubgraphBoundary = sourceNode.parentId !== targetNode.parentId;
+  if (sourceNode.kind === 'end' && sourceNode.parentId && !crossesSubgraphBoundary) {
+    return invalid('INVALID_SUBGRAPH_EXIT');
+  }
+  if (targetNode.kind === 'start' && targetNode.parentId && !crossesSubgraphBoundary) {
+    return invalid('INVALID_SUBGRAPH_ENTRY');
+  }
+  if (crossesSubgraphBoundary) {
+    if (sourceNode.parentId && sourceNode.kind !== 'end') return invalid('INVALID_SUBGRAPH_EXIT');
+    if (targetNode.parentId && targetNode.kind !== 'start') return invalid('INVALID_SUBGRAPH_ENTRY');
+  }
 
   const edges = graph.edges.filter((edge) => edge.id !== options.reconnectingEdgeId);
   if (edges.some((edge) => edge.source === source && edge.target === target)) {
@@ -53,6 +68,9 @@ export function evaluateConnection(
     ? graph.edges.find((edge) => edge.id === options.reconnectingEdgeId)
     : undefined;
   const mode = reconnectingEdge?.mode ?? suggestedEdgeMode({ ...graph, edges }, source);
+  if (sourceNode.kind === 'end' && sourceNode.parentId && mode !== 'normal') {
+    return invalid('SUBGRAPH_END_NORMAL_REQUIRED');
+  }
   const outgoing = edges.filter((edge) => edge.source === source);
   if (mode === 'normal' && outgoing.length > 0) return invalid('ROUTING_LIMIT');
   if (
@@ -69,20 +87,6 @@ export function evaluateConnection(
     return invalid('ROUTING_LIMIT');
   }
 
-  const outgoingByNode = new Map<string, string[]>();
-  for (const edge of edges) {
-    outgoingByNode.set(edge.source, [...(outgoingByNode.get(edge.source) ?? []), edge.target]);
-  }
-  const pending = [target];
-  const visited = new Set<string>();
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (current === source) return invalid('CYCLE_DETECTED');
-    if (visited.has(current)) continue;
-    visited.add(current);
-    pending.push(...(outgoingByNode.get(current) ?? []));
-  }
-
   return { valid: true };
 }
 
@@ -96,11 +100,18 @@ export function createDraftEdge(
   const branchNumber = graph.edges.filter(
     (edge) => edge.source === source && edge.mode === 'conditional',
   ).length + 1;
+  const commandNumber = graph.edges.filter(
+    (edge) => edge.source === source && edge.mode === 'command',
+  ).length + 1;
   return {
     id: edgeId,
     source,
     target,
     mode,
-    ...(mode === 'conditional' ? { label: `branch ${branchNumber}` } : {}),
+    ...(mode === 'conditional'
+      ? { label: `branch ${branchNumber}` }
+      : mode === 'command'
+        ? { label: `command ${commandNumber}` }
+        : {}),
   };
 }

@@ -108,6 +108,7 @@ export function GraphWorkspace() {
   const unfreezeGraph = useGraphStore((state) => state.unfreezeGraph);
   const resetGraph = useGraphStore((state) => state.resetGraph);
   const loadResearchSupervisorDemo = useGraphStore((state) => state.loadResearchSupervisorDemo);
+  const loadResearchIntakeRoutingDemo = useGraphStore((state) => state.loadResearchIntakeRoutingDemo);
   const clearNotice = useGraphStore((state) => state.clearNotice);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
@@ -293,12 +294,13 @@ export function GraphWorkspace() {
       if (
         connection.source &&
         connection.target &&
-        canConnectCanvasEndpoints(canvas.nodes, connection.source, connection.target)
+        canConnectCanvasEndpoints(canvas.nodes, connection.source, connection.target) &&
+        evaluateConnection(graph, connection).valid
       ) {
         addEdge(connection.source, connection.target);
       }
     },
-    [addEdge, canvas.nodes],
+    [addEdge, canvas.nodes, graph],
   );
 
   const isValidConnection = useCallback(
@@ -323,11 +325,14 @@ export function GraphWorkspace() {
         return;
       }
       const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
-      if (domainEdgeId) {
+      if (
+        domainEdgeId &&
+        evaluateConnection(graph, connection, { reconnectingEdgeId: domainEdgeId }).valid
+      ) {
         updateEdge(domainEdgeId, { source: connection.source, target: connection.target });
       }
     },
-    [canvas.nodes, editable, updateEdge],
+    [canvas.nodes, editable, graph, updateEdge],
   );
 
   const openInspectorForSelection = useCallback(() => {
@@ -506,6 +511,7 @@ export function GraphWorkspace() {
               validationIssueCount={validationIssues.length}
               onAdd={addAtCenter}
               onLoadResearchSupervisorDemo={loadResearchSupervisorDemo}
+              onLoadResearchIntakeRoutingDemo={loadResearchIntakeRoutingDemo}
               onCollapse={closePalette}
             />
             <PanelResizer

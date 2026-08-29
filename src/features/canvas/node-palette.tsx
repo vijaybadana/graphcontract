@@ -86,6 +86,7 @@ type NodePaletteProps = {
   proposal: GraphProposal | null;
   onAdd: (kind: PaletteKind) => void;
   onLoadResearchSupervisorDemo: () => void;
+  onLoadResearchIntakeRoutingDemo: () => void;
   onCollapse: () => void;
 };
 
@@ -102,6 +103,7 @@ function NodePaletteContents({
   proposal,
   onAdd,
   onLoadResearchSupervisorDemo,
+  onLoadResearchIntakeRoutingDemo,
   onCollapse,
 }: NodePaletteProps) {
   const [query, setQuery] = useState('');
@@ -120,6 +122,16 @@ function NodePaletteContents({
       )
     ) {
       onLoadResearchSupervisorDemo();
+    }
+  };
+
+  const loadResearchIntakeRoutingDemo = () => {
+    if (
+      window.confirm(
+        'Replace the current canvas with Research Intake Routing? This replaces the current workflow; one Undo restores it.',
+      )
+    ) {
+      onLoadResearchIntakeRoutingDemo();
     }
   };
 
@@ -179,6 +191,16 @@ function NodePaletteContents({
         <strong>{getContractHealthLabel(graph, proposal, validationIssueCount)}</strong>
       </div>
       <div className="node-palette__demo">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={loadResearchIntakeRoutingDemo}
+          className="node-palette__demo-button"
+        >
+          <RobotIcon aria-hidden="true" size={15} weight="duotone" />
+          Load Research Intake Routing
+        </button>
+        <p>Requires confirmation and replaces this canvas. One Undo restores your workflow.</p>
         <button
           type="button"
           disabled={disabled}

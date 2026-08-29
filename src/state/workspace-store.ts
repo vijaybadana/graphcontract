@@ -70,6 +70,7 @@ type WorkspaceStore = WorkspaceCore & {
   unfreezeGraph: () => void;
   resetGraph: () => void;
   loadResearchSupervisorDemo: () => void;
+  loadResearchIntakeRoutingDemo: () => void;
   clearNotice: () => void;
 };
 
@@ -365,6 +366,14 @@ export const useGraphStore = create<WorkspaceStore>()(
 
         loadResearchSupervisorDemo: () => {
           commit(workspace.loadResearchSupervisorDemo(currentCore()), { selection: emptySelection() });
+          set((state) => ({
+            clipboardNodeIds: [],
+            fitViewRevision: state.fitViewRevision + 1,
+          }));
+        },
+
+        loadResearchIntakeRoutingDemo: () => {
+          commit(workspace.loadResearchIntakeRoutingDemo(currentCore()), { selection: emptySelection() });
           set((state) => ({
             clipboardNodeIds: [],
             fitViewRevision: state.fitViewRevision + 1,
