@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { validateGraph } from '@/src/domain';
 import { createWorkspaceService } from './workspace';
 
 const service = createWorkspaceService({
@@ -97,5 +98,81 @@ describe('workspace application service', () => {
     expect(approved.result?.ok).toBe(true);
     expect(Math.max(...approved.state.graph.nodes.map((node) => node.position.x))).toBeLessThan(1600);
     expect(approved.state.graph.nodes.find((node) => node.id === 'fraud-check')?.position).not.toEqual({ x: 5000, y: 5000 });
+  });
+
+  it('converts positions at subgraph boundaries and preserves child coordinates when moved', () => {
+    const initial = service.createInitial();
+    const originalEdges = structuredClone(initial.graph.edges);
+    const created = service.createSubgraph(initial, {
+      label: 'Research area',
+      position: { x: 400, y: 40 },
+      dimensions: { width: 600, height: 360 },
+    });
+    const subgraphId = created.result!.subgraphId;
+    const assigned = service.assignNodesToSubgraph(created.state, subgraphId, ['billing', 'diagnostic']);
+
+    expect(assigned.state.graph.nodes.find((node) => node.id === 'billing')).toMatchObject({
+      parentId: subgraphId,
+      position: { x: 80, y: 20 },
+    });
+    expect(assigned.state.graph.nodes.find((node) => node.id === 'diagnostic')).toMatchObject({
+      parentId: subgraphId,
+      position: { x: 80, y: 180 },
+    });
+
+    const collapsed = service.setSubgraphCollapsed(assigned.state, subgraphId, true);
+    expect(collapsed.state.graph.edges).toEqual(originalEdges);
+
+    const moved = service.moveSubgraph(collapsed.state, subgraphId, { x: 640, y: 220 });
+    expect(moved.state.graph.nodes.find((node) => node.id === 'diagnostic')?.position).toEqual({
+      x: 80,
+      y: 180,
+    });
+
+    const removed = service.removeNodeFromSubgraph(moved.state, 'billing');
+    expect(removed.state.graph.nodes.find((node) => node.id === 'billing')?.parentId).toBeUndefined();
+    expect(removed.state.graph.nodes.find((node) => node.id === 'billing')?.position).toEqual({
+      x: 720,
+      y: 240,
+    });
+
+    const dissolved = service.dissolveSubgraph(removed.state, subgraphId);
+    expect(dissolved.state.graph.subgraphs).toEqual([]);
+    expect(dissolved.state.graph.nodes.find((node) => node.id === 'diagnostic')?.parentId).toBeUndefined();
+    expect(dissolved.state.graph.nodes.find((node) => node.id === 'diagnostic')?.position).toEqual({
+      x: 720,
+      y: 400,
+    });
+    expect(dissolved.state.graph.edges).toEqual(originalEdges);
+  });
+
+  it('loads a valid Research Supervisor demo and locks all subgraph edits during review or freeze', () => {
+    const demo = service.loadResearchSupervisorDemo(service.createInitial());
+    expect(validateGraph(demo.state.graph)).toEqual([]);
+
+    const proposed = service.submitProposal(demo.state, {
+      rationale: 'Clarify the supervisor role.',
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'research-supervisor-agent',
+          patch: { label: 'Research Supervisor' },
+        },
+      ],
+    });
+    expect(proposed.result?.proposal.status).toBe('pending');
+    const pendingCollapse = service.setSubgraphCollapsed(
+      proposed.state,
+      'research-supervisor',
+      true,
+    );
+    expect(pendingCollapse.changed).toBe(false);
+
+    const frozen = service.freezeGraph(demo.state);
+    expect(frozen.result?.ok).toBe(true);
+    expect(service.createSubgraph(frozen.state, { position: { x: 0, y: 0 } }).changed).toBe(false);
+    expect(
+      service.dissolveSubgraph(frozen.state, 'research-supervisor').changed,
+    ).toBe(false);
   });
 });

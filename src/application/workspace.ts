@@ -6,7 +6,9 @@ import {
   GraphEdge,
   GraphNode,
   GraphProposal,
+  GraphSubgraph,
   NodeKind,
+  researchSupervisorGraph,
   sampleGraph,
   validateGraph,
   ValidationIssue,
@@ -51,6 +53,18 @@ const labels: Record<NodeKind, string> = {
 };
 
 const clone = <T,>(value: T): T => structuredClone(value);
+
+const absoluteNodePosition = (graph: WorkflowGraph, node: GraphNode): GraphNode['position'] => {
+  const parent = graph.subgraphs.find((subgraph) => subgraph.id === node.parentId);
+  return parent
+    ? { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y }
+    : node.position;
+};
+
+const removeParent = (node: GraphNode, position: GraphNode['position']): GraphNode => {
+  const { parentId: _parentId, ...unparented } = node;
+  return { ...unparented, position };
+};
 
 export function createWorkspaceService(dependencies: WorkspaceDependencies) {
   const createInitial = (): WorkspaceCore => ({
@@ -140,6 +154,202 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         ...graph,
         nodes: graph.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
       }));
+    },
+
+    createSubgraph(
+      state: WorkspaceCore,
+      input: {
+        label?: string;
+        position: GraphSubgraph['position'];
+        dimensions?: GraphSubgraph['dimensions'];
+        collapsed?: boolean;
+      },
+    ): WorkspaceTransition<{ subgraphId: string }> {
+      if (!editable(state)) return { ...blocked(state), result: undefined };
+      const subgraphId = dependencies.makeId('subgraph');
+      const transition = changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          subgraphs: [
+            ...graph.subgraphs,
+            {
+              id: subgraphId,
+              label: input.label ?? 'New Subgraph',
+              position: input.position,
+              dimensions: input.dimensions ?? { width: 640, height: 360 },
+              collapsed: input.collapsed ?? false,
+            },
+          ],
+        }),
+        'Subgraph added. Add its Start and End nodes to complete the workflow.',
+      );
+      return { ...transition, result: { subgraphId } };
+    },
+
+    updateSubgraph(
+      state: WorkspaceCore,
+      subgraphId: string,
+      patch: Partial<Omit<GraphSubgraph, 'id'>>,
+    ) {
+      if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
+        return { state, changed: false };
+      }
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        subgraphs: graph.subgraphs.map((subgraph) =>
+          subgraph.id === subgraphId ? { ...subgraph, ...patch } : subgraph,
+        ),
+      }));
+    },
+
+    moveSubgraph(
+      state: WorkspaceCore,
+      subgraphId: string,
+      position: GraphSubgraph['position'],
+    ) {
+      if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
+        return { state, changed: false };
+      }
+      // Child positions are canonical relative coordinates, so moving a
+      // container changes only its own position.
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        subgraphs: graph.subgraphs.map((subgraph) =>
+          subgraph.id === subgraphId ? { ...subgraph, position } : subgraph,
+        ),
+      }));
+    },
+
+    setSubgraphCollapsed(state: WorkspaceCore, subgraphId: string, collapsed: boolean) {
+      if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
+        return { state, changed: false };
+      }
+      // Collapse is view state on the canonical container; its edges are never
+      // rewritten, hidden, or otherwise changed here.
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        subgraphs: graph.subgraphs.map((subgraph) =>
+          subgraph.id === subgraphId ? { ...subgraph, collapsed } : subgraph,
+        ),
+      }));
+    },
+
+    assignNodesToSubgraph(state: WorkspaceCore, subgraphId: string, nodeIds: string[]) {
+      const target = state.graph.subgraphs.find((subgraph) => subgraph.id === subgraphId);
+      const requested = new Set(nodeIds);
+      const selected = state.graph.nodes.filter(
+        (node) => requested.has(node.id) && node.parentId !== subgraphId,
+      );
+      if (!target || selected.length === 0) return { state, changed: false };
+      return changeGraph(
+        state,
+        (graph) => {
+          const parent = graph.subgraphs.find((subgraph) => subgraph.id === subgraphId)!;
+          return {
+            ...graph,
+            nodes: graph.nodes.map((node) => {
+              if (!requested.has(node.id) || node.parentId === subgraphId) return node;
+              const absolute = absoluteNodePosition(graph, node);
+              return {
+                ...node,
+                parentId: subgraphId,
+                position: {
+                  x: absolute.x - parent.position.x,
+                  y: absolute.y - parent.position.y,
+                },
+              };
+            }),
+          };
+        },
+        'Nodes assigned to subgraph with relative positions preserved.',
+      );
+    },
+
+    assignNodeToSubgraph(state: WorkspaceCore, subgraphId: string, nodeId: string) {
+      const target = state.graph.subgraphs.find((subgraph) => subgraph.id === subgraphId);
+      const node = state.graph.nodes.find(
+        (candidate) => candidate.id === nodeId && candidate.parentId !== subgraphId,
+      );
+      if (!target || !node) return { state, changed: false };
+      return changeGraph(
+        state,
+        (graph) => {
+          const parent = graph.subgraphs.find((subgraph) => subgraph.id === subgraphId)!;
+          const current = graph.nodes.find((candidate) => candidate.id === nodeId)!;
+          const absolute = absoluteNodePosition(graph, current);
+          return {
+            ...graph,
+            nodes: graph.nodes.map((candidate) =>
+              candidate.id === nodeId
+                ? {
+                    ...candidate,
+                    parentId: subgraphId,
+                    position: {
+                      x: absolute.x - parent.position.x,
+                      y: absolute.y - parent.position.y,
+                    },
+                  }
+                : candidate,
+            ),
+          };
+        },
+        'Node assigned to subgraph with its relative position preserved.',
+      );
+    },
+
+    removeNodesFromSubgraph(state: WorkspaceCore, nodeIds: string[]) {
+      const requested = new Set(nodeIds);
+      const selected = state.graph.nodes.filter((node) => requested.has(node.id) && node.parentId);
+      if (selected.length === 0) return { state, changed: false };
+      return changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          nodes: graph.nodes.map((node) =>
+            requested.has(node.id) && node.parentId
+              ? removeParent(node, absoluteNodePosition(graph, node))
+              : node,
+          ),
+        }),
+        'Nodes removed from subgraph with absolute positions preserved.',
+      );
+    },
+
+    removeNodeFromSubgraph(state: WorkspaceCore, nodeId: string) {
+      const node = state.graph.nodes.find((candidate) => candidate.id === nodeId && candidate.parentId);
+      if (!node) return { state, changed: false };
+      return changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          nodes: graph.nodes.map((candidate) =>
+            candidate.id === nodeId
+              ? removeParent(candidate, absoluteNodePosition(graph, candidate))
+              : candidate,
+          ),
+        }),
+        'Node removed from subgraph with its absolute position preserved.',
+      );
+    },
+
+    dissolveSubgraph(state: WorkspaceCore, subgraphId: string) {
+      if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
+        return { state, changed: false };
+      }
+      return changeGraph(
+        state,
+        (graph) => ({
+          ...graph,
+          nodes: graph.nodes.map((node) =>
+            node.parentId === subgraphId
+              ? removeParent(node, absoluteNodePosition(graph, node))
+              : node,
+          ),
+          subgraphs: graph.subgraphs.filter((subgraph) => subgraph.id !== subgraphId),
+        }),
+        'Subgraph dissolved. Its child nodes remain at their absolute positions.',
+      );
     },
 
     removeNode(state: WorkspaceCore, nodeId: string) {
@@ -366,6 +576,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         changed: true,
         notice: 'Sample workflow restored.',
       };
+    },
+
+    loadResearchSupervisorDemo(state: WorkspaceCore): WorkspaceTransition {
+      return changeGraph(
+        state,
+        () => clone(researchSupervisorGraph),
+        'Research Supervisor demo loaded.',
+      );
     },
   };
 }

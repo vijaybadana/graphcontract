@@ -37,8 +37,9 @@ Both the human interface and WebMCP adapter enter through the same application/s
 
 Owns the canonical accepted workflow:
 
-- Nodes, edges, positions, labels, and optional embedded HITL configuration
-- Structural validation: IDs, routing constraints, reachability, and acyclicity
+- Nodes, edges, positions, labels, optional embedded HITL configuration, and one-level subgraph containers
+- Subgraph membership through a node `parentId`; child positions are relative to their container and collapse never rewrites canonical edges
+- Structural validation: IDs, scope-aware entry/exit routing, reachability, and acyclicity
 - Import/export serialization
 - Path enumeration after the graph is frozen
 
@@ -101,7 +102,7 @@ A frozen graph is immutable in normal UI flow. The user must explicitly unfreeze
 
 ## Persistence
 
-`localStorage` stores the current accepted graph, pending proposal metadata, and frozen state on the local browser/device. No account, authentication, or server-side project database is needed for the MVP.
+`localStorage` stores the current accepted graph, pending proposal metadata, and frozen state on the local browser/device. Persisted graphs created before subgraphs are normalized with an empty `subgraphs` collection. No account, authentication, or server-side project database is needed for the MVP.
 
 Persisted data is convenience storage, not a collaboration or security mechanism. The page remains fully functional when storage is empty by loading the predefined sample graph.
 
@@ -147,4 +148,4 @@ ChatGPT Sites hosts the public application. The initial deployment should verify
 
 ## Non-goals
 
-The MVP does not include repository parsing, agent-code generation, implementation verification, authentication, loops or retries, parallel branches, subgraphs, LangSmith integration, or an embedded chatbot.
+The MVP does not include repository parsing, agent-code generation, implementation verification, authentication, loops or retries, parallel branches, deeply nested subgraphs, LangSmith integration, or an embedded chatbot.

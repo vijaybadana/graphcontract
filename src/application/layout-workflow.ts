@@ -71,6 +71,13 @@ export function layoutWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
 
   return {
     ...structuredClone(graph),
-    nodes: graph.nodes.map((node) => ({ ...structuredClone(node), position: positions.get(node.id)! })),
+    nodes: graph.nodes.map((node) =>
+      // Nested child positions are canonical relative coordinates. Structural
+      // proposal layout may still arrange outer nodes, but must not turn a
+      // child's relative position into an absolute canvas coordinate.
+      node.parentId
+        ? structuredClone(node)
+        : { ...structuredClone(node), position: positions.get(node.id)! },
+    ),
   };
 }

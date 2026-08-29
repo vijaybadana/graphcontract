@@ -19,12 +19,25 @@ export type HitlConfig = {
   condition?: string;
 };
 
+export type GraphPosition = { x: number; y: number };
+export type GraphDimensions = { width: number; height: number };
+
+export type GraphSubgraph = {
+  id: string;
+  label: string;
+  position: GraphPosition;
+  dimensions: GraphDimensions;
+  collapsed: boolean;
+};
+
 export type GraphNode = {
   id: string;
   kind: NodeKind;
   label: string;
   description?: string;
-  position: { x: number; y: number };
+  /** Relative to its parent subgraph when parentId is present. */
+  position: GraphPosition;
+  parentId?: string;
   config?: Record<string, unknown>;
   hitl?: HitlConfig;
 };
@@ -44,6 +57,7 @@ export type WorkflowGraph = {
   name: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  subgraphs: GraphSubgraph[];
   status: 'draft' | 'frozen';
   updatedAt: string;
 };
@@ -110,6 +124,7 @@ export type BranchScenario = {
 };
 
 const positionSchema = z.object({ x: z.number(), y: z.number() });
+const dimensionsSchema = z.object({ width: z.number().positive(), height: z.number().positive() });
 
 export const hitlSchema = z.object({
   enabled: z.boolean(),
@@ -124,8 +139,17 @@ export const graphNodeSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
   position: positionSchema,
+  parentId: z.string().min(1).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
   hitl: hitlSchema.optional(),
+});
+
+export const graphSubgraphSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  position: positionSchema,
+  dimensions: dimensionsSchema,
+  collapsed: z.boolean(),
 });
 
 export const graphEdgeSchema = z.object({
@@ -143,6 +167,9 @@ export const workflowGraphSchema = z.object({
   name: z.string().min(1),
   nodes: z.array(graphNodeSchema),
   edges: z.array(graphEdgeSchema),
+  // A default keeps every pre-subgraph persisted graph readable without
+  // changing its node positions, topology, or other authored data.
+  subgraphs: z.array(graphSubgraphSchema).default([]),
   status: z.enum(['draft', 'frozen']),
   updatedAt: z.string().min(1),
 });
@@ -239,6 +266,103 @@ export const sampleGraph: WorkflowGraph = {
     { id: 'diagnostic-end', source: 'diagnostic', target: 'end', mode: 'normal' },
     { id: 'human-end', source: 'human', target: 'end', mode: 'normal' },
   ],
+  subgraphs: [],
+};
+
+/** A compact valid fixture for the first-class subgraph interaction. */
+export const researchSupervisorGraph: WorkflowGraph = {
+  schemaVersion: '1',
+  id: 'research-supervisor-demo',
+  name: 'Research Supervisor Workflow',
+  status: 'draft',
+  updatedAt: '2026-08-29T00:00:00.000Z',
+  nodes: [
+    {
+      id: 'research-outer-start',
+      kind: 'start',
+      label: 'Start',
+      position: { x: 60, y: 250 },
+    },
+    {
+      id: 'research-subgraph-start',
+      kind: 'start',
+      label: 'Research Start',
+      parentId: 'research-supervisor',
+      position: { x: 36, y: 130 },
+    },
+    {
+      id: 'research-supervisor-agent',
+      kind: 'agent',
+      label: 'Supervisor',
+      description: 'Plans the research sequence and synthesizes the result.',
+      parentId: 'research-supervisor',
+      position: { x: 220, y: 130 },
+      config: { role: 'research_supervisor', capability: 'ai' },
+    },
+    {
+      id: 'research-supervisor-tools',
+      kind: 'tool',
+      label: 'Supervisor Tools',
+      description: 'Research retrieval and source-review tools available to the supervisor.',
+      parentId: 'research-supervisor',
+      position: { x: 415, y: 130 },
+      config: { capability: 'research_tools', tools: ['search', 'source_review'] },
+    },
+    {
+      id: 'research-subgraph-end',
+      kind: 'end',
+      label: 'Research Complete',
+      parentId: 'research-supervisor',
+      position: { x: 600, y: 130 },
+    },
+    {
+      id: 'research-outer-end',
+      kind: 'end',
+      label: 'End',
+      position: { x: 930, y: 250 },
+    },
+  ],
+  edges: [
+    {
+      id: 'research-enter-subgraph',
+      source: 'research-outer-start',
+      target: 'research-subgraph-start',
+      mode: 'normal',
+    },
+    {
+      id: 'research-start-supervisor',
+      source: 'research-subgraph-start',
+      target: 'research-supervisor-agent',
+      mode: 'normal',
+    },
+    {
+      id: 'research-supervisor-tools',
+      source: 'research-supervisor-agent',
+      target: 'research-supervisor-tools',
+      mode: 'normal',
+    },
+    {
+      id: 'research-tools-end',
+      source: 'research-supervisor-tools',
+      target: 'research-subgraph-end',
+      mode: 'normal',
+    },
+    {
+      id: 'research-exit-subgraph',
+      source: 'research-subgraph-end',
+      target: 'research-outer-end',
+      mode: 'normal',
+    },
+  ],
+  subgraphs: [
+    {
+      id: 'research-supervisor',
+      label: 'Research Supervisor',
+      position: { x: 220, y: 120 },
+      dimensions: { width: 760, height: 320 },
+      collapsed: false,
+    },
+  ],
 };
 
 const issue = (code: string, message: string, path?: string): ValidationIssue => ({
@@ -255,15 +379,46 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     );
   }
 
+  const normalized = parsed.data;
   const issues: ValidationIssue[] = [];
   const nodeIds = new Set<string>();
   const edgeIds = new Set<string>();
+  const subgraphIds = new Set<string>();
+  const nodeById = new Map<string, GraphNode>();
 
-  for (const node of graph.nodes) {
+  for (const subgraph of normalized.subgraphs) {
+    if (subgraphIds.has(subgraph.id)) {
+      issues.push(
+        issue('DUPLICATE_SUBGRAPH_ID', `Subgraph ID “${subgraph.id}” is duplicated.`, `subgraphs.${subgraph.id}`),
+      );
+    }
+    subgraphIds.add(subgraph.id);
+  }
+
+  for (const node of normalized.nodes) {
     if (nodeIds.has(node.id)) {
       issues.push(issue('DUPLICATE_NODE_ID', `Node ID “${node.id}” is duplicated.`, `nodes.${node.id}`));
     }
     nodeIds.add(node.id);
+    nodeById.set(node.id, node);
+    if (subgraphIds.has(node.id)) {
+      issues.push(
+        issue(
+          'SUBGRAPH_NODE_ID_CONFLICT',
+          `Node ID “${node.id}” conflicts with a subgraph ID.`,
+          `nodes.${node.id}`,
+        ),
+      );
+    }
+    if (node.parentId && !subgraphIds.has(node.parentId)) {
+      issues.push(
+        issue(
+          'MISSING_NODE_PARENT',
+          `Node “${node.label}” references a subgraph that does not exist.`,
+          `nodes.${node.id}.parentId`,
+        ),
+      );
+    }
     if (node.hitl?.enabled && !['agent', 'action', 'tool'].includes(node.kind)) {
       issues.push(
         issue(
@@ -275,7 +430,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     }
   }
 
-  for (const edge of graph.edges) {
+  for (const edge of normalized.edges) {
     if (edgeIds.has(edge.id)) {
       issues.push(issue('DUPLICATE_EDGE_ID', `Edge ID “${edge.id}” is duplicated.`, `edges.${edge.id}`));
     }
@@ -288,11 +443,35 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
           `edges.${edge.id}`,
         ),
       );
+      continue;
+    }
+
+    const source = nodeById.get(edge.source)!;
+    const target = nodeById.get(edge.target)!;
+    if (source.parentId !== target.parentId) {
+      if (source.parentId && source.kind !== 'end') {
+        issues.push(
+          issue(
+            'INVALID_SUBGRAPH_EXIT',
+            `Only an internal End node may leave subgraph “${source.parentId}”.`,
+            `edges.${edge.id}`,
+          ),
+        );
+      }
+      if (target.parentId && target.kind !== 'start') {
+        issues.push(
+          issue(
+            'INVALID_SUBGRAPH_ENTRY',
+            `Only an internal Start node may receive an edge into subgraph “${target.parentId}”.`,
+            `edges.${edge.id}`,
+          ),
+        );
+      }
     }
   }
 
-  const starts = graph.nodes.filter((node) => node.kind === 'start');
-  const ends = graph.nodes.filter((node) => node.kind === 'end');
+  const starts = normalized.nodes.filter((node) => node.kind === 'start' && !node.parentId);
+  const ends = normalized.nodes.filter((node) => node.kind === 'end' && !node.parentId);
   if (starts.length !== 1) {
     issues.push(issue('START_COUNT', 'A contract must contain exactly one Start node.'));
   }
@@ -302,15 +481,78 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
 
   const outgoing = new Map<string, GraphEdge[]>();
   const incoming = new Map<string, GraphEdge[]>();
-  for (const edge of graph.edges) {
+  for (const edge of normalized.edges) {
     outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
     incoming.set(edge.target, [...(incoming.get(edge.target) ?? []), edge]);
   }
 
-  for (const node of graph.nodes) {
+  for (const subgraph of normalized.subgraphs) {
+    const children = normalized.nodes.filter((node) => node.parentId === subgraph.id);
+    const internalStarts = children.filter((node) => node.kind === 'start');
+    const internalEnds = children.filter((node) => node.kind === 'end');
+
+    if (internalStarts.length !== 1) {
+      issues.push(
+        issue(
+          'SUBGRAPH_START_COUNT',
+          `Subgraph “${subgraph.label}” must contain exactly one Start node.`,
+          `subgraphs.${subgraph.id}`,
+        ),
+      );
+    }
+    if (internalEnds.length !== 1) {
+      issues.push(
+        issue(
+          'SUBGRAPH_END_COUNT',
+          `Subgraph “${subgraph.label}” must contain exactly one End node.`,
+          `subgraphs.${subgraph.id}`,
+        ),
+      );
+    }
+
+    const internalStart = internalStarts[0];
+    if (internalStart) {
+      const entries = incoming.get(internalStart.id) ?? [];
+      const internalEntries = entries.filter(
+        (edge) => nodeById.get(edge.source)?.parentId === subgraph.id,
+      );
+      if (internalEntries.length > 0 || entries.length !== 1) {
+        issues.push(
+          issue(
+            'SUBGRAPH_START_ENTRY',
+            `Subgraph Start node “${internalStart.label}” needs exactly one incoming edge from outside its subgraph.`,
+            `nodes.${internalStart.id}`,
+          ),
+        );
+      }
+    }
+
+    const internalEnd = internalEnds[0];
+    if (internalEnd) {
+      const exits = outgoing.get(internalEnd.id) ?? [];
+      const internalExits = exits.filter(
+        (edge) => nodeById.get(edge.target)?.parentId === subgraph.id,
+      );
+      if (
+        internalExits.length > 0 ||
+        exits.length !== 1 ||
+        exits[0]?.mode !== 'normal'
+      ) {
+        issues.push(
+          issue(
+            'SUBGRAPH_END_EXIT',
+            `Subgraph End node “${internalEnd.label}” needs exactly one normal edge to outside its subgraph.`,
+            `nodes.${internalEnd.id}`,
+          ),
+        );
+      }
+    }
+  }
+
+  for (const node of normalized.nodes) {
     const nodeOutgoing = outgoing.get(node.id) ?? [];
     if (node.kind === 'end') {
-      if (nodeOutgoing.length > 0) {
+      if (!node.parentId && nodeOutgoing.length > 0) {
         issues.push(issue('END_HAS_OUTGOING', `End node “${node.label}” cannot have outgoing edges.`));
       }
       continue;
@@ -375,7 +617,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     visit(starts[0].id);
     if (cycleFound) issues.push(issue('CYCLE_DETECTED', 'MVP contracts must be acyclic.'));
 
-    const unreachable = graph.nodes.filter((node) => !visited.has(node.id));
+    const unreachable = normalized.nodes.filter((node) => !visited.has(node.id));
     if (unreachable.length > 0) {
       issues.push(
         issue(
@@ -396,7 +638,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
         }
       }
     }
-    const deadEnds = graph.nodes.filter((node) => !canReachEnd.has(node.id));
+    const deadEnds = normalized.nodes.filter((node) => !canReachEnd.has(node.id));
     if (deadEnds.length > 0) {
       issues.push(
         issue(
@@ -415,6 +657,9 @@ export function applyGraphOperations(
   operations: GraphOperation[],
 ): { graph: WorkflowGraph; errors: ValidationIssue[] } {
   const next: WorkflowGraph = structuredClone(graph);
+  // Proposals may be replayed against data loaded before subgraphs existed.
+  // Keep that accepted data canonical even outside the persistence adapter.
+  next.subgraphs ??= [];
   const errors: ValidationIssue[] = [];
 
   for (const [index, operation] of operations.entries()) {
@@ -534,12 +779,13 @@ export function createProposal(
 
 export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
   if (validateGraph(graph).length > 0) return [];
-  const start = graph.nodes.find((node) => node.kind === 'start');
+  const normalized = workflowGraphSchema.parse(graph);
+  const start = normalized.nodes.find((node) => node.kind === 'start' && !node.parentId);
   if (!start) return [];
 
-  const nodeMap = new Map(graph.nodes.map((node) => [node.id, node]));
+  const nodeMap = new Map(normalized.nodes.map((node) => [node.id, node]));
   const outgoing = new Map<string, GraphEdge[]>();
-  for (const edge of graph.edges) {
+  for (const edge of normalized.edges) {
     outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
   }
   for (const edges of outgoing.values()) {
@@ -551,7 +797,7 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     const node = nodeMap.get(nodeId);
     if (!node) return;
     const nextPath = [...path, nodeId];
-    if (node.kind === 'end') {
+    if (node.kind === 'end' && !node.parentId) {
       const number = scenarios.length + 1;
       scenarios.push({
         id: `scenario-${number}`,

@@ -5,8 +5,10 @@ import {
   createProposal,
   enumerateScenarios,
   GraphOperation,
+  researchSupervisorGraph,
   sampleGraph,
   validateGraph,
+  workflowGraphSchema,
 } from './graph';
 
 const cloneSample = () => structuredClone(sampleGraph);
@@ -40,6 +42,32 @@ describe('graph validation', () => {
     const codes = validateGraph(graph).map((entry) => entry.code);
     expect(codes).toContain('CYCLE_DETECTED');
     expect(codes).toContain('END_HAS_OUTGOING');
+  });
+
+  it('normalizes a persisted pre-subgraph graph to an empty subgraph collection', () => {
+    const legacy = cloneSample();
+    delete (legacy as { subgraphs?: unknown }).subgraphs;
+
+    expect(workflowGraphSchema.parse(legacy).subgraphs).toEqual([]);
+  });
+
+  it('accepts and traverses the Research Supervisor subgraph demo through its internal boundaries', () => {
+    const graph = structuredClone(researchSupervisorGraph);
+
+    expect(validateGraph(graph)).toEqual([]);
+    expect(enumerateScenarios({ ...graph, status: 'frozen' })).toEqual([
+      expect.objectContaining({
+        orderedPath: [
+          'research-outer-start',
+          'research-subgraph-start',
+          'research-supervisor-agent',
+          'research-supervisor-tools',
+          'research-subgraph-end',
+          'research-outer-end',
+        ],
+        expectedTerminalNode: 'research-outer-end',
+      }),
+    ]);
   });
 });
 

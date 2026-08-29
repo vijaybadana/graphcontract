@@ -23,12 +23,25 @@ type HitlConfig = {
   condition?: string;
 };
 
+type GraphPosition = { x: number; y: number };
+type GraphDimensions = { width: number; height: number };
+
+type GraphSubgraph = {
+  id: string;
+  label: string;
+  position: GraphPosition;
+  dimensions: GraphDimensions;
+  collapsed: boolean;
+};
+
 type GraphNode = {
   id: string;
   kind: NodeKind;
   label: string;
   description?: string;
-  position: { x: number; y: number };
+  // Relative to the parent subgraph when parentId is set.
+  position: GraphPosition;
+  parentId?: string;
   config?: Record<string, unknown>;
   hitl?: HitlConfig;
 };
@@ -50,6 +63,7 @@ type WorkflowGraph = {
   name: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  subgraphs: GraphSubgraph[];
   status: "draft" | "frozen";
   updatedAt: string;
 };
@@ -61,8 +75,8 @@ A valid MVP graph must satisfy all of the following:
 
 - Node and edge IDs are unique.
 - Every edge source and target references an existing node.
-- There is exactly one `start` node.
-- There is at least one `end` node.
+- The outer graph has exactly one `start` node and at least one `end` node.
+- Each subgraph has exactly one internal `start` and one internal `end` node.
 - The graph is acyclic.
 - Every non-`end` node has either:
   - exactly one outgoing `normal` edge; or
@@ -70,7 +84,8 @@ A valid MVP graph must satisfy all of the following:
 - A node cannot mix normal and conditional or fallback outgoing edges.
 - Conditional edge labels are unique per source node and non-empty.
 - A source node has at most one fallback edge.
-- `end` nodes have no outgoing edges.
+- Outer `end` nodes have no outgoing edges. An internal `end` has exactly one normal exit edge outside its subgraph; an internal `start` has exactly one incoming entry edge from outside its subgraph.
+- Edges may enter a subgraph only through its internal `start`, and may leave only through its internal `end`. Stored endpoints remain the underlying node IDs when a subgraph is collapsed.
 - Nodes intended for the final contract must be reachable from `start`.
 - Embedded HITL is allowed only on `agent`, `action`, and `tool` nodes.
 - A standalone `human_input` node represents an explicit human stage and does not require embedded HITL.

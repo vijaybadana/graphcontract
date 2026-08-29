@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createWorkspaceService } from '@/src/application/workspace';
 import { sampleGraph } from '@/src/domain';
-import { migrateWorkspaceV2 } from './migrate-workspace';
+import { migrateWorkspaceV3 } from './migrate-workspace';
 
 const service = createWorkspaceService({
   now: () => '2026-08-28T12:00:00.000Z',
@@ -14,7 +14,7 @@ describe('workspace persistence migration', () => {
     const invalid = structuredClone(sampleGraph);
     invalid.edges.push({ id: 'refund-extra', source: 'refund', target: 'end', mode: 'normal' });
 
-    const migrated = migrateWorkspaceV2(
+    const migrated = migrateWorkspaceV3(
       { graph: invalid, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -26,7 +26,7 @@ describe('workspace persistence migration', () => {
     const graph = structuredClone(sampleGraph);
     graph.nodes.find((node) => node.id === 'diagnostic')!.label = 'New Action';
 
-    const migrated = migrateWorkspaceV2(
+    const migrated = migrateWorkspaceV3(
       { graph, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -34,5 +34,22 @@ describe('workspace persistence migration', () => {
     expect(migrated.graph?.nodes.find((node) => node.id === 'diagnostic')?.label).toBe(
       'Post-Refund Audit',
     );
+  });
+
+  it('preserves valid legacy graph data and supplies its empty subgraph collection', () => {
+    const legacy = structuredClone(sampleGraph);
+    delete (legacy as { subgraphs?: unknown }).subgraphs;
+
+    const migrated = migrateWorkspaceV3(
+      { graph: legacy, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph).toMatchObject({
+      id: sampleGraph.id,
+      nodes: sampleGraph.nodes,
+      edges: sampleGraph.edges,
+      subgraphs: [],
+    });
   });
 });
