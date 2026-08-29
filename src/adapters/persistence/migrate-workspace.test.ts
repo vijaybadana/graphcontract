@@ -68,7 +68,7 @@ describe('workspace persistence migration', () => {
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '2',
+      schemaVersion: '3',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'unfinished-agent', kind: 'step', executor: 'ai' }),
       ]),
@@ -143,7 +143,16 @@ describe('workspace persistence migration', () => {
           id: 'diagnostic',
           kind: 'step',
           executor: 'deterministic',
-          hitl: { enabled: true, timing: 'before', inputType: 'approval' },
+          hitl: {
+            enabled: true,
+            timing: 'before',
+            response: {
+              type: 'approval',
+              allowedOutcomes: [
+                { id: 'outcome:diagnostic-end', label: 'End', resumeNodeId: 'end' },
+              ],
+            },
+          },
         }),
         expect.objectContaining({ id: 'refund', kind: 'step', executor: 'tool' }),
         expect.objectContaining({ id: 'human', kind: 'step', executor: 'human' }),
@@ -219,7 +228,7 @@ describe('workspace persistence migration', () => {
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '2',
+      schemaVersion: '3',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'classifier', kind: 'step', executor: 'ai' }),
         expect.objectContaining({ id: 'diagnostic', kind: 'step', executor: 'deterministic' }),
@@ -254,6 +263,121 @@ describe('workspace persistence migration', () => {
           target: 'research-supervisor',
         }),
       ]),
+    });
+  });
+
+  it('migrates v2 HITL, sensitive policy, and pending proposal data without replacing incomplete drafts', () => {
+    const graph = structuredClone(sampleGraph) as unknown as {
+      schemaVersion: '2';
+      nodes: Array<Record<string, unknown>>;
+      edges: typeof sampleGraph.edges;
+    };
+    graph.schemaVersion = '2';
+    const classifier = graph.nodes.find((node) => node.id === 'classifier')!;
+    classifier.hitl = {
+      enabled: true,
+      timing: 'conditional',
+      inputType: 'selection',
+      condition: 'risk.requiresReview === true',
+    };
+    classifier.modifiers = { sensitiveSideEffect: true, guardrail: true };
+    const proposal = {
+      id: 'v2-pending',
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'classifier',
+          patch: {
+            hitl: {
+              enabled: true,
+              timing: 'conditional',
+              inputType: 'approval',
+              condition: 'proposal.requiresReview === true',
+            },
+            modifiers: { sensitiveSideEffect: true },
+          },
+        },
+        {
+          type: 'add_node',
+          node: {
+            id: 'proposed-gate',
+            kind: 'step',
+            executor: 'ai',
+            label: 'Proposed gate',
+            position: { x: 900, y: 220 },
+            hitl: {
+              enabled: true,
+              timing: 'conditional',
+              inputType: 'approval',
+              condition: 'proposal.needsApproval === true',
+            },
+          },
+        },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'proposed-gate-end',
+            source: 'proposed-gate',
+            target: 'end',
+            mode: 'normal',
+          },
+        },
+      ],
+    };
+
+    const migrated = migrateWorkspaceV3(
+      { graph, proposal, scenarios: [] },
+      service.createInitial,
+    );
+    const migratedClassifier = migrated.graph?.nodes.find((node) => node.id === 'classifier');
+
+    expect(migratedClassifier).toMatchObject({
+      kind: 'step',
+      hitl: {
+        enabled: true,
+        timing: 'inside',
+        activation: { reason: 'risk.requiresReview === true' },
+        response: {
+          type: 'selection',
+          selectionChoices: [
+            { id: 'outcome:classifier-billing', label: 'billing' },
+            { id: 'outcome:classifier-diagnostic', label: 'technical' },
+            { id: 'outcome:classifier-human', label: 'unknown' },
+          ],
+          allowedOutcomes: [
+            { id: 'outcome:classifier-billing', resumeNodeId: 'billing' },
+            { id: 'outcome:classifier-diagnostic', resumeNodeId: 'diagnostic' },
+            { id: 'outcome:classifier-human', resumeNodeId: 'human' },
+          ],
+        },
+      },
+      sensitive: {
+        target: 'Legacy sensitive side effect',
+        approvalRequired: false,
+      },
+      modifiers: { guardrail: true },
+    });
+    expect(migratedClassifier).not.toMatchObject({ modifiers: { sensitiveSideEffect: true } });
+    expect(migrated.graph?.schemaVersion).toBe('3');
+    const operations = (migrated.proposal as unknown as { operations: Array<{ patch: Record<string, unknown> }> }).operations;
+    expect(operations[0]?.patch).toMatchObject({
+      hitl: {
+        timing: 'inside',
+        activation: { reason: 'proposal.requiresReview === true' },
+      },
+      sensitive: { target: 'Legacy sensitive side effect' },
+    });
+    expect(operations[0]?.patch.modifiers).toBeUndefined();
+    expect((operations[1] as unknown as { node: Record<string, unknown> }).node).toMatchObject({
+      hitl: {
+        timing: 'inside',
+        activation: { reason: 'proposal.needsApproval === true' },
+        response: {
+          allowedOutcomes: [
+            { id: 'outcome:proposed-gate-end', resumeNodeId: 'end' },
+          ],
+        },
+      },
     });
   });
 

@@ -15,10 +15,42 @@ type V1NodeKind = (typeof v1NodeKinds)[number];
 export type EdgeMode = 'normal' | 'conditional' | 'command' | 'fallback';
 export type StepExecutor = 'deterministic' | 'ai' | 'tool' | 'human';
 
+export type HitlTiming = 'before' | 'inside' | 'after';
+export type HumanResponseType = 'approval' | 'text' | 'selection';
+
+export type HumanSelectionChoice = {
+  id: string;
+  label: string;
+};
+
+/** A configured human response always resumes through an authored edge. */
+export type HumanOutcome = {
+  id: string;
+  label: string;
+  resumeNodeId: string;
+};
+
+export type HitlResponseContract = {
+  type: HumanResponseType;
+  selectionChoices?: HumanSelectionChoice[];
+  allowedOutcomes: HumanOutcome[];
+};
+
 export type HitlConfig = {
   enabled: boolean;
+  /** Required for enabled gates; omitted only while an inactive draft is configured. */
+  timing?: HitlTiming;
+  /** Required for enabled gates. */
+  response?: HitlResponseContract;
+  /** Explains why the gate is active without changing its execution owner. */
+  activation?: { reason?: string };
+};
+
+/** The v2 persistence-only HITL shape. Never write this shape to v3. */
+export type HitlConfigV2 = {
+  enabled: boolean;
   timing?: 'before' | 'after' | 'conditional';
-  inputType?: 'approval' | 'text' | 'selection';
+  inputType?: HumanResponseType;
   condition?: string;
 };
 
@@ -43,20 +75,9 @@ type GraphNodeBase = {
   config?: Record<string, unknown>;
 };
 
-type GraphNodeWithHitl = GraphNodeBase & {
-  /**
-   * A gate is deliberately independent from who owns execution. The v1
-   * timing shape remains intact here; Package 2 owns richer gate timing and
-   * response-policy configuration.
-   */
-  hitl?: HitlConfig;
-};
-
 export type StepModifierSummary = {
   /** A guardrail policy exists; its detail remains inspector-owned. */
   guardrail?: true;
-  /** This Step can perform a sensitive side effect. */
-  sensitiveSideEffect?: true;
   /** This Step directly reads from the long-term Store. */
   storeRead?: true;
   /** This Step directly writes to the long-term Store. */
@@ -69,9 +90,21 @@ export type StepModifierSummary = {
   readiness?: 'degraded' | 'unimplemented';
 };
 
+/** v2 compatibility summary. Active v3 derives Sensitive from `sensitive`. */
+export type StepModifierSummaryV2 = StepModifierSummary & {
+  sensitiveSideEffect?: true;
+};
+
 export type StepParticipation = {
   /** The Step makes internal tool calls without becoming a Tool executor. */
   internalTools?: true;
+};
+
+export type SensitiveEffectPolicy = {
+  target: string;
+  authorization: string;
+  approvalRequired: boolean;
+  idempotency: string;
 };
 
 export type StructuralGraphNode = GraphNodeBase & {
@@ -83,6 +116,8 @@ export type StepGraphNode = GraphNodeBase & {
   executor: StepExecutor;
   /** A gate is a Step modifier, distinct from human executor ownership. */
   hitl?: HitlConfig;
+  /** The policy is independent from HITL; its presence renders Sensitive. */
+  sensitive?: SensitiveEffectPolicy;
   participation?: StepParticipation;
   modifiers?: StepModifierSummary;
 };
@@ -90,9 +125,16 @@ export type StepGraphNode = GraphNodeBase & {
 /** The active, serialized node model. Agent/Action/Tool/Human are presets, not kinds. */
 export type GraphNode = StructuralGraphNode | StepGraphNode;
 
+export type StepGraphNodeV2 = Omit<StepGraphNode, 'hitl' | 'sensitive' | 'modifiers'> & {
+  hitl?: HitlConfigV2;
+  modifiers?: StepModifierSummaryV2;
+};
+export type GraphNodeV2 = StructuralGraphNode | StepGraphNodeV2;
+
 /** The v1 persistence-only node shape. Never use this for new writes. */
-export type LegacyGraphNodeV1 = GraphNodeWithHitl & {
+export type LegacyGraphNodeV1 = GraphNodeBase & {
   kind: V1NodeKind;
+  hitl?: HitlConfigV2;
 };
 
 export type GraphEdge = {
@@ -131,23 +173,33 @@ export function normalizeRoutingEdge(edge: GraphEdge): GraphEdge {
 }
 
 /** Returns a graph copy whose route semantics are safe to persist or export. */
-export function normalizeWorkflowGraphRouting(graph: WorkflowGraph): WorkflowGraph {
+export function normalizeWorkflowGraphRouting<T extends { edges: GraphEdge[] }>(graph: T): T {
   return { ...graph, edges: graph.edges.map(normalizeRoutingEdge) };
 }
 
-export type WorkflowGraph = {
-  schemaVersion: '2';
+type WorkflowGraphBase = {
   id: string;
   name: string;
-  nodes: GraphNode[];
   edges: GraphEdge[];
   subgraphs: GraphSubgraph[];
   status: 'draft' | 'frozen';
   updatedAt: string;
 };
 
+/** The active, serialized schema. All new writes use v3. */
+export type WorkflowGraph = WorkflowGraphBase & {
+  schemaVersion: '3';
+  nodes: GraphNode[];
+};
+
+/** v2 is persistence input only and is normalized before it reaches v3. */
+export type WorkflowGraphV2 = WorkflowGraphBase & {
+  schemaVersion: '2';
+  nodes: GraphNodeV2[];
+};
+
 /** The v1 persistence-only graph shape accepted by the ordinary migration. */
-export type WorkflowGraphV1 = Omit<WorkflowGraph, 'schemaVersion' | 'nodes'> & {
+export type WorkflowGraphV1 = WorkflowGraphBase & {
   schemaVersion: '1';
   nodes: LegacyGraphNodeV1[];
 };
@@ -156,6 +208,8 @@ export type WorkflowGraphV1 = Omit<WorkflowGraph, 'schemaVersion' | 'nodes'> & {
 export type GraphNodePatch = Partial<
   Omit<GraphNodeBase, 'id' | 'parentId'> & {
     hitl: HitlConfig;
+    /** `null` is patch-only and removes the optional v3 policy. */
+    sensitive: SensitiveEffectPolicy | null;
     executor: StepExecutor;
     participation: StepParticipation;
     modifiers: StepModifierSummary;
@@ -186,8 +240,8 @@ export function normalizeLegacyWorkNodeKind(
   };
 }
 
-/** Converts one v1 node into the active canonical node model. */
-export function migrateLegacyGraphNodeV1(node: LegacyGraphNodeV1): GraphNode {
+/** Converts one v1 node into its v2-normalized Step identity. */
+export function migrateLegacyGraphNodeV1(node: LegacyGraphNodeV1): GraphNodeV2 {
   if (node.kind === 'start' || node.kind === 'end') return { ...node };
 
   const { kind, ...step } = node;
@@ -195,17 +249,92 @@ export function migrateLegacyGraphNodeV1(node: LegacyGraphNodeV1): GraphNode {
 }
 
 /**
- * Converts a persisted v1 graph into the only active graph model. This does
- * not validate topology: incomplete drafts keep their authored IDs,
- * membership, coordinates, routes, HITL data, status, and timestamp for the
- * ordinary validator to report after rehydration.
+ * Converts a persisted v1 graph into the v2 normalization input. v1 always
+ * passes through this seam before the v3 migration below.
  */
-export function migrateWorkflowGraphV1(graph: WorkflowGraphV1): WorkflowGraph {
+export function migrateWorkflowGraphV1(graph: WorkflowGraphV1): WorkflowGraphV2 {
   return normalizeWorkflowGraphRouting({
     ...graph,
     schemaVersion: '2',
     nodes: graph.nodes.map(migrateLegacyGraphNodeV1),
   });
+}
+
+const legacyOutcomeId = (edge: GraphEdge) => `outcome:${edge.id}`;
+
+const legacyOutcomeLabel = (edge: GraphEdge, nodes: readonly GraphNodeV2[]) =>
+  edge.label?.trim() || nodes.find((node) => node.id === edge.target)?.label || edge.target;
+
+/**
+ * v2 HITL had no response destinations. Derive deterministic migration
+ * defaults from existing canonical edges, never by adding or rewiring an edge.
+ * Empty draft edge sets stay empty so ordinary validation can report them.
+ */
+export function migrateHitlConfigV2(
+  hitl: HitlConfigV2 | undefined,
+  nodeId: string,
+  graph: Pick<WorkflowGraphV2, 'nodes' | 'edges'>,
+): HitlConfig | undefined {
+  if (!hitl) return undefined;
+  if (!hitl.enabled) return { enabled: false };
+
+  const type = hitl.inputType ?? 'approval';
+  const outgoing = graph.edges.filter((edge) => edge.source === nodeId);
+  const allowedOutcomes = outgoing.map((edge) => ({
+    id: legacyOutcomeId(edge),
+    label: legacyOutcomeLabel(edge, graph.nodes),
+    resumeNodeId: edge.target,
+  }));
+  const selectionChoices =
+    type === 'selection'
+      ? allowedOutcomes.map(({ id, label }) => ({ id, label }))
+      : undefined;
+  const reason = hitl.condition?.trim();
+
+  return {
+    enabled: true,
+    timing: hitl.timing === 'conditional' ? 'inside' : hitl.timing ?? 'before',
+    response: { type, allowedOutcomes, ...(selectionChoices ? { selectionChoices } : {}) },
+    ...(reason ? { activation: { reason } } : {}),
+  };
+}
+
+export const legacySensitiveEffectPolicy: SensitiveEffectPolicy = {
+  target: 'Legacy sensitive side effect',
+  authorization: 'Legacy authorization not specified',
+  approvalRequired: false,
+  idempotency: 'Legacy idempotency not specified',
+};
+
+/** Migrates a v2 node without discarding incomplete draft configuration. */
+export function migrateGraphNodeV2(node: GraphNodeV2, graph: WorkflowGraphV2): GraphNode {
+  if (node.kind !== 'step') return { ...node };
+  const { hitl, modifiers, ...step } = node;
+  const { sensitiveSideEffect, ...remainingModifiers } = modifiers ?? {};
+  const migratedHitl = migrateHitlConfigV2(hitl, node.id, graph);
+  return {
+    ...step,
+    ...(Object.keys(remainingModifiers).length > 0 ? { modifiers: remainingModifiers } : {}),
+    ...(sensitiveSideEffect ? { sensitive: { ...legacySensitiveEffectPolicy } } : {}),
+    ...(migratedHitl ? { hitl: migratedHitl } : {}),
+  };
+}
+
+/**
+ * Converts a v2 graph into active v3. It intentionally does not validate
+ * topology, so parseable partial drafts retain their authored state.
+ */
+export function migrateWorkflowGraphV2(graph: WorkflowGraphV2): WorkflowGraph {
+  return normalizeWorkflowGraphRouting({
+    ...graph,
+    schemaVersion: '3',
+    nodes: graph.nodes.map((node) => migrateGraphNodeV2(node, graph)),
+  });
+}
+
+/** Convenience migration for callers that receive an original v1 payload. */
+export function migrateWorkflowGraphV1ToV3(graph: WorkflowGraphV1): WorkflowGraph {
+  return migrateWorkflowGraphV2(migrateWorkflowGraphV1(graph));
 }
 
 export type ValidationIssue = {
@@ -281,10 +410,23 @@ export type ScenarioEdge = GraphEdge & {
   isFallback?: boolean;
 };
 
+/** The configured response that selected an existing outgoing edge. */
+export type ScenarioHumanOutcome = {
+  nodeId: string;
+  nodeLabel: string;
+  timing: HitlTiming;
+  responseType: HumanResponseType;
+  outcomeId: string;
+  outcomeLabel: string;
+  resumeNodeId: string;
+};
+
 export type BranchScenario = {
   id: string;
   name: string;
   triggeringConditions: BranchCondition[];
+  /** Ordered human responses are separate from authored routing conditions. */
+  humanOutcomes: ScenarioHumanOutcome[];
   /** Ordered edges retain the authored routing data needed by scenario exports. */
   traversedEdges: ScenarioEdge[];
   orderedPath: string[];
@@ -295,12 +437,45 @@ export type BranchScenario = {
 const positionSchema = z.object({ x: z.number(), y: z.number() });
 const dimensionsSchema = z.object({ width: z.number().positive(), height: z.number().positive() });
 
-export const hitlSchema = z.object({
+const humanSelectionChoiceSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+  })
+  .strict();
+
+const humanOutcomeSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    resumeNodeId: z.string().min(1),
+  })
+  .strict();
+
+export const hitlResponseContractSchema = z
+  .object({
+    type: z.enum(['approval', 'text', 'selection']),
+    selectionChoices: z.array(humanSelectionChoiceSchema).optional(),
+    allowedOutcomes: z.array(humanOutcomeSchema),
+  })
+  .strict();
+
+export const hitlSchema = z
+  .object({
+    enabled: z.boolean(),
+    timing: z.enum(['before', 'inside', 'after']).optional(),
+    response: hitlResponseContractSchema.optional(),
+    activation: z.object({ reason: z.string().min(1).optional() }).strict().optional(),
+  })
+  .strict();
+
+/** v2 persistence input only; this schema must not be used for new writes. */
+export const hitlV2Schema = z.object({
   enabled: z.boolean(),
   timing: z.enum(['before', 'after', 'conditional']).optional(),
   inputType: z.enum(['approval', 'text', 'selection']).optional(),
   condition: z.string().optional(),
-});
+}).strict();
 
 const graphNodeBaseSchema = z.object({
   id: z.string().min(1),
@@ -314,7 +489,6 @@ const graphNodeBaseSchema = z.object({
 export const stepModifierSummarySchema = z
   .object({
     guardrail: z.literal(true).optional(),
-    sensitiveSideEffect: z.literal(true).optional(),
     storeRead: z.literal(true).optional(),
     storeWrite: z.literal(true).optional(),
     retryFallback: z.literal(true).optional(),
@@ -323,11 +497,24 @@ export const stepModifierSummarySchema = z
   })
   .strict();
 
+const stepModifierSummaryV2Schema = stepModifierSummarySchema.extend({
+  sensitiveSideEffect: z.literal(true).optional(),
+});
+
 export const stepParticipationSchema = z
   .object({ internalTools: z.literal(true).optional() })
   .strict();
 
 const stepExecutorSchema = z.enum(['deterministic', 'ai', 'tool', 'human']);
+
+export const sensitiveEffectPolicySchema = z
+  .object({
+    target: z.string().min(1),
+    authorization: z.string().min(1),
+    approvalRequired: z.boolean(),
+    idempotency: z.string().min(1),
+  })
+  .strict();
 
 export const graphNodeSchema = z.discriminatedUnion('kind', [
   graphNodeBaseSchema.extend({ kind: z.literal('start') }),
@@ -335,8 +522,22 @@ export const graphNodeSchema = z.discriminatedUnion('kind', [
     kind: z.literal('step'),
     executor: stepExecutorSchema,
     hitl: hitlSchema.optional(),
+    sensitive: sensitiveEffectPolicySchema.optional(),
     participation: stepParticipationSchema.optional(),
     modifiers: stepModifierSummarySchema.optional(),
+  }),
+  graphNodeBaseSchema.extend({ kind: z.literal('end') }),
+]);
+
+/** v2 compatibility input only; active graph operations never accept this shape. */
+export const graphNodeV2Schema = z.discriminatedUnion('kind', [
+  graphNodeBaseSchema.extend({ kind: z.literal('start') }),
+  graphNodeBaseSchema.extend({
+    kind: z.literal('step'),
+    executor: stepExecutorSchema,
+    hitl: hitlV2Schema.optional(),
+    participation: stepParticipationSchema.optional(),
+    modifiers: stepModifierSummaryV2Schema.optional(),
   }),
   graphNodeBaseSchema.extend({ kind: z.literal('end') }),
 ]);
@@ -344,7 +545,7 @@ export const graphNodeSchema = z.discriminatedUnion('kind', [
 /** v1 compatibility input only; successful parsing must be followed by migration. */
 export const legacyGraphNodeV1Schema = graphNodeBaseSchema.extend({
   kind: z.enum(v1NodeKinds),
-  hitl: hitlSchema.optional(),
+  hitl: hitlV2Schema.optional(),
 });
 
 export const graphSubgraphSchema = z.object({
@@ -365,7 +566,7 @@ export const graphEdgeSchema = z.object({
 });
 
 export const workflowGraphSchema = z.object({
-  schemaVersion: z.literal('2'),
+  schemaVersion: z.literal('3'),
   id: z.string().min(1),
   name: z.string().min(1),
   nodes: z.array(graphNodeSchema),
@@ -377,8 +578,16 @@ export const workflowGraphSchema = z.object({
   updatedAt: z.string().min(1),
 });
 
+/** v2 compatibility input only; successful parsing must be followed by migration. */
+export const workflowGraphV2Schema = workflowGraphSchema
+  .omit({ schemaVersion: true, nodes: true })
+  .extend({
+    schemaVersion: z.literal('2'),
+    nodes: z.array(graphNodeV2Schema),
+  });
+
 /** v1 compatibility input only; active graph operations never accept this shape. */
-export const workflowGraphV1Schema = workflowGraphSchema
+export const workflowGraphV1Schema = workflowGraphV2Schema
   .omit({ schemaVersion: true, nodes: true })
   .extend({
     schemaVersion: z.literal('1'),
@@ -392,6 +601,7 @@ export const graphNodePatchSchema = z
     position: positionSchema.optional(),
     config: z.record(z.string(), z.unknown()).optional(),
     hitl: hitlSchema.optional(),
+    sensitive: sensitiveEffectPolicySchema.nullable().optional(),
     executor: stepExecutorSchema.optional(),
     participation: stepParticipationSchema.optional(),
     modifiers: stepModifierSummarySchema.optional(),
@@ -438,7 +648,7 @@ export const proposalInputSchema = z.object({
 });
 
 export const sampleGraph: WorkflowGraph = {
-  schemaVersion: '2',
+  schemaVersion: '3',
   id: 'customer-support-contract',
   name: 'Customer Support Workflow',
   status: 'draft',
@@ -516,7 +726,7 @@ export const sampleGraph: WorkflowGraph = {
 
 /** A compact valid fixture for the first-class subgraph interaction. */
 export const researchSupervisorGraph: WorkflowGraph = {
-  schemaVersion: '2',
+  schemaVersion: '3',
   id: 'research-supervisor-demo',
   name: 'Research Supervisor Workflow',
   status: 'draft',
@@ -615,7 +825,7 @@ export const researchSupervisorGraph: WorkflowGraph = {
 /** The canonical routing-semantics fixture. A return edge is normal topology,
  * so loop presentation can be derived without persisting a separate mode. */
 export const researchIntakeRoutingGraph: WorkflowGraph = {
-  schemaVersion: '2',
+  schemaVersion: '3',
   id: 'research-intake-routing-demo',
   name: 'Research Intake Routing',
   status: 'draft',
@@ -787,7 +997,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
         ),
       );
     }
-    if (node.kind !== 'step' && (node as GraphNodeWithHitl).hitl?.enabled) {
+    if (node.kind !== 'step' && 'hitl' in node && node.hitl?.enabled) {
       issues.push(
         issue(
           'INVALID_HITL_NODE',
@@ -849,6 +1059,119 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     }
   }
 
+  const outgoing = new Map<string, GraphEdge[]>();
+  const incoming = new Map<string, GraphEdge[]>();
+  for (const edge of normalized.edges) {
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
+    incoming.set(edge.target, [...(incoming.get(edge.target) ?? []), edge]);
+  }
+
+  for (const node of normalized.nodes) {
+    if (node.kind !== 'step') continue;
+    const hitl = node.hitl;
+    const nodeOutgoing = outgoing.get(node.id) ?? [];
+
+    if (hitl?.enabled) {
+      if (!hitl.timing) {
+        issues.push(
+          issue(
+            'HITL_TIMING_REQUIRED',
+            `Enabled HITL on “${node.label}” needs before, inside, or after timing.`,
+            `nodes.${node.id}.hitl.timing`,
+          ),
+        );
+      }
+      if (!hitl.response) {
+        issues.push(
+          issue(
+            'HITL_RESPONSE_REQUIRED',
+            `Enabled HITL on “${node.label}” needs a response contract.`,
+            `nodes.${node.id}.hitl.response`,
+          ),
+        );
+      } else {
+        const response = hitl.response;
+        if (response.allowedOutcomes.length === 0) {
+          issues.push(
+            issue(
+              'HITL_OUTCOME_REQUIRED',
+              `Enabled HITL on “${node.label}” needs at least one allowed outcome.`,
+              `nodes.${node.id}.hitl.response.allowedOutcomes`,
+            ),
+          );
+        }
+        const outcomeIds = response.allowedOutcomes.map((outcome) => outcome.id);
+        if (new Set(outcomeIds).size !== outcomeIds.length) {
+          issues.push(
+            issue(
+              'HITL_OUTCOME_ID_DUPLICATE',
+              `HITL outcome IDs on “${node.label}” must be unique.`,
+              `nodes.${node.id}.hitl.response.allowedOutcomes`,
+            ),
+          );
+        }
+        for (const outcome of response.allowedOutcomes) {
+          if (!nodeOutgoing.some((edge) => edge.target === outcome.resumeNodeId)) {
+            issues.push(
+              issue(
+                'HITL_OUTCOME_DESTINATION_INVALID',
+                `HITL outcome “${outcome.label}” must resume through an outgoing edge from “${node.label}”.`,
+                `nodes.${node.id}.hitl.response.allowedOutcomes.${outcome.id}.resumeNodeId`,
+              ),
+            );
+          }
+        }
+        if (response.type === 'selection') {
+          const choices = response.selectionChoices ?? [];
+          if (choices.length === 0) {
+            issues.push(
+              issue(
+                'HITL_SELECTION_CHOICES_REQUIRED',
+                `Selection HITL on “${node.label}” needs at least one choice.`,
+                `nodes.${node.id}.hitl.response.selectionChoices`,
+              ),
+            );
+          }
+          const choiceIds = choices.map((choice) => choice.id);
+          if (new Set(choiceIds).size !== choiceIds.length) {
+            issues.push(
+              issue(
+                'HITL_SELECTION_CHOICE_ID_DUPLICATE',
+                `Selection choice IDs on “${node.label}” must be unique.`,
+                `nodes.${node.id}.hitl.response.selectionChoices`,
+              ),
+            );
+          }
+        } else if (response.selectionChoices && response.selectionChoices.length > 0) {
+          issues.push(
+            issue(
+              'HITL_SELECTION_CHOICES_UNEXPECTED',
+              `Only selection HITL may define selection choices on “${node.label}”.`,
+              `nodes.${node.id}.hitl.response.selectionChoices`,
+            ),
+          );
+        }
+      }
+    }
+
+    if (node.sensitive?.approvalRequired) {
+      const eligibleApprovalGate =
+        hitl?.enabled &&
+        hitl.timing === 'before' &&
+        hitl.response?.type === 'approval' &&
+        hitl.response.allowedOutcomes.some((outcome) => outcome.id === 'approve');
+      if (!eligibleApprovalGate) {
+        issues.push(
+          issue(
+            'SENSITIVE_APPROVAL_GATE_REQUIRED',
+            `Approval-required sensitive policy on “${node.label}” needs an enabled before approval gate with an approve outcome.`,
+            `nodes.${node.id}.sensitive.approvalRequired`,
+          ),
+        );
+      }
+    }
+  }
+
   for (const connectionEdges of edgesByConnection.values()) {
     if (connectionEdges.length < 2) continue;
     for (const edge of connectionEdges) {
@@ -869,13 +1192,6 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   }
   if (ends.length < 1) {
     issues.push(issue('END_COUNT', 'A contract must contain at least one End node.'));
-  }
-
-  const outgoing = new Map<string, GraphEdge[]>();
-  const incoming = new Map<string, GraphEdge[]>();
-  for (const edge of normalized.edges) {
-    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
-    incoming.set(edge.target, [...(incoming.get(edge.target) ?? []), edge]);
   }
 
   for (const subgraph of normalized.subgraphs) {
@@ -1130,7 +1446,7 @@ export function applyGraphOperations(
   };
   const uniqueNodeIds = (nodeIds: string[]) => [...new Set(nodeIds)];
   const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
-    ['executor', 'participation', 'modifiers', 'hitl'].some((field) => field in patch);
+    ['executor', 'participation', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
   const missingNodes = (nodeIds: string[], operationIndex: number) => {
     const missing = uniqueNodeIds(nodeIds).filter((nodeId) => !findNode(nodeId));
     for (const nodeId of missing) {
@@ -1164,7 +1480,14 @@ export function applyGraphOperations(
           ),
         );
       } else {
-        next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...structuredClone(operation.patch) };
+        const patch = structuredClone(operation.patch);
+        if (next.nodes[nodeIndex].kind === 'step' && patch.sensitive === null) {
+          const updated = { ...next.nodes[nodeIndex], ...patch };
+          delete updated.sensitive;
+          next.nodes[nodeIndex] = updated;
+        } else {
+          next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...patch };
+        }
       }
     } else if (operation.type === 'remove_node') {
       if (!findNode(operation.nodeId)) {
@@ -1409,6 +1732,7 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     nodeId: string,
     path: string[],
     conditions: BranchCondition[],
+    humanOutcomes: ScenarioHumanOutcome[],
     traversedEdges: ScenarioEdge[],
     traversedLoopEdgeIds: ReadonlySet<string>,
   ) => {
@@ -1417,10 +1741,14 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     const nextPath = [...path, nodeId];
     if (node.kind === 'end' && !node.parentId) {
       const number = scenarios.length + 1;
+      const humanOutcomeSuffix = humanOutcomes.length
+        ? ` [${humanOutcomes.map((outcome) => outcome.outcomeLabel).join(', ')}]`
+        : '';
       scenarios.push({
         id: `scenario-${number}`,
-        name: `Path ${number}: ${nextPath.map((id) => nodeMap.get(id)?.label ?? id).join(' → ')}`,
+        name: `Path ${number}: ${nextPath.map((id) => nodeMap.get(id)?.label ?? id).join(' → ')}${humanOutcomeSuffix}`,
         triggeringConditions: conditions,
+        humanOutcomes,
         traversedEdges,
         orderedPath: nextPath,
         expectedNodes: nextPath,
@@ -1429,7 +1757,19 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
       return;
     }
 
-    for (const edge of outgoing.get(nodeId) ?? []) {
+    const response = node.kind === 'step' && node.hitl?.enabled ? node.hitl.response : undefined;
+    const choices = response
+      ? response.allowedOutcomes
+          .slice()
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .flatMap((outcome) =>
+            (outgoing.get(nodeId) ?? [])
+              .filter((edge) => edge.target === outcome.resumeNodeId)
+              .map((edge) => ({ edge, outcome })),
+          )
+      : (outgoing.get(nodeId) ?? []).map((edge) => ({ edge, outcome: undefined }));
+
+    for (const { edge, outcome } of choices) {
       const isLoop = loopEdgeIds.has(edge.id);
       if (isLoop && traversedLoopEdgeIds.has(edge.id)) continue;
       const scenarioEdge: ScenarioEdge = {
@@ -1455,17 +1795,33 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
       const nextTraversedLoopEdgeIds = isLoop
         ? new Set([...traversedLoopEdgeIds, edge.id])
         : traversedLoopEdgeIds;
+      const nextHumanOutcomes =
+        outcome && response
+          ? [
+              ...humanOutcomes,
+              {
+                nodeId,
+                nodeLabel: node.label,
+                timing: node.hitl!.timing!,
+                responseType: response.type,
+                outcomeId: outcome.id,
+                outcomeLabel: outcome.label,
+                resumeNodeId: outcome.resumeNodeId,
+              },
+            ]
+          : humanOutcomes;
       walk(
         edge.target,
         nextPath,
         branch,
+        nextHumanOutcomes,
         [...traversedEdges, scenarioEdge],
         nextTraversedLoopEdgeIds,
       );
     }
   };
 
-  walk(start.id, [], [], [], new Set());
+  walk(start.id, [], [], [], [], new Set());
   return scenarios;
 }
 
@@ -1491,6 +1847,11 @@ SCENARIOS = ${JSON.stringify(
       id: scenario.id,
       path: scenario.orderedPath,
       terminal: scenario.expectedTerminalNode,
+      human_outcomes: scenario.humanOutcomes.map((outcome) => ({
+        node_id: outcome.nodeId,
+        outcome_id: outcome.outcomeId,
+        resume_node_id: outcome.resumeNodeId,
+      })),
     })),
     null,
     2,

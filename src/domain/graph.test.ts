@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyGraphOperations,
   enumerateScenarios,
+  graphOperationSchema,
   graphNodePatchSchema,
   researchIntakeRoutingGraph,
   sampleGraph,
@@ -12,6 +13,7 @@ import {
 import {
   buildGraphContractDownload,
   buildGraphScenariosDownload,
+  buildPythonTestsDownload,
 } from '../adapters/exports/downloads';
 
 describe('routing edge semantics', () => {
@@ -26,10 +28,26 @@ describe('routing edge semantics', () => {
     }
 
     ai.participation = { internalTools: true };
-    ai.hitl = { enabled: true, timing: 'before', inputType: 'approval' };
+    ai.hitl = {
+      enabled: true,
+      timing: 'before',
+      response: {
+        type: 'approval',
+        allowedOutcomes: [
+          { id: 'approve', label: 'Approve billing', resumeNodeId: 'billing' },
+          { id: 'request-changes', label: 'Request changes', resumeNodeId: 'diagnostic' },
+          { id: 'reject', label: 'Reject', resumeNodeId: 'human' },
+        ],
+      },
+    };
+    ai.sensitive = {
+      target: 'Refund decision',
+      authorization: 'Billing operator',
+      approvalRequired: false,
+      idempotency: 'No external mutation',
+    };
     ai.modifiers = {
       guardrail: true,
-      sensitiveSideEffect: true,
       storeRead: true,
       storeWrite: true,
       retryFallback: true,
@@ -44,6 +62,7 @@ describe('routing edge semantics', () => {
       executor: 'ai',
       participation: { internalTools: true },
       hitl: { enabled: true, timing: 'before' },
+      sensitive: { target: 'Refund decision', approvalRequired: false },
       modifiers: { storeRead: true, storeWrite: true, readiness: 'degraded' },
     });
     expect(human.executor).toBe('human');
@@ -55,6 +74,72 @@ describe('routing edge semantics', () => {
     };
     legacyKind.nodes.find((node) => node.id === 'classifier')!.kind = 'agent';
     expect(workflowGraphSchema.safeParse(legacyKind).success).toBe(false);
+
+    const duplicateSensitiveTruth = structuredClone(graph) as unknown as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    duplicateSensitiveTruth.nodes.find((node) => node.id === 'classifier')!.modifiers = {
+      sensitiveSideEffect: true,
+    };
+    expect(workflowGraphSchema.safeParse(duplicateSensitiveTruth).success).toBe(false);
+  });
+
+  it('validates complete HITL response contracts and explicit sensitive approval gates', () => {
+    const invalid = structuredClone(sampleGraph);
+    const classifier = invalid.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected a Step fixture.');
+
+    classifier.hitl = {
+      enabled: true,
+      timing: 'inside',
+      response: {
+        type: 'selection',
+        selectionChoices: [
+          { id: 'billing', label: 'Billing' },
+          { id: 'billing', label: 'Duplicate billing' },
+        ],
+        allowedOutcomes: [
+          { id: 'route', label: 'Route', resumeNodeId: 'missing-node' },
+          { id: 'route', label: 'Duplicate route', resumeNodeId: 'billing' },
+        ],
+      },
+    };
+    classifier.sensitive = {
+      target: 'Refund',
+      authorization: 'Billing operator',
+      approvalRequired: true,
+      idempotency: 'Refund idempotency key',
+    };
+
+    expect(validateGraph(invalid).map((entry) => entry.code)).toEqual(
+      expect.arrayContaining([
+        'HITL_OUTCOME_ID_DUPLICATE',
+        'HITL_OUTCOME_DESTINATION_INVALID',
+        'HITL_SELECTION_CHOICE_ID_DUPLICATE',
+        'SENSITIVE_APPROVAL_GATE_REQUIRED',
+      ]),
+    );
+    expect(classifier.hitl.timing).toBe('inside');
+    expect(classifier.hitl.response?.allowedOutcomes[0]?.resumeNodeId).toBe('missing-node');
+  });
+
+  it('requires a configured before approval gate for approval-required sensitive policy without adding one', () => {
+    const graph = structuredClone(sampleGraph);
+    const refund = graph.nodes.find((node) => node.id === 'refund');
+    if (!refund || refund.kind !== 'step') throw new Error('Expected a Step fixture.');
+    refund.sensitive = {
+      target: 'Customer refund',
+      authorization: 'Payments administrator',
+      approvalRequired: true,
+      idempotency: 'Provider idempotency key',
+    };
+
+    expect(validateGraph(graph)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'SENSITIVE_APPROVAL_GATE_REQUIRED', path: 'nodes.refund.sensitive.approvalRequired' }),
+      ]),
+    );
+    expect(refund.hitl).toBeUndefined();
   });
 
   it('normalizes route fields on canonical add and update operations', () => {
@@ -110,7 +195,14 @@ describe('routing edge semantics', () => {
       {
         type: 'update_node',
         nodeId: 'start',
-        patch: { executor: 'ai', hitl: { enabled: true } },
+        patch: {
+          sensitive: {
+            target: 'Structural mutation',
+            authorization: 'Nobody',
+            approvalRequired: false,
+            idempotency: 'Not applicable',
+          },
+        },
       },
     ]);
 
@@ -118,6 +210,31 @@ describe('routing edge semantics', () => {
       expect.objectContaining({ code: 'STEP_FIELDS_REQUIRE_STEP', path: 'operations.0' }),
     ]);
     expect(applied.graph).toEqual(original);
+  });
+
+  it('uses null as an operation-only request to remove an existing sensitive policy', () => {
+    const original = structuredClone(sampleGraph);
+    const classifier = original.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected a Step fixture.');
+    classifier.sensitive = {
+      target: 'Customer refund',
+      authorization: 'Payments administrator',
+      approvalRequired: false,
+      idempotency: 'Provider idempotency key',
+    };
+
+    const operation = {
+      type: 'update_node' as const,
+      nodeId: 'classifier',
+      patch: { sensitive: null },
+    };
+    expect(graphOperationSchema.safeParse(operation).success).toBe(true);
+
+    const applied = applyGraphOperations(original, [operation]);
+    expect(applied.errors).toEqual([]);
+    expect(applied.graph.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('sensitive');
+    const roundTripped = workflowGraphSchema.parse(JSON.parse(JSON.stringify(applied.graph)));
+    expect(roundTripped.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('sensitive');
   });
 
   it('keeps the Research Intake topology valid with commands and a derived return loop', () => {
@@ -310,5 +427,50 @@ describe('routing edge semantics', () => {
     expect(JSON.parse(buildGraphScenariosDownload(researchIntakeRoutingGraph, scenarios).content).scenarios).toEqual(
       scenarios,
     );
+  });
+
+  it('enumerates configured human outcomes in stable order through only their canonical outgoing edges', () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected a Step fixture.');
+    classifier.hitl = {
+      enabled: true,
+      timing: 'before',
+      response: {
+        type: 'approval',
+        allowedOutcomes: [
+          { id: 'request-changes', label: 'Request changes', resumeNodeId: 'diagnostic' },
+          { id: 'approve', label: 'Approve', resumeNodeId: 'billing' },
+          { id: 'reject', label: 'Reject', resumeNodeId: 'human' },
+        ],
+      },
+    };
+
+    const scenarios = enumerateScenarios(graph);
+    expect(scenarios).toEqual(enumerateScenarios(graph));
+    expect(scenarios.map((scenario) => scenario.humanOutcomes[0]?.outcomeId)).toEqual([
+      'approve',
+      'reject',
+      'request-changes',
+    ]);
+    expect(scenarios).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          orderedPath: ['start', 'classifier', 'billing', 'refund', 'end'],
+          humanOutcomes: [
+            expect.objectContaining({
+              outcomeId: 'approve',
+              responseType: 'approval',
+              resumeNodeId: 'billing',
+            }),
+          ],
+        }),
+      ]),
+    );
+    expect(JSON.parse(buildGraphScenariosDownload(graph, scenarios).content).scenarios).toEqual(scenarios);
+    expect(JSON.parse(buildGraphContractDownload(graph).content).nodes.find((node: { id: string }) => node.id === 'classifier')).toMatchObject({
+      hitl: classifier.hitl,
+    });
+    expect(buildPythonTestsDownload(graph, scenarios).content).toContain('"human_outcomes"');
   });
 });
