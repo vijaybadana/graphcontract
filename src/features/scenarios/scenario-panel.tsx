@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 
 import {
   buildGraphContractDownload,
@@ -52,7 +52,7 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
 function DownloadLink({ artifact }: { artifact: DownloadArtifact }) {
   const anchorRef = useRef<HTMLAnchorElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const url = URL.createObjectURL(new Blob([artifact.content], { type: artifact.type }));
     const anchor = anchorRef.current;
     if (!anchor) {
