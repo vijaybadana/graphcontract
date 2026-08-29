@@ -127,7 +127,6 @@ export function GraphWorkspace() {
     inspectorRequested: showInspector,
     compactPreference: compactPanelPreference,
     proposalPending: Boolean(proposal),
-    scenariosActive: rightTab === 'scenarios' && scenarios.length > 0,
   });
   const inspectorTab = proposal || selection.primary ? 'review' : rightTab;
   const toggleSubgraphCollapse = useCallback(

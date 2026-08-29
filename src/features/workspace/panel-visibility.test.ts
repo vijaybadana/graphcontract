@@ -10,7 +10,6 @@ describe('resolveWorkspacePanelVisibility', () => {
       inspectorRequested: true,
       compactPreference: null,
       proposalPending: false,
-      scenariosActive: false,
     });
     const selectionPreservedAfterClose = resolveWorkspacePanelVisibility({
       compact: false,
@@ -18,7 +17,6 @@ describe('resolveWorkspacePanelVisibility', () => {
       inspectorRequested: false,
       compactPreference: null,
       proposalPending: false,
-      scenariosActive: false,
     });
 
     expect(selectionOpened).toEqual({ paletteVisible: true, inspectorVisible: true });
@@ -32,7 +30,6 @@ describe('resolveWorkspacePanelVisibility', () => {
       inspectorRequested: true,
       compactPreference: 'inspector',
       proposalPending: false,
-      scenariosActive: false,
     });
     const paletteReopened = resolveWorkspacePanelVisibility({
       compact: true,
@@ -40,7 +37,6 @@ describe('resolveWorkspacePanelVisibility', () => {
       inspectorRequested: false,
       compactPreference: 'palette',
       proposalPending: false,
-      scenariosActive: false,
     });
 
     expect(selectionOpened).toEqual({ paletteVisible: false, inspectorVisible: true });
@@ -55,8 +51,27 @@ describe('resolveWorkspacePanelVisibility', () => {
         inspectorRequested: false,
         compactPreference: 'palette',
         proposalPending: true,
-        scenariosActive: false,
       }),
     ).toEqual({ paletteVisible: false, inspectorVisible: true });
+  });
+
+  it('allows an explicitly opened scenarios panel to close and reopen', () => {
+    const scenarioOpened = resolveWorkspacePanelVisibility({
+      compact: false,
+      paletteRequested: true,
+      inspectorRequested: true,
+      compactPreference: null,
+      proposalPending: false,
+    });
+    const scenarioClosed = resolveWorkspacePanelVisibility({
+      compact: false,
+      paletteRequested: true,
+      inspectorRequested: false,
+      compactPreference: null,
+      proposalPending: false,
+    });
+
+    expect(scenarioOpened).toEqual({ paletteVisible: true, inspectorVisible: true });
+    expect(scenarioClosed).toEqual({ paletteVisible: true, inspectorVisible: false });
   });
 });
