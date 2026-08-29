@@ -28,7 +28,8 @@ test('collapsed proxy edges cannot delete the canonical boundary connection', as
     'rf__edge-subgraph-proxy:research-outer-start:research-supervisor',
   );
 
-  await proxy.click();
+  await proxy.focus();
+  await proxy.press('Enter');
   await expect(app.getByRole('button', { name: 'Delete selection' })).toBeDisabled();
   await app.keyboard.press('Delete');
   expect(

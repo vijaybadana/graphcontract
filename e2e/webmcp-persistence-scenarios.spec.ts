@@ -104,7 +104,7 @@ test('pending proposal locks palette authoring and freeze without changing accep
     updateClassifier('Locked Preview', accepted.graph.updatedAt),
   );
 
-  for (const name of ['Agent', 'Action / function', 'Tool', 'Human Input', 'Subgraph']) {
+  for (const name of ['Step', 'Agent', 'Action', 'Tool', 'Human review', 'Subgraph']) {
     await expect(app.getByRole('button', { name, exact: true })).toBeDisabled();
   }
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();

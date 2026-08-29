@@ -3,7 +3,9 @@ import { chooseInspectorOption, readGraph } from './helpers/graph';
 
 test('routing mode transitions update semantics while keeping authored route fields stable', async ({ app }) => {
   await loadResearchIntake(app);
-  await app.getByTestId('rf__edge-brief-supervisor').click();
+  const route = app.getByTestId('rf__edge-brief-supervisor');
+  await route.focus();
+  await route.press('Enter');
 
   await chooseInspectorOption(app, 'Routing mode', 'Command');
   await expect(app.locator('[aria-label="Command edge, invalid"]')).toHaveCount(1);

@@ -171,15 +171,15 @@ test('keyboard duplicate, delete, undo, and redo keep graph counts truthful', as
 test('palette search filters components and announces a useful empty state', async ({ app }) => {
   const search = app.getByRole('searchbox', { name: 'Search components' });
   await search.fill('human');
-  await expect(app.getByRole('button', { name: 'Human Input' })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Human review' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Agent', exact: true })).toHaveCount(0);
-  await expect(app.getByText('1 of 7 components shown', { exact: true })).toBeAttached();
+  await expect(app.getByText('1 of 8 components shown', { exact: true })).toBeAttached();
 
   await search.fill('not-a-component');
   await expect(
     app.getByRole('status').filter({ hasText: 'No components match “not-a-component”.' }),
   ).toBeVisible();
-  await expect(app.getByText('0 of 7 components shown', { exact: true })).toBeAttached();
+  await expect(app.getByText('0 of 8 components shown', { exact: true })).toBeAttached();
 });
 
 test('node and edge focus targets expose semantic identity', async ({ app }) => {
