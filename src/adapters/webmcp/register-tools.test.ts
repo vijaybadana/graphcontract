@@ -13,11 +13,14 @@ type RegisteredTool = {
 };
 
 type JsonSchema = {
+  type?: string;
   required?: string[];
   properties?: Record<string, JsonSchema>;
   oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
   const?: string | boolean;
   enum?: string[];
+  minLength?: number;
   additionalProperties?: boolean;
   description?: string;
 };
@@ -96,7 +99,7 @@ describe('WebMCP adapter', () => {
     const startNode = addNodeVariants.find((variant) => nodeKind(variant) === 'start');
     const stepNode = addNodeVariants.find((variant) => nodeKind(variant) === 'step');
     const endNode = addNodeVariants.find((variant) => nodeKind(variant) === 'end');
-    const stepOnlyProperties = ['executor', 'participation', 'hitl', 'modifiers'];
+    const stepOnlyProperties = ['executor', 'participation', 'hitl', 'sensitive', 'modifiers'];
 
     expect(proposalSchema.required).toEqual(['operations', 'rationale']);
     expect(operationTypes).toEqual(expect.arrayContaining([
@@ -119,7 +122,6 @@ describe('WebMCP adapter', () => {
       modifiers: {
         properties: {
           guardrail: { const: true },
-          sensitiveSideEffect: { const: true },
           storeRead: { const: true },
           storeWrite: { const: true },
           retryFallback: { const: true },
@@ -130,9 +132,29 @@ describe('WebMCP adapter', () => {
     });
     expect(stepNode?.properties?.hitl?.properties).toMatchObject({
       enabled: { type: 'boolean' },
-      timing: { enum: ['before', 'after', 'conditional'] },
-      inputType: { enum: ['approval', 'text', 'selection'] },
-      condition: { type: 'string' },
+      timing: { enum: ['before', 'inside', 'after'] },
+      response: {
+        required: ['type', 'allowedOutcomes'],
+        properties: {
+          type: { enum: ['approval', 'text', 'selection'] },
+          selectionChoices: {
+            items: { required: ['id', 'label'] },
+          },
+          allowedOutcomes: {
+            items: { required: ['id', 'label', 'resumeNodeId'] },
+          },
+        },
+      },
+      activation: { properties: { reason: { type: 'string' } } },
+    });
+    expect(stepNode?.properties?.sensitive).toMatchObject({
+      required: ['target', 'authorization', 'approvalRequired', 'idempotency'],
+      properties: {
+        target: { type: 'string', minLength: 1 },
+        authorization: { type: 'string', minLength: 1 },
+        approvalRequired: { type: 'boolean' },
+        idempotency: { type: 'string', minLength: 1 },
+      },
     });
     for (const property of stepOnlyProperties) {
       expect(startNode?.properties).not.toHaveProperty(property);
@@ -142,11 +164,16 @@ describe('WebMCP adapter', () => {
       executor: { enum: ['deterministic', 'ai', 'tool', 'human'] },
       participation: { properties: { internalTools: { const: true } } },
       hitl: expect.any(Object),
+      sensitive: {
+        anyOf: [expect.any(Object), { type: 'null' }],
+      },
       modifiers: expect.any(Object),
     });
     expect(updateNode?.properties?.patch?.description).toContain('Step-only');
     expect(proposalTool.description).toContain('Start, Step, or End');
     expect(proposalTool.description).toContain('requires an executor');
+    expect(proposalTool.description).toContain('before/inside/after');
+    expect(proposalTool.description).toContain('respond, resume, freeze');
     expect(addEdge?.properties?.edge?.properties).toMatchObject({
       source: { type: 'string' },
       target: { type: 'string' },
@@ -166,6 +193,186 @@ describe('WebMCP adapter', () => {
       'conditional',
       'command',
       'fallback',
+    ]);
+  });
+
+  it('submits complete v3 HITL and sensitive configuration only as a pending human review', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-30T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+    const before = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      {
+        registerTool: async (tool: RegisteredTool) => {
+          registered.set(tool.name, tool);
+        },
+      } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const response = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Configure the classifier gate before external review.',
+      expectedGraphUpdatedAt: before.updatedAt,
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'classifier',
+          patch: {
+            hitl: {
+              enabled: true,
+              timing: 'inside',
+              activation: { reason: 'Escalated support classification' },
+              response: {
+                type: 'selection',
+                selectionChoices: [
+                  { id: 'billing', label: 'Billing' },
+                  { id: 'technical', label: 'Technical' },
+                  { id: 'unknown', label: 'Escalate to human' },
+                ],
+                allowedOutcomes: [
+                  { id: 'billing', label: 'Route to billing', resumeNodeId: 'billing' },
+                  { id: 'technical', label: 'Route to diagnostics', resumeNodeId: 'diagnostic' },
+                  { id: 'unknown', label: 'Escalate', resumeNodeId: 'human' },
+                ],
+              },
+            },
+            sensitive: {
+              target: 'Support classification record',
+              authorization: 'Support lead',
+              approvalRequired: false,
+              idempotency: 'Classification revision identifier',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(state.proposal?.status).toBe('pending');
+    expect(state.graph).toEqual(before);
+    expect(state.graph.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('hitl');
+    expect([...registered.keys()]).toHaveLength(3);
+  });
+
+  it('keeps invalid approval-required sensitive proposals out of accepted state', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-30T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+    const before = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      { registerTool: async (tool: RegisteredTool) => { registered.set(tool.name, tool); } } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const response = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Try to require approval without configuring a gate.',
+      operations: [{
+        type: 'update_node',
+        nodeId: 'refund',
+        patch: {
+          sensitive: {
+            target: 'Customer refund',
+            authorization: 'Payments administrator',
+            approvalRequired: true,
+            idempotency: 'Provider idempotency key',
+          },
+        },
+      }],
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      proposal: {
+        status: 'invalid',
+        validationErrors: expect.arrayContaining([
+          expect.objectContaining({ code: 'SENSITIVE_APPROVAL_GATE_REQUIRED' }),
+        ]),
+      },
+    });
+    expect(state.graph).toEqual(before);
+    expect(state.graph.nodes.find((node) => node.id === 'refund')).not.toHaveProperty('hitl');
+  });
+
+  it('cannot bypass frozen or pending proposal authority through WebMCP', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-30T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.freezeGraph(service.createInitial()).state;
+    const frozenBefore = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      { registerTool: async (tool: RegisteredTool) => { registered.set(tool.name, tool); } } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const frozenResponse = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Attempt a frozen graph edit.',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Frozen change' } }],
+    });
+    expect(frozenResponse).toEqual({
+      ok: false,
+      error: { code: 'GRAPH_FROZEN', message: 'Unfreeze the graph before requesting changes.' },
+    });
+    expect(state.graph).toEqual(frozenBefore);
+
+    state = service.createInitial();
+    const first = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Await human review.',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } }],
+    });
+    const pendingBefore = structuredClone(state.graph);
+    const pendingResponse = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Attempt to supersede the pending proposal.',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Bypass review' } }],
+    });
+
+    expect(first).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(pendingResponse).toEqual({
+      ok: false,
+      error: {
+        code: 'PENDING_PROPOSAL_EXISTS',
+        message: 'Review the current proposal before submitting another one.',
+      },
+    });
+    expect(state.graph).toEqual(pendingBefore);
+    expect([...registered.keys()]).toEqual([
+      'get_graph',
+      'propose_graph_changes',
+      'get_branch_scenarios',
     ]);
   });
 

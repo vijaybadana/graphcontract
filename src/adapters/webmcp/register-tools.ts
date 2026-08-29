@@ -57,11 +57,73 @@ const subgraphSchema = {
 
 const hitlSchema = {
   type: 'object',
+  description:
+    'Optional human-in-the-loop Step modifier. An enabled gate needs a timing and response contract in the final candidate; the proposal is validated after all operations are applied.',
+  required: ['enabled'],
   properties: {
     enabled: { type: 'boolean' },
-    timing: { enum: ['before', 'after', 'conditional'] },
-    inputType: { enum: ['approval', 'text', 'selection'] },
-    condition: { type: 'string' },
+    timing: {
+      enum: ['before', 'inside', 'after'],
+      description: 'Gate boundary: before execution, inside execution, or after result production.',
+    },
+    response: {
+      type: 'object',
+      description:
+        'Human response contract. Each allowed outcome resumes only through an existing outgoing edge from this Step; this proposal cannot create a response or resume a runtime.',
+      required: ['type', 'allowedOutcomes'],
+      properties: {
+        type: {
+          enum: ['approval', 'text', 'selection'],
+          description: 'The response payload expected from the human.',
+        },
+        selectionChoices: {
+          type: 'array',
+          description: 'Choices shown to a human for a selection response; omit for approval and text responses.',
+          items: {
+            type: 'object',
+            required: ['id', 'label'],
+            properties: { id: { type: 'string', minLength: 1 }, label: { type: 'string', minLength: 1 } },
+            additionalProperties: false,
+          },
+        },
+        allowedOutcomes: {
+          type: 'array',
+          description:
+            'One or more semantic human outcomes. resumeNodeId must target a canonical outgoing edge from the gated Step in the completed candidate.',
+          items: {
+            type: 'object',
+            required: ['id', 'label', 'resumeNodeId'],
+            properties: {
+              id: { type: 'string', minLength: 1 },
+              label: { type: 'string', minLength: 1 },
+              resumeNodeId: { type: 'string', minLength: 1 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    activation: {
+      type: 'object',
+      description: 'Optional reason for activating the gate; it does not change executor ownership.',
+      properties: { reason: { type: 'string', minLength: 1 } },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const sensitiveEffectPolicySchema = {
+  type: 'object',
+  description:
+    'Independent sensitive-effect policy. Its presence marks the Step Sensitive; it never creates a HITL gate. approvalRequired needs an eligible before approval gate in the completed candidate.',
+  required: ['target', 'authorization', 'approvalRequired', 'idempotency'],
+  properties: {
+    target: { type: 'string', minLength: 1 },
+    authorization: { type: 'string', minLength: 1 },
+    approvalRequired: { type: 'boolean' },
+    idempotency: { type: 'string', minLength: 1 },
   },
   additionalProperties: false,
 };
@@ -76,7 +138,6 @@ const stepModifierSchema = {
   type: 'object',
   properties: {
     guardrail: { const: true },
-    sensitiveSideEffect: { const: true },
     storeRead: { const: true },
     storeWrite: { const: true },
     retryFallback: { const: true },
@@ -97,6 +158,7 @@ const stepProperties = {
   executor: { enum: ['deterministic', 'ai', 'tool', 'human'] },
   participation: stepParticipationSchema,
   hitl: hitlSchema,
+  sensitive: sensitiveEffectPolicySchema,
   modifiers: stepModifierSchema,
 };
 
@@ -105,9 +167,14 @@ const nodePatchSchema = {
   properties: {
     ...nodeBaseProperties,
     ...stepProperties,
+    sensitive: {
+      anyOf: [sensitiveEffectPolicySchema, { type: 'null' }],
+      description:
+        'Sets the independent sensitive-effect policy, or null to remove it from an existing Step. Removal is still review-only.',
+    },
   },
   description:
-    'Updates an existing node. executor, participation, hitl, and modifiers are Step-only; Start and End nodes accept only label, description, position, and config changes.',
+    'Updates an existing node. executor, participation, hitl, sensitive, and modifiers are Step-only; Start and End nodes accept only label, description, position, and config changes.',
   // Parent membership is intentionally a dedicated proposal operation.
   additionalProperties: false,
 };
@@ -304,7 +371,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only proposal. Nodes are exactly Start, Step, or End; every added Step requires an executor, while participation.internalTools, HITL, and modifiers are independent Step semantics. Start and End never accept Step-only fields. Operations may add or update canonical source-to-target edges as normal, conditional, command, or fallback routes; a return source/target connection forms derived loop topology and is never a loop mode. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, freeze, or directly modify the accepted graph.',
+          'Creates a review-only proposal. Nodes are exactly Start, Step, or End; every added Step requires an executor. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Start and End never accept Step-only fields. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, or directly modify accepted state.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],
