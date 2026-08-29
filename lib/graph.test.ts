@@ -32,7 +32,7 @@ describe('graph validation', () => {
     expect(validateGraph(graph).some((entry) => entry.code === 'MIXED_ROUTING')).toBe(true);
   });
 
-  it('rejects cycles', () => {
+  it('allows topology cycles while rejecting End outgoing routes', () => {
     const graph = cloneSample();
     graph.edges.push({
       id: 'end-classifier',
@@ -42,7 +42,7 @@ describe('graph validation', () => {
     });
 
     const codes = validateGraph(graph).map((entry) => entry.code);
-    expect(codes).toContain('CYCLE_DETECTED');
+    expect(codes).not.toContain('CYCLE_DETECTED');
     expect(codes).toContain('END_HAS_OUTGOING');
   });
 
