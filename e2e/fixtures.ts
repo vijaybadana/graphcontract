@@ -2,6 +2,10 @@ import { expect, test as base, type Page, type TestInfo } from '@playwright/test
 
 type BrowserTool = {
   name: string;
+  title?: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
   execute: (input: unknown) => Promise<unknown>;
 };
 
@@ -105,6 +109,23 @@ export async function webMcpToolNames(page: Page): Promise<string[]> {
     }).__graphContractWebMcpTools;
     return Object.keys(registry ?? {}).sort();
   });
+}
+
+export async function webMcpToolMetadata(page: Page, name: string) {
+  return page.evaluate((toolName) => {
+    const registry = (window as Window & {
+      __graphContractWebMcpTools?: Record<string, BrowserTool>;
+    }).__graphContractWebMcpTools;
+    const tool = registry?.[toolName];
+    if (!tool) throw new Error(`WebMCP tool not registered: ${toolName}`);
+    return {
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
+    };
+  }, name);
 }
 
 export async function callWebMcpTool<Result>(
