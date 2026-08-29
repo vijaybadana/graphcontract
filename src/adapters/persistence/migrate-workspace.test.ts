@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { createWorkspaceService } from '@/src/application/workspace';
-import { researchIntakeRoutingGraph, sampleGraph } from '@/src/domain';
+import {
+  createProposal,
+  enumerateScenarios,
+  researchIntakeRoutingGraph,
+  sampleGraph,
+  validateGraph,
+} from '@/src/domain';
 import { migrateWorkspaceV3 } from './migrate-workspace';
 
 const service = createWorkspaceService({
@@ -10,16 +16,61 @@ const service = createWorkspaceService({
 });
 
 describe('workspace persistence migration', () => {
-  it('replaces an invalid saved demo with the valid initial workflow', () => {
+  it('preserves schema-safe incomplete drafts for ordinary validation', () => {
     const invalid = structuredClone(sampleGraph);
-    invalid.edges.push({ id: 'refund-extra', source: 'refund', target: 'end', mode: 'normal' });
+    invalid.nodes.push({
+      id: 'unfinished-agent',
+      kind: 'agent',
+      label: 'Unfinished agent',
+      position: { x: 900, y: 120 },
+    });
+    invalid.edges.push({
+      id: 'unfinished-edge',
+      source: 'diagnostic',
+      target: 'not-yet-created',
+      mode: 'normal',
+    });
+    invalid.subgraphs.push({
+      id: 'empty-subgraph',
+      label: 'Unfinished subgraph',
+      position: { x: 900, y: 280 },
+      dimensions: { width: 320, height: 200 },
+      collapsed: false,
+    });
 
     const migrated = migrateWorkspaceV3(
       { graph: invalid, proposal: null, scenarios: [] },
       service.createInitial,
     );
 
-    expect(migrated.graph?.edges).toHaveLength(sampleGraph.edges.length);
+    expect(migrated.graph).toMatchObject({
+      id: sampleGraph.id,
+      nodes: expect.arrayContaining([expect.objectContaining({ id: 'unfinished-agent' })]),
+      edges: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'unfinished-edge',
+          source: 'diagnostic',
+          target: 'not-yet-created',
+        }),
+      ]),
+      subgraphs: expect.arrayContaining([expect.objectContaining({ id: 'empty-subgraph' })]),
+    });
+    expect(validateGraph(migrated.graph!).map((entry) => entry.code)).toEqual(
+      expect.arrayContaining(['MISSING_EDGE_NODE', 'OUTGOING_REQUIRED', 'SUBGRAPH_START_COUNT']),
+    );
+  });
+
+  it('falls back only when the saved graph shape cannot be parsed', () => {
+    const migrated = migrateWorkspaceV3(
+      { graph: { ...sampleGraph, nodes: 'corrupt' }, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph).toMatchObject({
+      id: sampleGraph.id,
+      nodes: sampleGraph.nodes,
+      edges: sampleGraph.edges,
+    });
   });
 
   it('renames the old generic demo action without changing its identity', () => {
@@ -39,9 +90,22 @@ describe('workspace persistence migration', () => {
   it('preserves valid pre-command graph data and supplies its empty subgraph collection', () => {
     const legacy = structuredClone(sampleGraph);
     delete (legacy as { subgraphs?: unknown }).subgraphs;
+    const proposalResult = createProposal(sampleGraph, {
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'billing',
+          patch: { description: 'Keep the saved review state.' },
+        },
+      ],
+      rationale: 'Keep the saved review state.',
+    });
+    expect(proposalResult.proposal).toBeDefined();
+    const proposal = proposalResult.proposal!;
+    const scenarios = enumerateScenarios(sampleGraph);
 
     const migrated = migrateWorkspaceV3(
-      { graph: legacy, proposal: null, scenarios: [] },
+      { graph: legacy, proposal, scenarios },
       service.createInitial,
     );
 
@@ -51,6 +115,12 @@ describe('workspace persistence migration', () => {
       edges: sampleGraph.edges,
       subgraphs: [],
     });
+    expect(migrated.proposal).toMatchObject({
+      id: proposal.id,
+      status: 'pending',
+      operations: proposal.operations,
+    });
+    expect(migrated.scenarios).toEqual(scenarios);
   });
 
   it('keeps a persisted Command graph with a topology-derived loop', () => {

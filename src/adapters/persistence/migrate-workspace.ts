@@ -1,5 +1,5 @@
 import { WorkspaceCore } from '@/src/application/workspace';
-import { validateGraph, workflowGraphSchema } from '@/src/domain';
+import { workflowGraphSchema } from '@/src/domain';
 
 type PersistedWorkspace = Partial<WorkspaceCore> & Record<string, unknown>;
 
@@ -9,9 +9,16 @@ export function migrateWorkspaceV3(
   persistedState: unknown,
   createInitial: () => WorkspaceCore,
 ): PersistedWorkspace {
+  if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState)) {
+    return createInitial();
+  }
+
   const persisted = persistedState as PersistedWorkspace;
   const parsed = workflowGraphSchema.safeParse(persisted.graph);
-  if (!parsed.success || validateGraph(parsed.data).length > 0) {
+  // Rehydration only decides whether the saved shape is recoverable. A draft
+  // may legitimately be incomplete while its author is still editing it;
+  // canonical validation remains the ordinary derived contract-status signal.
+  if (!parsed.success) {
     return createInitial();
   }
 

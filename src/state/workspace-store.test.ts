@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { sampleGraph, validateGraph } from '@/src/domain';
 import type { WorkspaceSelection } from './workspace-store';
 
 const persisted = new Map<string, string>();
@@ -121,5 +122,51 @@ describe('workspace subgraph actions', () => {
 
     expect(billing).toMatchObject({ parentId: subgraphId, position: { x: 220, y: 110 } });
     expect(useGraphStore.getState().past).toHaveLength(historyBeforeDrop + 1);
+  });
+});
+
+describe('workspace persistence reload', () => {
+  it('rehydrates an incomplete, schema-safe draft instead of replacing it with the sample', async () => {
+    const draft = structuredClone(sampleGraph);
+    draft.nodes.push({
+      id: 'unfinished-agent',
+      kind: 'agent',
+      label: 'Unfinished agent',
+      position: { x: 900, y: 120 },
+    });
+    draft.edges.push({
+      id: 'unfinished-edge',
+      source: 'diagnostic',
+      target: 'not-yet-created',
+      mode: 'normal',
+    });
+    draft.subgraphs.push({
+      id: 'empty-subgraph',
+      label: 'Unfinished subgraph',
+      position: { x: 900, y: 280 },
+      dimensions: { width: 320, height: 200 },
+      collapsed: false,
+    });
+    persisted.set(
+      'graphcontract-workspace-v1',
+      JSON.stringify({ state: { graph: draft, proposal: null, scenarios: [] }, version: 2 }),
+    );
+
+    await useGraphStore.persist.rehydrate();
+
+    expect(useGraphStore.getState().graph).toMatchObject({
+      nodes: expect.arrayContaining([expect.objectContaining({ id: 'unfinished-agent' })]),
+      edges: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'unfinished-edge',
+          source: 'diagnostic',
+          target: 'not-yet-created',
+        }),
+      ]),
+      subgraphs: expect.arrayContaining([expect.objectContaining({ id: 'empty-subgraph' })]),
+    });
+    expect(validateGraph(useGraphStore.getState().graph).map((entry) => entry.code)).toEqual(
+      expect.arrayContaining(['MISSING_EDGE_NODE', 'OUTGOING_REQUIRED', 'SUBGRAPH_START_COUNT']),
+    );
   });
 });
