@@ -2,120 +2,385 @@
 
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import {
-  Flag,
-  HandPalm,
-  Lightning,
-  Play,
-  Robot,
-  Wrench,
+  ArrowsClockwiseIcon,
+  CubeIcon,
+  DatabaseIcon,
+  FlagCheckeredIcon,
+  LockSimpleIcon,
+  PauseCircleIcon,
+  PersonSimpleIcon,
+  PlayCircleIcon,
+  RobotIcon,
+  ShieldCheckIcon,
+  SquaresFourIcon,
+  WarningCircleIcon,
+  WrenchIcon,
 } from '@phosphor-icons/react';
+import { useId, useState } from 'react';
 
 import { GraphNode } from '@/src/domain';
 import './contract-node.css';
 
+export type StepModifierInspectorSection =
+  | 'executor'
+  | 'participation'
+  | 'hitl'
+  | 'modifiers';
+
+/** Stable presentation metadata for the Package 1 inspector seam. */
+export type StepModifierPresentation = {
+  id:
+    | 'executor'
+    | 'internalTools'
+    | 'hitl'
+    | 'guardrail'
+    | 'sensitiveSideEffect'
+    | 'storeRead'
+    | 'storeWrite'
+    | 'retryFallback'
+    | 'opaque'
+    | 'readiness';
+  label: string;
+  accessibleLabel: string;
+  tone:
+    | 'ai'
+    | 'tool'
+    | 'human'
+    | 'guardrail'
+    | 'sensitive'
+    | 'store'
+    | 'retry'
+    | 'opaque'
+    | 'readiness';
+  inspectorSection: StepModifierInspectorSection;
+};
+
 export type ContractNodeData = GraphNode & {
   [key: string]: unknown;
+  /** Review-only state projected from a pending graph proposal. */
   proposalState?: 'added' | 'updated' | 'removed';
+  /** Projection-only validation state; canonical issues remain domain-owned. */
+  invalid?: boolean;
+  /** Projection-only frozen presentation; editing authority remains workspace-owned. */
+  frozen?: boolean;
   /** Projection-only warning for a node visually inside, but not assigned to, a subgraph. */
   outsideSubgraph?: boolean;
+  /**
+   * The projection publishes an inspector target without owning navigation or
+   * mutation. Package 1 integration can attach the corresponding focus path.
+   */
+  onModifierActivate?: (
+    nodeId: string,
+    modifier: StepModifierPresentation,
+  ) => void;
 };
 
 export type ContractFlowNode = Node<ContractNodeData, 'contractNode'>;
 
 const kindLabel: Record<GraphNode['kind'], string> = {
   start: 'Start',
-  agent: 'Agent',
-  action: 'Action',
-  tool: 'Tool',
-  human_input: 'Human input',
+  step: 'Step',
   end: 'End',
 };
 
-function nodeKindBadge(node: GraphNode): string {
-  // The existing kind/config seam already expresses the Supervisor's intent;
-  // keep it compact instead of introducing a second taxonomy.
-  if (node.kind === 'agent' && node.config?.capability === 'ai') return 'AI';
-  return kindLabel[node.kind];
+function executorPresentation(
+  node: Extract<GraphNode, { kind: 'step' }>,
+): StepModifierPresentation | null {
+  switch (node.executor) {
+    case 'ai':
+      return {
+        id: 'executor',
+        label: 'AI',
+        accessibleLabel: 'AI executor',
+        tone: 'ai',
+        inspectorSection: 'executor',
+      };
+    case 'tool':
+      return {
+        id: 'executor',
+        label: 'Tool',
+        accessibleLabel: 'Tool executor',
+        tone: 'tool',
+        inspectorSection: 'executor',
+      };
+    case 'human':
+      return {
+        id: 'executor',
+        label: 'Human',
+        accessibleLabel: 'Human executor',
+        tone: 'human',
+        inspectorSection: 'executor',
+      };
+    // Deterministic work is the unmodified Step baseline, not a badge.
+    case 'deterministic':
+      return null;
+  }
 }
 
-function NodeKindIcon({ kind }: { kind: GraphNode['kind'] }) {
-  const iconProps = { 'aria-hidden': true, size: 17, weight: 'bold' as const };
+/**
+ * Returns semantic Step presentation in a stable order. Proposal state is
+ * deliberately absent: review diffs are an independent canvas overlay.
+ */
+export function stepModifierPresentations(
+  node: Extract<GraphNode, { kind: 'step' }>,
+): StepModifierPresentation[] {
+  const executor = executorPresentation(node);
+  const modifiers: StepModifierPresentation[] = executor ? [executor] : [];
 
-  switch (kind) {
-    case 'start':
-      return <Play {...iconProps} />;
-    case 'agent':
-      return <Robot {...iconProps} />;
-    case 'action':
-      return <Lightning {...iconProps} />;
-    case 'tool':
-      return <Wrench {...iconProps} />;
-    case 'human_input':
-      return <HandPalm {...iconProps} />;
-    case 'end':
-      return <Flag {...iconProps} />;
+  if (node.participation?.internalTools) {
+    modifiers.push({
+      id: 'internalTools',
+      label: 'Tools',
+      accessibleLabel: 'Internal tools',
+      tone: 'tool',
+      inspectorSection: 'participation',
+    });
   }
+  if (node.hitl?.enabled) {
+    modifiers.push({
+      id: 'hitl',
+      label: 'HITL',
+      accessibleLabel: `Human-in-the-loop gate, ${node.hitl.timing ?? 'before'} execution`,
+      tone: 'human',
+      inspectorSection: 'hitl',
+    });
+  }
+  if (node.modifiers?.guardrail) {
+    modifiers.push({
+      id: 'guardrail',
+      label: 'Guard',
+      accessibleLabel: 'Guardrail',
+      tone: 'guardrail',
+      inspectorSection: 'modifiers',
+    });
+  }
+  if (node.modifiers?.sensitiveSideEffect) {
+    modifiers.push({
+      id: 'sensitiveSideEffect',
+      label: 'Sensitive',
+      accessibleLabel: 'Sensitive side effect',
+      tone: 'sensitive',
+      inspectorSection: 'modifiers',
+    });
+  }
+  if (node.modifiers?.storeRead) {
+    modifiers.push({
+      id: 'storeRead',
+      label: 'Store R',
+      accessibleLabel: 'Store read',
+      tone: 'store',
+      inspectorSection: 'modifiers',
+    });
+  }
+  if (node.modifiers?.storeWrite) {
+    modifiers.push({
+      id: 'storeWrite',
+      label: 'Store W',
+      accessibleLabel: 'Store write',
+      tone: 'store',
+      inspectorSection: 'modifiers',
+    });
+  }
+  if (node.modifiers?.retryFallback) {
+    modifiers.push({
+      id: 'retryFallback',
+      label: 'Retry',
+      accessibleLabel: 'Retry or fallback',
+      tone: 'retry',
+      inspectorSection: 'modifiers',
+    });
+  }
+  if (node.modifiers?.opaque) {
+    modifiers.push({
+      id: 'opaque',
+      label: 'Opaque',
+      accessibleLabel: 'Opaque or prebuilt',
+      tone: 'opaque',
+      inspectorSection: 'modifiers',
+    });
+  }
+  if (node.modifiers?.readiness) {
+    const label = node.modifiers.readiness === 'degraded' ? 'Degraded' : 'Unready';
+    modifiers.push({
+      id: 'readiness',
+      label,
+      accessibleLabel: `${label} readiness`,
+      tone: 'readiness',
+      inspectorSection: 'modifiers',
+    });
+  }
+
+  return modifiers;
+}
+
+function NodeKindIcon({ node }: { node: GraphNode }) {
+  const iconProps = { 'aria-hidden': true, size: 18, weight: 'bold' as const };
+  if (node.kind === 'start') return <PlayCircleIcon {...iconProps} />;
+  if (node.kind === 'end') return <FlagCheckeredIcon {...iconProps} />;
+
+  switch (node.executor) {
+    case 'ai': return <RobotIcon {...iconProps} />;
+    case 'tool': return <WrenchIcon {...iconProps} />;
+    case 'human': return <PersonSimpleIcon {...iconProps} />;
+    case 'deterministic': return <SquaresFourIcon {...iconProps} />;
+  }
+}
+
+function ModifierIcon({ modifier }: { modifier: StepModifierPresentation }) {
+  const iconProps = { 'aria-hidden': true, size: 12, weight: 'bold' as const };
+  switch (modifier.id) {
+    case 'executor':
+      if (modifier.tone === 'ai') return <RobotIcon {...iconProps} />;
+      if (modifier.tone === 'tool') return <WrenchIcon {...iconProps} />;
+      return <PersonSimpleIcon {...iconProps} />;
+    case 'internalTools': return <WrenchIcon {...iconProps} />;
+    case 'hitl': return <PauseCircleIcon {...iconProps} />;
+    case 'guardrail': return <ShieldCheckIcon {...iconProps} />;
+    case 'sensitiveSideEffect': return <LockSimpleIcon {...iconProps} />;
+    case 'storeRead':
+    case 'storeWrite': return <DatabaseIcon {...iconProps} />;
+    case 'retryFallback': return <ArrowsClockwiseIcon {...iconProps} />;
+    case 'opaque': return <CubeIcon {...iconProps} />;
+    case 'readiness': return <WarningCircleIcon {...iconProps} />;
+  }
+}
+
+function ModifierChip({
+  modifier,
+  nodeId,
+  onActivate,
+}: {
+  modifier: StepModifierPresentation;
+  nodeId: string;
+  onActivate?: ContractNodeData['onModifierActivate'];
+}) {
+  return (
+    <button
+      type="button"
+      className={`contract-node-modifier-chip contract-node-modifier-chip--${modifier.tone} nodrag nopan`}
+      data-modifier-id={modifier.id}
+      aria-label={`${modifier.accessibleLabel}. Focus ${modifier.inspectorSection} in the inspector.`}
+      title={`${modifier.accessibleLabel} · configure in inspector`}
+      onClick={() => onActivate?.(nodeId, modifier)}
+    >
+      <ModifierIcon modifier={modifier} />
+      <span>{modifier.label}</span>
+    </button>
+  );
+}
+
+function StepModifierRail({ data }: { data: Extract<ContractNodeData, { kind: 'step' }> }) {
+  const modifiers = stepModifierPresentations(data);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const overflowId = useId();
+  const visible = modifiers.slice(0, 3);
+  const overflow = modifiers.slice(3);
+
+  if (modifiers.length === 0) return null;
+
+  return (
+    <div className="contract-node-modifier-rail" aria-label="Step modifiers">
+      {visible.map((modifier) => (
+        <ModifierChip
+          key={modifier.id}
+          modifier={modifier}
+          nodeId={data.id}
+          onActivate={data.onModifierActivate}
+        />
+      ))}
+      {overflow.length > 0 && (
+        <div className="contract-node-modifier-overflow">
+          <button
+            type="button"
+            className="contract-node-modifier-overflow-button nodrag nopan"
+            aria-expanded={overflowOpen}
+            aria-controls={overflowId}
+            aria-label={`Show ${overflow.length} more modifiers for ${data.label}`}
+            onClick={() => setOverflowOpen((open) => !open)}
+          >
+            +{overflow.length}
+          </button>
+          {overflowOpen && (
+            <div id={overflowId} className="contract-node-modifier-overflow-menu" role="group" aria-label={`Additional modifiers for ${data.label}`}>
+              {overflow.map((modifier) => (
+                <ModifierChip
+                  key={modifier.id}
+                  modifier={modifier}
+                  nodeId={data.id}
+                  onActivate={data.onModifierActivate}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
   const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
+  const invalid = Boolean(data.invalid);
+  const frozen = Boolean(data.frozen);
   // Outer Start/End nodes remain terminal at the canvas boundary. Their
   // parented counterparts are subgraph ingress/egress endpoints, so React
   // Flow needs the otherwise-suppressed handle for their canonical boundary
   // edges to attach.
   const rendersTargetHandle = data.kind !== 'start' || Boolean(data.parentId);
   const rendersSourceHandle = data.kind !== 'end' || Boolean(data.parentId);
+  const modifierData = data.kind === 'step' ? data : null;
 
   return (
     <div
       data-kind={data.kind}
-      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${proposalClass}`}
+      data-executor={modifierData?.executor}
+      data-invalid={invalid || undefined}
+      data-frozen={frozen || undefined}
+      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${frozen ? 'is-frozen' : ''} ${proposalClass}`}
     >
-        {rendersTargetHandle && (
-          <Handle
-            type="target"
-            position={Position.Left}
-            className="contract-node-handle"
-          />
-        )}
-        <div className="contract-node-heading">
-          <span className="contract-node-icon-slot">
-            <NodeKindIcon kind={data.kind} />
-          </span>
-          <div className="contract-node-title-group">
-            <p className="contract-node-kind">{kindLabel[data.kind]}</p>
-            <p className="contract-node-title">{data.label}</p>
-          </div>
+      {rendersTargetHandle && (
+        <Handle type="target" position={Position.Left} className="contract-node-handle" />
+      )}
+      <div className="contract-node-heading">
+        <span className="contract-node-icon-slot">
+          <NodeKindIcon node={data} />
+        </span>
+        <div className="contract-node-title-group">
+          <p className="contract-node-kind">{kindLabel[data.kind]}</p>
+          <p className="contract-node-title">{data.label}</p>
+          {data.description && <p className="contract-node-description">{data.description}</p>}
         </div>
-        <div className="contract-node-divider" />
-        <div className="contract-node-meta" aria-label="Node status">
-          <span className="contract-node-kind-badge">{nodeKindBadge(data)}</span>
-          <div className="contract-node-statuses">
-            {data.proposalState && (
-              <span className="contract-node-proposal-status">
-                Proposed {data.proposalState}
-              </span>
-            )}
-            {data.hitl?.enabled && (
-              <span
-                title={`Human input ${data.hitl.timing ?? 'before'} · ${data.hitl.inputType ?? 'approval'}`}
-                className="contract-node-hitl-status"
-              >
-                HITL
-              </span>
-            )}
-            {data.outsideSubgraph && (
-              <span className="contract-node-membership-status">Outside subgraph</span>
-            )}
-          </div>
+      </div>
+      <div className="contract-node-divider" />
+      <div className="contract-node-meta" aria-label="Node status and modifiers">
+        {modifierData ? <StepModifierRail data={modifierData} /> : <span />}
+        <div className="contract-node-statuses">
+          {invalid && (
+            <span className="contract-node-status contract-node-status--invalid">
+              <WarningCircleIcon aria-hidden="true" size={12} weight="bold" />
+              Invalid
+            </span>
+          )}
+          {frozen && (
+            <span className="contract-node-status contract-node-status--frozen">
+              <LockSimpleIcon aria-hidden="true" size={11} weight="bold" />
+              Frozen
+            </span>
+          )}
+          {data.proposalState && (
+            <span className="contract-node-proposal-status">Proposed {data.proposalState}</span>
+          )}
+          {!invalid && !frozen && !data.proposalState && (
+            <span className="contract-node-status contract-node-status--ready">Ready</span>
+          )}
+          {data.outsideSubgraph && (
+            <span className="contract-node-membership-status">Outside subgraph</span>
+          )}
         </div>
-        {rendersSourceHandle && (
-          <Handle
-            type="source"
-            position={Position.Right}
-            className="contract-node-handle"
-          />
-        )}
+      </div>
+      {rendersSourceHandle && (
+        <Handle type="source" position={Position.Right} className="contract-node-handle" />
+      )}
     </div>
   );
 }

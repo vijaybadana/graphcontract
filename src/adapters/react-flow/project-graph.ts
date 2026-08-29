@@ -10,8 +10,8 @@ import {
 } from '@/src/domain';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 
-const CONTRACT_NODE_WIDTH = 184;
-const CONTRACT_NODE_HEIGHT = 114;
+const CONTRACT_NODE_WIDTH = 220;
+const CONTRACT_NODE_HEIGHT = 134;
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
 
@@ -143,6 +143,19 @@ function isEdgeInvalid(
 
   // A frozen graph is separately presented as locked, not invalid.
   return graph.status !== 'frozen' && (validationMarksEdge || routeLabelMissing || unreadableCondition);
+}
+
+/** Source-scoped domain issues stay visible on the owning Step shell. */
+function isNodeInvalid(
+  nodeId: string,
+  graph: WorkflowGraph,
+  validationIssues: ReturnType<typeof validateGraph>,
+): boolean {
+  if (graph.status === 'frozen') return false;
+  const nodePath = `nodes.${nodeId}`;
+  return validationIssues.some(
+    (issue) => issue.path === nodePath || issue.path?.startsWith(`${nodePath}.`),
+  );
 }
 
 /**
@@ -359,6 +372,7 @@ export function projectGraphToCanvas(
   ];
 
   const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
+  const validationIssues = validateGraph(preview);
   const nodes: CanvasFlowNode[] = [
     ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(subgraph, subgraphProposalState(subgraph.id))),
     ...sourceNodes.map((node) => {
@@ -388,7 +402,13 @@ export function projectGraphToCanvas(
             }
           : {}),
         hidden: Boolean(parent?.collapsed),
-        data: { ...node, proposalState, outsideSubgraph },
+        data: {
+          ...node,
+          proposalState,
+          outsideSubgraph,
+          invalid: isNodeInvalid(node.id, preview, validationIssues),
+          frozen: preview.status === 'frozen',
+        },
       };
     }),
   ];
@@ -399,8 +419,6 @@ export function projectGraphToCanvas(
     ...graph.edges.filter((edge) => !previewEdgeIds.has(edge.id)),
   ];
   const loopEdgeIds = topologyDerivedLoopEdgeIds({ ...preview, edges: sourceEdges });
-  const validationIssues = validateGraph(preview);
-
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
     const sourceParent = subgraphsById.get(
       preview.nodes.find((node) => node.id === edge.source)?.parentId ?? '',

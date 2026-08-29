@@ -11,12 +11,14 @@ import {
   WrenchIcon,
 } from '@phosphor-icons/react';
 
-import { GraphProposal, NodeKind, nodeKinds, WorkflowGraph } from '@/src/domain';
+import type { NodeCreationPreset } from '@/src/application/workspace';
+import { GraphProposal, WorkflowGraph } from '@/src/domain';
 import { PanelCollapseButton } from '@/src/features/workspace/panel-collapse-control';
 
 import './node-palette.css';
 
-export type PaletteKind = NodeKind | 'subgraph';
+/** Matches the application creation API; work presets create canonical Steps. */
+export type PaletteKind = NodeCreationPreset | 'subgraph';
 export type PaletteItem = {
   kind: PaletteKind;
   label: string;
@@ -27,10 +29,11 @@ export const paletteItems: readonly PaletteItem[] = [
   { kind: 'start', label: 'Start', group: 'Flow' },
   { kind: 'end', label: 'End', group: 'Flow' },
   { kind: 'subgraph', label: 'Subgraph', group: 'Structure' },
+  { kind: 'step', label: 'Step', group: 'Work' },
   { kind: 'agent', label: 'Agent', group: 'Work' },
-  { kind: 'action', label: 'Action / function', group: 'Work' },
+  { kind: 'action', label: 'Action', group: 'Work' },
   { kind: 'tool', label: 'Tool', group: 'Work' },
-  { kind: 'human_input', label: 'Human Input', group: 'Human' },
+  { kind: 'humanReview', label: 'Human review', group: 'Human' },
 ];
 
 const groups: PaletteItem['group'][] = ['Flow', 'Structure', 'Work', 'Human'];
@@ -59,10 +62,11 @@ function PaletteIcon({ kind }: { kind: PaletteKind }) {
     case 'start': return <PlayCircleIcon {...props} />;
     case 'end': return <FlagCheckeredIcon {...props} />;
     case 'subgraph': return <StackIcon {...props} />;
+    case 'step': return <LightningIcon {...props} />;
     case 'agent': return <RobotIcon {...props} />;
     case 'action': return <LightningIcon {...props} />;
     case 'tool': return <WrenchIcon {...props} />;
-    case 'human_input': return <HandIcon {...props} />;
+    case 'humanReview': return <HandIcon {...props} />;
   }
 }
 
@@ -217,12 +221,7 @@ function NodePaletteContents({
   );
 }
 
-export function readDroppedNodeKind(event: DragEvent<HTMLDivElement>): NodeKind | null {
-  const kind = event.dataTransfer.getData('application/graphcontract-node') as NodeKind;
-  return nodeKinds.includes(kind) ? kind : null;
-}
-
 export function readDroppedPaletteKind(event: DragEvent<HTMLDivElement>): PaletteKind | null {
   const kind = event.dataTransfer.getData('application/graphcontract-node') as PaletteKind;
-  return kind === 'subgraph' || nodeKinds.includes(kind as NodeKind) ? kind : null;
+  return paletteItems.some((item) => item.kind === kind) ? kind : null;
 }

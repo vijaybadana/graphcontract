@@ -98,7 +98,8 @@ function InteractiveSubgraphCanvas({ onNodeClick }: { onNodeClick: (id: string) 
         zIndex: 1,
         data: {
           id: 'child-node',
-          kind: 'agent',
+          kind: 'step',
+          executor: 'ai',
           label: 'Child node',
           parentId: 'review-group',
           position: { x: 60, y: 120 },
@@ -110,7 +111,8 @@ function InteractiveSubgraphCanvas({ onNodeClick }: { onNodeClick: (id: string) 
         position: { x: 430, y: 240 },
         data: {
           id: 'outside-member',
-          kind: 'tool',
+          kind: 'step',
+          executor: 'tool',
           label: 'Outside member',
           position: { x: 430, y: 240 },
           outsideSubgraph: true,

@@ -10,13 +10,13 @@ describe('workspaceSelectionFromCanvas', () => {
         id: 'billing',
         type: 'contractNode',
         position: { x: 100, y: 100 },
-        data: { id: 'billing', kind: 'agent', label: 'Billing', position: { x: 100, y: 100 } },
+        data: { id: 'billing', kind: 'step', executor: 'ai', label: 'Billing', position: { x: 100, y: 100 } },
       },
       {
         id: 'diagnostic',
         type: 'contractNode',
         position: { x: 300, y: 100 },
-        data: { id: 'diagnostic', kind: 'action', label: 'Diagnostic', position: { x: 300, y: 100 } },
+        data: { id: 'diagnostic', kind: 'step', executor: 'deterministic', label: 'Diagnostic', position: { x: 300, y: 100 } },
       },
     ] as CanvasFlowNode[];
 

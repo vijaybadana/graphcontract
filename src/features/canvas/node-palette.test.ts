@@ -25,15 +25,15 @@ describe('contract health presentation', () => {
   });
 
   it('keeps Subgraph in the searchable inventory and accepts it on canvas drop', () => {
-    expect(paletteItems).toHaveLength(7);
+    expect(paletteItems).toHaveLength(8);
     expect(filterPaletteItems('subgraph')).toEqual([
       expect.objectContaining({ kind: 'subgraph', group: 'Structure' }),
     ]);
     expect(
       readDroppedPaletteKind({
-        dataTransfer: { getData: () => 'subgraph' },
+        dataTransfer: { getData: () => 'humanReview' },
       } as never),
-    ).toBe('subgraph');
+    ).toBe('humanReview');
   });
 
   it('keeps outer Start and End singleton-only until a subgraph needs member endpoints', () => {

@@ -2,195 +2,74 @@
   --node-accent: #64748b;
   --node-accent-soft: #f8fafc;
   --node-accent-ink: #1e293b;
-  width: 11.5rem;
-  min-height: 7.125rem;
+  position: relative;
+  width: 13.75rem;
+  min-height: 8.375rem;
   border: 1px solid color-mix(in srgb, var(--node-accent) 38%, white);
   border-radius: 0.875rem;
   background: #fff;
   box-shadow: 0 3px 12px rgb(15 23 42 / 10%);
   color: var(--node-accent-ink);
   overflow: visible;
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease,
-    opacity 160ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, opacity 160ms ease;
 }
 
-.contract-node-shell[data-kind='start'] {
-  --node-accent: #059669;
-  --node-accent-soft: #ecfdf5;
-  --node-accent-ink: #064e3b;
-}
+.contract-node-shell[data-kind='start'] { --node-accent: #059669; --node-accent-soft: #ecfdf5; --node-accent-ink: #064e3b; }
+.contract-node-shell[data-kind='end'] { --node-accent: #475569; --node-accent-soft: #f8fafc; --node-accent-ink: #0f172a; }
+.contract-node-shell[data-kind='step'][data-executor='ai'] { --node-accent: #c8752d; --node-accent-soft: #fff7ed; --node-accent-ink: #3d2816; }
+.contract-node-shell[data-kind='step'][data-executor='tool'] { --node-accent: #0284c7; --node-accent-soft: #f0f9ff; --node-accent-ink: #0c4a6e; }
+.contract-node-shell[data-kind='step'][data-executor='human'] { --node-accent: #e11d48; --node-accent-soft: #fff1f2; --node-accent-ink: #881337; }
 
-.contract-node-shell[data-kind='agent'] {
-  --node-accent: #c8752d;
-  --node-accent-soft: #fff7ed;
-  --node-accent-ink: #3d2816;
-}
+.contract-node-shell:hover { border-color: color-mix(in srgb, var(--node-accent) 72%, white); box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-accent) 15%, transparent), 0 8px 18px rgb(15 23 42 / 16%); transform: translateY(-1px); }
+.contract-node-shell.is-selected { border-color: #2563eb; box-shadow: 0 0 0 3px rgb(37 99 235 / 30%), 0 8px 18px rgb(15 23 42 / 16%); }
+.contract-node-shell.is-invalid { border-color: #dc2626; }
+.contract-node-shell.is-invalid:not(.is-selected) { box-shadow: 0 0 0 2px rgb(220 38 38 / 20%), 0 3px 12px rgb(15 23 42 / 10%); }
+.contract-node-shell.is-frozen { filter: saturate(.48); }
+.contract-node-shell.is-proposed-added::before, .contract-node-shell.is-proposed-updated::before, .contract-node-shell.is-proposed-removed::before { position: absolute; z-index: 2; top: -1px; right: 1.125rem; left: 1.125rem; height: 3px; border-radius: 0 0 999px 999px; content: ''; }
+.contract-node-shell.is-proposed-added::before { background: #159160; }
+.contract-node-shell.is-proposed-updated::before { background: #c47b24; }
+.contract-node-shell.is-proposed-removed { border-style: dashed; opacity: .62; text-decoration: line-through; }
+.contract-node-shell.is-proposed-removed::before { background: #db4b55; }
 
-.contract-node-shell[data-kind='action'] {
-  --node-accent: #7c3aed;
-  --node-accent-soft: #f5f3ff;
-  --node-accent-ink: #2e1065;
-}
-
-.contract-node-shell[data-kind='tool'] {
-  --node-accent: #0284c7;
-  --node-accent-soft: #f0f9ff;
-  --node-accent-ink: #0c4a6e;
-}
-
-.contract-node-shell[data-kind='human_input'] {
-  --node-accent: #e11d48;
-  --node-accent-soft: #fff1f2;
-  --node-accent-ink: #881337;
-}
-
-.contract-node-shell[data-kind='end'] {
-  --node-accent: #475569;
-  --node-accent-soft: #f8fafc;
-  --node-accent-ink: #0f172a;
-}
-
-.contract-node-shell.is-selected {
-  border-color: var(--node-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 28%, transparent),
-    0 8px 18px rgb(15 23 42 / 16%);
-  transform: translateY(-1px);
-}
-
-.contract-node-shell.is-proposed-added {
-  box-shadow: 0 0 0 3px rgb(110 231 183 / 54%), 0 3px 12px rgb(15 23 42 / 10%);
-}
-
-.contract-node-shell.is-proposed-updated {
-  box-shadow: 0 0 0 3px rgb(252 211 77 / 54%), 0 3px 12px rgb(15 23 42 / 10%);
-}
-
-.contract-node-shell.is-proposed-removed {
-  opacity: 0.58;
-  text-decoration: line-through;
-  box-shadow: 0 0 0 3px rgb(253 164 175 / 58%), 0 3px 12px rgb(15 23 42 / 10%);
-}
-
-.contract-node-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.625rem;
-  padding: 0.75rem 0.75rem 0.625rem;
-}
-
-.contract-node-icon-slot {
-  display: grid;
-  flex: 0 0 auto;
-  width: 1.875rem;
-  height: 1.875rem;
-  place-items: center;
-  border-radius: 0.5rem;
-  background: var(--node-accent-soft);
-  color: var(--node-accent);
-}
-
+.contract-node-heading { display: flex; align-items: flex-start; gap: .625rem; padding: .75rem .75rem .625rem; }
+.contract-node-icon-slot { display: grid; flex: 0 0 auto; width: 1.875rem; height: 1.875rem; place-items: center; border-radius: .5rem; background: var(--node-accent-soft); color: var(--node-accent); }
 .contract-node-title-group { min-width: 0; }
+.contract-node-kind, .contract-node-title, .contract-node-description { margin: 0; }
+.contract-node-kind { color: color-mix(in srgb, var(--node-accent-ink) 78%, white); font-size: .5625rem; font-weight: 800; letter-spacing: .12em; line-height: 1.1; text-transform: uppercase; }
+.contract-node-title { display: -webkit-box; margin-top: .25rem; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: .8125rem; font-weight: 650; line-height: 1.2; }
+.contract-node-description { display: -webkit-box; margin-top: .25rem; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 1; color: color-mix(in srgb, var(--node-accent-ink) 65%, white); font-size: .625rem; font-weight: 540; line-height: 1.3; }
+.contract-node-divider { height: 1px; margin: 0 .75rem; background: color-mix(in srgb, var(--node-accent) 16%, white); }
+.contract-node-meta { display: flex; align-items: center; justify-content: space-between; gap: .375rem; min-height: 2.15rem; padding: .5rem .75rem; }
 
-.contract-node-kind,
-.contract-node-title { margin: 0; }
+.contract-node-modifier-rail { display: flex; align-items: center; gap: .22rem; min-width: 0; }
+.contract-node-modifier-chip, .contract-node-modifier-overflow-button, .contract-node-status, .contract-node-proposal-status, .contract-node-membership-status { white-space: nowrap; font-size: .53rem; font-weight: 800; letter-spacing: .035em; line-height: 1; text-transform: uppercase; }
+.contract-node-modifier-chip { display: inline-flex; align-items: center; gap: .16rem; min-width: 1.875rem; min-height: 1.5rem; max-width: 3.8rem; overflow: hidden; border: 1px solid currentColor; border-radius: .3rem; background: white; padding: .2rem .28rem; color: var(--modifier-ink); text-overflow: ellipsis; }
+.contract-node-modifier-chip:hover { background: var(--modifier-soft); }
+.contract-node-modifier-chip:focus-visible, .contract-node-modifier-overflow-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.contract-node-modifier-chip--ai { --modifier-ink: #c25b12; --modifier-soft: #fff4e9; }
+.contract-node-modifier-chip--tool { --modifier-ink: #0369a1; --modifier-soft: #edf8ff; }
+.contract-node-modifier-chip--human { --modifier-ink: #be123c; --modifier-soft: #fff1f2; }
+.contract-node-modifier-chip--guardrail { --modifier-ink: #6d28d9; --modifier-soft: #f5f3ff; }
+.contract-node-modifier-chip--sensitive { --modifier-ink: #7c3aed; --modifier-soft: #f5f3ff; }
+.contract-node-modifier-chip--store { --modifier-ink: #047857; --modifier-soft: #ecfdf5; }
+.contract-node-modifier-chip--retry { --modifier-ink: #c2410c; --modifier-soft: #fff7ed; }
+.contract-node-modifier-chip--opaque { --modifier-ink: #475569; --modifier-soft: #f8fafc; border-style: dashed; }
+.contract-node-modifier-chip--readiness { --modifier-ink: #b45309; --modifier-soft: #fffbeb; }
+.contract-node-modifier-overflow { position: relative; flex: 0 0 auto; }
+.contract-node-modifier-overflow-button { min-width: 1.875rem; min-height: 1.5rem; border: 1px solid #cbd5e1; border-radius: .3rem; background: #fff; color: #334155; padding: .2rem .28rem; }
+.contract-node-modifier-overflow-button:hover { background: #f8fafc; }
+.contract-node-modifier-overflow-menu { position: absolute; z-index: 4; bottom: calc(100% + .35rem); left: 0; display: grid; gap: .28rem; min-width: 8.75rem; border: 1px solid #cbd5e1; border-radius: .5rem; background: #fff; box-shadow: 0 8px 18px rgb(15 23 42 / 16%); padding: .38rem; }
+.contract-node-modifier-overflow-menu .contract-node-modifier-chip { justify-content: flex-start; max-width: none; }
 
-.contract-node-kind {
-  color: color-mix(in srgb, var(--node-accent-ink) 78%, white);
-  font-size: 0.5625rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
+.contract-node-statuses { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; min-width: 0; }
+.contract-node-status { display: inline-flex; align-items: center; gap: .14rem; border-radius: 999px; padding: .25rem .31rem; }
+.contract-node-status--ready { color: #047857; }
+.contract-node-status--ready::before { width: .32rem; height: .32rem; border-radius: 999px; background: currentColor; content: ''; }
+.contract-node-status--invalid { color: #b91c1c; }
+.contract-node-status--frozen { color: #475569; }
+.contract-node-proposal-status { overflow: hidden; max-width: 5.6rem; color: #475569; text-overflow: ellipsis; }
+.contract-node-membership-status { border: 1px solid #f2c45f; border-radius: 999px; padding: .25rem .3125rem; background: #fff7df; color: #8b5b08; }
+.contract-node-handle { width: .6875rem !important; height: .6875rem !important; border: 2px solid #fff !important; background: var(--node-accent) !important; }
 
-.contract-node-title {
-  display: -webkit-box;
-  margin-top: 0.25rem;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  font-size: 0.8125rem;
-  font-weight: 650;
-  line-height: 1.2;
-}
-
-.contract-node-divider {
-  height: 1px;
-  margin: 0 0.75rem;
-  background: color-mix(in srgb, var(--node-accent) 16%, white);
-}
-
-.contract-node-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  min-height: 2rem;
-  padding: 0.5rem 0.75rem;
-}
-
-.contract-node-kind-badge,
-.contract-node-proposal-status,
-.contract-node-hitl-status,
-.contract-node-membership-status {
-  white-space: nowrap;
-  font-size: 0.5625rem;
-  font-weight: 800;
-  letter-spacing: 0.075em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.contract-node-kind-badge {
-  color: var(--node-accent);
-}
-
-.contract-node-statuses {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.3125rem;
-  min-width: 0;
-}
-
-.contract-node-proposal-status {
-  overflow: hidden;
-  max-width: 5.5rem;
-  color: #475569;
-  text-overflow: ellipsis;
-}
-
-.contract-node-hitl-status {
-  border: 1px solid color-mix(in srgb, var(--node-accent) 28%, white);
-  border-radius: 999px;
-  padding: 0.25rem 0.3125rem;
-  background: var(--node-accent-soft);
-  color: var(--node-accent-ink);
-}
-
-.contract-node-membership-status {
-  border: 1px solid #f2c45f;
-  border-radius: 999px;
-  padding: 0.25rem 0.3125rem;
-  background: #fff7df;
-  color: #8b5b08;
-}
-
-.contract-node-handle {
-  width: 0.6875rem !important;
-  height: 0.6875rem !important;
-  border: 2px solid #fff !important;
-  background: var(--node-accent) !important;
-}
-
-@media (max-width: 480px) {
-  .contract-node-shell { width: 10.25rem; }
-  .contract-node-heading { gap: 0.5rem; padding-inline: 0.625rem; }
-  .contract-node-meta { padding-inline: 0.625rem; }
-  .contract-node-divider { margin-inline: 0.625rem; }
-  .contract-node-proposal-status { display: none; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .contract-node-shell { transition: none; }
-}
+@media (max-width: 480px) { .contract-node-shell { width: 12rem; } .contract-node-heading { gap: .5rem; padding-inline: .625rem; } .contract-node-meta { padding-inline: .625rem; } .contract-node-divider { margin-inline: .625rem; } .contract-node-modifier-chip { max-width: 3rem; } }
+@media (prefers-reduced-motion: reduce) { .contract-node-shell { transition: none; } }

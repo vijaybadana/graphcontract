@@ -20,7 +20,7 @@ import {
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
-    schemaVersion: '1',
+    schemaVersion: '2',
     id: 'subgraph-projection',
     name: 'Subgraph projection',
     status: 'draft',
@@ -38,14 +38,16 @@ function graphWithSubgraph(collapsed = false): WorkflowGraph {
       { id: 'start', kind: 'start', label: 'Start', position: { x: 40, y: 260 } },
       {
         id: 'review',
-        kind: 'agent',
+        kind: 'step',
+        executor: 'ai',
         label: 'Review',
         parentId: 'review-group',
         position: { x: 60, y: 120 },
       },
       {
         id: 'approve',
-        kind: 'action',
+        kind: 'step',
+        executor: 'deterministic',
         label: 'Approve',
         parentId: 'review-group',
         position: { x: 330, y: 120 },
@@ -402,7 +404,8 @@ describe('projectGraphToCanvas', () => {
     const graph = graphWithSubgraph();
     graph.nodes.push({
       id: 'outside-member',
-      kind: 'tool',
+      kind: 'step',
+      executor: 'tool',
       label: 'Outside member',
       position: { x: 420, y: 220 },
     });

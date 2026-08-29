@@ -23,7 +23,7 @@ describe('positionsForCanvasCommit', () => {
         type: 'contractNode',
         parentId: 'group',
         position: { x: 70, y: 38 },
-        data: { id: 'child', kind: 'agent', label: 'Supervisor', position: { x: 70, y: 38 } },
+        data: { id: 'child', kind: 'step', executor: 'ai', label: 'Supervisor', position: { x: 70, y: 38 } },
       },
       {
         id: 'ordinary',
