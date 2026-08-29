@@ -15,9 +15,32 @@ const service = createWorkspaceService({
   makeId: (prefix) => `${prefix}-generated`,
 });
 
+const legacyV1Graph = () => {
+  const graph = structuredClone(sampleGraph);
+  const legacyKinds: Record<string, string> = {
+    classifier: 'agent',
+    billing: 'agent',
+    diagnostic: 'action',
+    human: 'human_input',
+    refund: 'tool',
+  };
+
+  return {
+    ...graph,
+    schemaVersion: '1' as const,
+    nodes: graph.nodes.map((node) => {
+      const legacy = { ...node } as Record<string, unknown>;
+      delete legacy.executor;
+      delete legacy.participation;
+      delete legacy.modifiers;
+      return { ...legacy, kind: legacyKinds[node.id] ?? node.kind };
+    }),
+  };
+};
+
 describe('workspace persistence migration', () => {
   it('preserves schema-safe incomplete drafts for ordinary validation', () => {
-    const invalid = structuredClone(sampleGraph);
+    const invalid = legacyV1Graph();
     invalid.nodes.push({
       id: 'unfinished-agent',
       kind: 'agent',
@@ -45,7 +68,10 @@ describe('workspace persistence migration', () => {
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      nodes: expect.arrayContaining([expect.objectContaining({ id: 'unfinished-agent' })]),
+      schemaVersion: '2',
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: 'unfinished-agent', kind: 'step', executor: 'ai' }),
+      ]),
       edges: expect.arrayContaining([
         expect.objectContaining({
           id: 'unfinished-edge',
@@ -62,7 +88,7 @@ describe('workspace persistence migration', () => {
 
   it('falls back only when the saved graph shape cannot be parsed', () => {
     const migrated = migrateWorkspaceV3(
-      { graph: { ...sampleGraph, nodes: 'corrupt' }, proposal: null, scenarios: [] },
+      { graph: { ...legacyV1Graph(), nodes: 'corrupt' }, proposal: null, scenarios: [] },
       service.createInitial,
     );
 
@@ -73,22 +99,104 @@ describe('workspace persistence migration', () => {
     });
   });
 
-  it('renames the old generic demo action without changing its identity', () => {
-    const graph = structuredClone(sampleGraph);
+  it('preserves legacy labels and descriptions while changing only taxonomy', () => {
+    const graph = legacyV1Graph();
     graph.nodes.find((node) => node.id === 'diagnostic')!.label = 'New Action';
+    graph.nodes.find((node) => node.id === 'diagnostic')!.description = 'Keep this exact detail.';
 
     const migrated = migrateWorkspaceV3(
       { graph, proposal: null, scenarios: [] },
       service.createInitial,
     );
 
-    expect(migrated.graph?.nodes.find((node) => node.id === 'diagnostic')?.label).toBe(
-      'Post-Refund Audit',
+    expect(migrated.graph?.nodes.find((node) => node.id === 'diagnostic')).toMatchObject({
+      id: 'diagnostic',
+      kind: 'step',
+      executor: 'deterministic',
+      label: 'New Action',
+      description: 'Keep this exact detail.',
+    });
+  });
+
+  it('maps every legacy work kind without conflating tool participation or HITL', () => {
+    const legacy = legacyV1Graph();
+    const classifier = legacy.nodes.find((node) => node.id === 'classifier')!;
+    const diagnostic = legacy.nodes.find((node) => node.id === 'diagnostic')!;
+    classifier.config = { tools: ['lookup'] };
+    diagnostic.hitl = { enabled: true, timing: 'before', inputType: 'approval' };
+
+    const migrated = migrateWorkspaceV3(
+      { graph: legacy, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph?.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'classifier',
+          kind: 'step',
+          executor: 'ai',
+          participation: { internalTools: true },
+          position: { x: 230, y: 220 },
+        }),
+        expect.objectContaining({
+          id: 'diagnostic',
+          kind: 'step',
+          executor: 'deterministic',
+          hitl: { enabled: true, timing: 'before', inputType: 'approval' },
+        }),
+        expect.objectContaining({ id: 'refund', kind: 'step', executor: 'tool' }),
+        expect.objectContaining({ id: 'human', kind: 'step', executor: 'human' }),
+      ]),
     );
   });
 
+  it('normalizes legacy pending proposal node operations during restoration', () => {
+    const legacy = legacyV1Graph();
+    const proposal = {
+      id: 'legacy-proposal',
+      operations: [
+        {
+          type: 'add_node',
+          node: {
+            id: 'legacy-tool',
+            kind: 'tool',
+            label: 'Legacy Tool',
+            position: { x: 880, y: 220 },
+          },
+        },
+        {
+          type: 'update_node',
+          nodeId: 'classifier',
+          patch: { kind: 'agent', config: { tools: ['search'] } },
+        },
+      ],
+    };
+
+    const migrated = migrateWorkspaceV3(
+      { graph: legacy, proposal, scenarios: [] },
+      service.createInitial,
+    );
+
+    const operations = (migrated.proposal as unknown as { operations: unknown[] }).operations;
+    expect(operations).toEqual([
+      expect.objectContaining({
+        type: 'add_node',
+        node: expect.objectContaining({ kind: 'step', executor: 'tool' }),
+      }),
+      expect.objectContaining({
+        type: 'update_node',
+        patch: expect.objectContaining({
+          executor: 'ai',
+          participation: { internalTools: true },
+        }),
+      }),
+    ]);
+    expect((operations[1] as { patch: Record<string, unknown> }).patch).not.toHaveProperty('kind');
+  });
+
   it('preserves valid pre-command graph data and supplies its empty subgraph collection', () => {
-    const legacy = structuredClone(sampleGraph);
+    const legacy = legacyV1Graph();
     delete (legacy as { subgraphs?: unknown }).subgraphs;
     const proposalResult = createProposal(sampleGraph, {
       operations: [
@@ -111,7 +219,13 @@ describe('workspace persistence migration', () => {
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      nodes: sampleGraph.nodes,
+      schemaVersion: '2',
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: 'classifier', kind: 'step', executor: 'ai' }),
+        expect.objectContaining({ id: 'diagnostic', kind: 'step', executor: 'deterministic' }),
+        expect.objectContaining({ id: 'refund', kind: 'step', executor: 'tool' }),
+        expect.objectContaining({ id: 'human', kind: 'step', executor: 'human' }),
+      ]),
       edges: sampleGraph.edges,
       subgraphs: [],
     });

@@ -4,6 +4,7 @@ import {
   applyGraphOperations,
   enumerateScenarios,
   researchIntakeRoutingGraph,
+  sampleGraph,
   validateGraph,
   workflowGraphSchema,
 } from './graph';
@@ -13,6 +14,48 @@ import {
 } from '../adapters/exports/downloads';
 
 describe('routing edge semantics', () => {
+  it('models executor ownership separately from internal tools, HITL, and modifier summaries', () => {
+    const graph = structuredClone(sampleGraph);
+    const ai = graph.nodes.find((node) => node.id === 'classifier');
+    const human = graph.nodes.find((node) => node.id === 'human');
+    const tool = graph.nodes.find((node) => node.id === 'refund');
+
+    if (ai?.kind !== 'step' || human?.kind !== 'step' || tool?.kind !== 'step') {
+      throw new Error('The canonical fixture must contain normalized Steps.');
+    }
+
+    ai.participation = { internalTools: true };
+    ai.hitl = { enabled: true, timing: 'before', inputType: 'approval' };
+    ai.modifiers = {
+      guardrail: true,
+      sensitiveSideEffect: true,
+      storeRead: true,
+      storeWrite: true,
+      retryFallback: true,
+      opaque: true,
+      readiness: 'degraded',
+    };
+
+    expect(workflowGraphSchema.safeParse(graph).success).toBe(true);
+    expect(validateGraph(graph)).toEqual([]);
+    expect(ai).toMatchObject({
+      kind: 'step',
+      executor: 'ai',
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'before' },
+      modifiers: { storeRead: true, storeWrite: true, readiness: 'degraded' },
+    });
+    expect(human.executor).toBe('human');
+    expect(human.hitl).toBeUndefined();
+    expect(tool.executor).toBe('tool');
+
+    const legacyKind = structuredClone(graph) as unknown as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    legacyKind.nodes.find((node) => node.id === 'classifier')!.kind = 'agent';
+    expect(workflowGraphSchema.safeParse(legacyKind).success).toBe(false);
+  });
+
   it('normalizes route fields on canonical add and update operations', () => {
     const normal = applyGraphOperations(researchIntakeRoutingGraph, [
       {

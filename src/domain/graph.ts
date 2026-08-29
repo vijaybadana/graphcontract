@@ -2,15 +2,18 @@ import { z } from 'zod';
 
 export const nodeKinds = [
   'start',
-  'agent',
-  'action',
-  'tool',
-  'human_input',
+  'step',
   'end',
 ] as const;
 
 export type NodeKind = (typeof nodeKinds)[number];
+/** Legacy input-only kinds accepted by the v1 persistence migration. */
+export const legacyNodeKinds = ['agent', 'action', 'tool', 'human_input'] as const;
+export type LegacyNodeKind = (typeof legacyNodeKinds)[number];
+const v1NodeKinds = ['start', ...legacyNodeKinds, 'end'] as const;
+type V1NodeKind = (typeof v1NodeKinds)[number];
 export type EdgeMode = 'normal' | 'conditional' | 'command' | 'fallback';
+export type StepExecutor = 'deterministic' | 'ai' | 'tool' | 'human';
 
 export type HitlConfig = {
   enabled: boolean;
@@ -30,16 +33,61 @@ export type GraphSubgraph = {
   collapsed: boolean;
 };
 
-export type GraphNode = {
+type GraphNodeBase = {
   id: string;
-  kind: NodeKind;
   label: string;
   description?: string;
   /** Relative to its parent subgraph when parentId is present. */
   position: GraphPosition;
   parentId?: string;
   config?: Record<string, unknown>;
+  /**
+   * A gate is deliberately independent from who owns execution. The v1
+   * timing shape remains intact here; Package 2 owns richer gate timing and
+   * response-policy configuration.
+   */
   hitl?: HitlConfig;
+};
+
+export type StepModifierSummary = {
+  /** A guardrail policy exists; its detail remains inspector-owned. */
+  guardrail?: true;
+  /** This Step can perform a sensitive side effect. */
+  sensitiveSideEffect?: true;
+  /** This Step directly reads from the long-term Store. */
+  storeRead?: true;
+  /** This Step directly writes to the long-term Store. */
+  storeWrite?: true;
+  /** An internal retry or provider-fallback policy exists; it is not a loop edge. */
+  retryFallback?: true;
+  /** The Step is a prebuilt/opaque unit with limited introspection. */
+  opaque?: true;
+  /** Omit when ready; degraded and unimplemented need an explicit status. */
+  readiness?: 'degraded' | 'unimplemented';
+};
+
+export type StepParticipation = {
+  /** The Step makes internal tool calls without becoming a Tool executor. */
+  internalTools?: true;
+};
+
+export type StructuralGraphNode = GraphNodeBase & {
+  kind: 'start' | 'end';
+};
+
+export type StepGraphNode = GraphNodeBase & {
+  kind: 'step';
+  executor: StepExecutor;
+  participation?: StepParticipation;
+  modifiers?: StepModifierSummary;
+};
+
+/** The active, serialized node model. Agent/Action/Tool/Human are presets, not kinds. */
+export type GraphNode = StructuralGraphNode | StepGraphNode;
+
+/** The v1 persistence-only node shape. Never use this for new writes. */
+export type LegacyGraphNodeV1 = GraphNodeBase & {
+  kind: V1NodeKind;
 };
 
 export type GraphEdge = {
@@ -83,7 +131,7 @@ export function normalizeWorkflowGraphRouting(graph: WorkflowGraph): WorkflowGra
 }
 
 export type WorkflowGraph = {
-  schemaVersion: '1';
+  schemaVersion: '2';
   id: string;
   name: string;
   nodes: GraphNode[];
@@ -92,6 +140,66 @@ export type WorkflowGraph = {
   status: 'draft' | 'frozen';
   updatedAt: string;
 };
+
+/** The v1 persistence-only graph shape accepted by the ordinary migration. */
+export type WorkflowGraphV1 = Omit<WorkflowGraph, 'schemaVersion' | 'nodes'> & {
+  schemaVersion: '1';
+  nodes: LegacyGraphNodeV1[];
+};
+
+export type GraphNodePatch = Partial<
+  Omit<GraphNodeBase, 'id' | 'parentId'> & {
+    executor: StepExecutor;
+    participation: StepParticipation;
+    modifiers: StepModifierSummary;
+  }
+>;
+
+const legacyExecutorByKind: Record<LegacyNodeKind, StepExecutor> = {
+  agent: 'ai',
+  action: 'deterministic',
+  tool: 'tool',
+  human_input: 'human',
+};
+
+const hasConfiguredInternalTools = (config: Record<string, unknown> | undefined) =>
+  Array.isArray(config?.tools) && config.tools.length > 0;
+
+/** Converts one legacy work-node kind into its normalized Step identity. */
+export function normalizeLegacyWorkNodeKind(
+  kind: LegacyNodeKind,
+  config?: Record<string, unknown>,
+): Pick<StepGraphNode, 'kind' | 'executor' | 'participation'> {
+  return {
+    kind: 'step',
+    executor: legacyExecutorByKind[kind],
+    ...(kind === 'agent' && hasConfiguredInternalTools(config)
+      ? { participation: { internalTools: true } }
+      : {}),
+  };
+}
+
+/** Converts one v1 node into the active canonical node model. */
+export function migrateLegacyGraphNodeV1(node: LegacyGraphNodeV1): GraphNode {
+  if (node.kind === 'start' || node.kind === 'end') return { ...node };
+
+  const { kind, ...step } = node;
+  return { ...step, ...normalizeLegacyWorkNodeKind(kind, step.config) };
+}
+
+/**
+ * Converts a persisted v1 graph into the only active graph model. This does
+ * not validate topology: incomplete drafts keep their authored IDs,
+ * membership, coordinates, routes, HITL data, status, and timestamp for the
+ * ordinary validator to report after rehydration.
+ */
+export function migrateWorkflowGraphV1(graph: WorkflowGraphV1): WorkflowGraph {
+  return normalizeWorkflowGraphRouting({
+    ...graph,
+    schemaVersion: '2',
+    nodes: graph.nodes.map(migrateLegacyGraphNodeV1),
+  });
+}
 
 export type ValidationIssue = {
   code: string;
@@ -104,7 +212,7 @@ export type GraphOperation =
   | {
       type: 'update_node';
       nodeId: string;
-      patch: Partial<Omit<GraphNode, 'id' | 'parentId'>>;
+      patch: GraphNodePatch;
     }
   | { type: 'remove_node'; nodeId: string }
   | { type: 'add_subgraph'; subgraph: GraphSubgraph }
@@ -187,15 +295,48 @@ export const hitlSchema = z.object({
   condition: z.string().optional(),
 });
 
-export const graphNodeSchema = z.object({
+const graphNodeBaseSchema = z.object({
   id: z.string().min(1),
-  kind: z.enum(nodeKinds),
   label: z.string().min(1),
   description: z.string().optional(),
   position: positionSchema,
   parentId: z.string().min(1).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
   hitl: hitlSchema.optional(),
+});
+
+export const stepModifierSummarySchema = z
+  .object({
+    guardrail: z.literal(true).optional(),
+    sensitiveSideEffect: z.literal(true).optional(),
+    storeRead: z.literal(true).optional(),
+    storeWrite: z.literal(true).optional(),
+    retryFallback: z.literal(true).optional(),
+    opaque: z.literal(true).optional(),
+    readiness: z.enum(['degraded', 'unimplemented']).optional(),
+  })
+  .strict();
+
+export const stepParticipationSchema = z
+  .object({ internalTools: z.literal(true).optional() })
+  .strict();
+
+const stepExecutorSchema = z.enum(['deterministic', 'ai', 'tool', 'human']);
+
+export const graphNodeSchema = z.discriminatedUnion('kind', [
+  graphNodeBaseSchema.extend({ kind: z.literal('start') }),
+  graphNodeBaseSchema.extend({
+    kind: z.literal('step'),
+    executor: stepExecutorSchema,
+    participation: stepParticipationSchema.optional(),
+    modifiers: stepModifierSummarySchema.optional(),
+  }),
+  graphNodeBaseSchema.extend({ kind: z.literal('end') }),
+]);
+
+/** v1 compatibility input only; successful parsing must be followed by migration. */
+export const legacyGraphNodeV1Schema = graphNodeBaseSchema.extend({
+  kind: z.enum(v1NodeKinds),
 });
 
 export const graphSubgraphSchema = z.object({
@@ -216,7 +357,7 @@ export const graphEdgeSchema = z.object({
 });
 
 export const workflowGraphSchema = z.object({
-  schemaVersion: z.literal('1'),
+  schemaVersion: z.literal('2'),
   id: z.string().min(1),
   name: z.string().min(1),
   nodes: z.array(graphNodeSchema),
@@ -228,12 +369,33 @@ export const workflowGraphSchema = z.object({
   updatedAt: z.string().min(1),
 });
 
+/** v1 compatibility input only; active graph operations never accept this shape. */
+export const workflowGraphV1Schema = workflowGraphSchema
+  .omit({ schemaVersion: true, nodes: true })
+  .extend({
+    schemaVersion: z.literal('1'),
+    nodes: z.array(legacyGraphNodeV1Schema),
+  });
+
+export const graphNodePatchSchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    description: z.string().optional(),
+    position: positionSchema.optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+    hitl: hitlSchema.optional(),
+    executor: stepExecutorSchema.optional(),
+    participation: stepParticipationSchema.optional(),
+    modifiers: stepModifierSummarySchema.optional(),
+  })
+  .strict();
+
 export const graphOperationSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('add_node'), node: graphNodeSchema }),
   z.object({
     type: z.literal('update_node'),
     nodeId: z.string().min(1),
-    patch: graphNodeSchema.omit({ id: true, parentId: true }).partial().strict(),
+    patch: graphNodePatchSchema,
   }),
   z.object({ type: z.literal('remove_node'), nodeId: z.string().min(1) }),
   z.object({ type: z.literal('add_subgraph'), subgraph: graphSubgraphSchema }),
@@ -268,7 +430,7 @@ export const proposalInputSchema = z.object({
 });
 
 export const sampleGraph: WorkflowGraph = {
-  schemaVersion: '1',
+  schemaVersion: '2',
   id: 'customer-support-contract',
   name: 'Customer Support Workflow',
   status: 'draft',
@@ -277,32 +439,37 @@ export const sampleGraph: WorkflowGraph = {
     { id: 'start', kind: 'start', label: 'Start', position: { x: 40, y: 230 } },
     {
       id: 'classifier',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Classifier Agent',
       description: 'Classifies the support request.',
       position: { x: 230, y: 220 },
     },
     {
       id: 'billing',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Billing Agent',
       position: { x: 480, y: 60 },
     },
     {
       id: 'diagnostic',
-      kind: 'action',
+      kind: 'step',
+      executor: 'deterministic',
       label: 'Diagnostic Action',
       position: { x: 480, y: 220 },
     },
     {
       id: 'human',
-      kind: 'human_input',
+      kind: 'step',
+      executor: 'human',
       label: 'Human Input',
       position: { x: 480, y: 380 },
     },
     {
       id: 'refund',
-      kind: 'tool',
+      kind: 'step',
+      executor: 'tool',
       label: 'Refund Tool',
       position: { x: 730, y: 60 },
     },
@@ -341,7 +508,7 @@ export const sampleGraph: WorkflowGraph = {
 
 /** A compact valid fixture for the first-class subgraph interaction. */
 export const researchSupervisorGraph: WorkflowGraph = {
-  schemaVersion: '1',
+  schemaVersion: '2',
   id: 'research-supervisor-demo',
   name: 'Research Supervisor Workflow',
   status: 'draft',
@@ -362,7 +529,8 @@ export const researchSupervisorGraph: WorkflowGraph = {
     },
     {
       id: 'research-supervisor-agent',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Supervisor',
       description: 'Plans the research sequence and synthesizes the result.',
       parentId: 'research-supervisor',
@@ -371,7 +539,8 @@ export const researchSupervisorGraph: WorkflowGraph = {
     },
     {
       id: 'research-supervisor-tools',
-      kind: 'tool',
+      kind: 'step',
+      executor: 'tool',
       label: 'Supervisor Tools',
       description: 'Research retrieval and source-review tools available to the supervisor.',
       parentId: 'research-supervisor',
@@ -438,7 +607,7 @@ export const researchSupervisorGraph: WorkflowGraph = {
 /** The canonical routing-semantics fixture. A return edge is normal topology,
  * so loop presentation can be derived without persisting a separate mode. */
 export const researchIntakeRoutingGraph: WorkflowGraph = {
-  schemaVersion: '1',
+  schemaVersion: '2',
   id: 'research-intake-routing-demo',
   name: 'Research Intake Routing',
   status: 'draft',
@@ -447,7 +616,8 @@ export const researchIntakeRoutingGraph: WorkflowGraph = {
     { id: 'research-intake-start', kind: 'start', label: 'Start', position: { x: 40, y: 280 } },
     {
       id: 'clarify-request',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Clarify Request',
       description: 'Clarifies the research request before authoring the brief.',
       position: { x: 180, y: 280 },
@@ -460,26 +630,30 @@ export const researchIntakeRoutingGraph: WorkflowGraph = {
     },
     {
       id: 'write-research-brief',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Write Research Brief',
       position: { x: 480, y: 280 },
     },
     {
       id: 'research-supervisor',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Research Supervisor',
       position: { x: 730, y: 280 },
     },
     {
       id: 'final-report',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Final Report',
       position: { x: 980, y: 280 },
     },
     { id: 'report-complete', kind: 'end', label: 'Report complete', position: { x: 1180, y: 280 } },
     {
       id: 'researcher',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Researcher',
       position: { x: 700, y: 500 },
     },
@@ -605,11 +779,11 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
         ),
       );
     }
-    if (node.hitl?.enabled && !['agent', 'action', 'tool'].includes(node.kind)) {
+    if (node.hitl?.enabled && node.kind !== 'step') {
       issues.push(
         issue(
           'INVALID_HITL_NODE',
-          'Embedded human-in-the-loop controls are only allowed on Agent, Action, and Tool nodes.',
+          'Embedded human-in-the-loop controls are only allowed on Step nodes.',
           `nodes.${node.id}.hitl`,
         ),
       );
