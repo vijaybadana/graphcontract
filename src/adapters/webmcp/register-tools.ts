@@ -1,7 +1,6 @@
 import { ProposalResult } from '@/src/application/workspace';
 import {
   enumerateScenarios,
-  nodeKinds,
   validateGraph,
   WorkflowGraph,
   GraphProposal,
@@ -56,27 +55,100 @@ const subgraphSchema = {
   additionalProperties: false,
 };
 
+const hitlSchema = {
+  type: 'object',
+  properties: {
+    enabled: { type: 'boolean' },
+    timing: { enum: ['before', 'after', 'conditional'] },
+    inputType: { enum: ['approval', 'text', 'selection'] },
+    condition: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+
+const stepParticipationSchema = {
+  type: 'object',
+  properties: { internalTools: { const: true } },
+  additionalProperties: false,
+};
+
+const stepModifierSchema = {
+  type: 'object',
+  properties: {
+    guardrail: { const: true },
+    sensitiveSideEffect: { const: true },
+    storeRead: { const: true },
+    storeWrite: { const: true },
+    retryFallback: { const: true },
+    opaque: { const: true },
+    readiness: { enum: ['degraded', 'unimplemented'] },
+  },
+  additionalProperties: false,
+};
+
+const nodeBaseProperties = {
+  label: { type: 'string' },
+  description: { type: 'string' },
+  position: positionSchema,
+  config: { type: 'object' },
+};
+
+const stepProperties = {
+  executor: { enum: ['deterministic', 'ai', 'tool', 'human'] },
+  participation: stepParticipationSchema,
+  hitl: hitlSchema,
+  modifiers: stepModifierSchema,
+};
+
 const nodePatchSchema = {
   type: 'object',
   properties: {
-    kind: { type: 'string', enum: nodeKinds },
-    label: { type: 'string' },
-    description: { type: 'string' },
-    position: positionSchema,
-    config: { type: 'object' },
-    hitl: {
+    ...nodeBaseProperties,
+    ...stepProperties,
+  },
+  description:
+    'Updates an existing node. executor, participation, hitl, and modifiers are Step-only; Start and End nodes accept only label, description, position, and config changes.',
+  // Parent membership is intentionally a dedicated proposal operation.
+  additionalProperties: false,
+};
+
+const addNodeSchema = {
+  oneOf: [
+    {
       type: 'object',
+      required: ['id', 'kind', 'label', 'position'],
       properties: {
-        enabled: { type: 'boolean' },
-        timing: { enum: ['before', 'after', 'conditional'] },
-        inputType: { enum: ['approval', 'text', 'selection'] },
-        condition: { type: 'string' },
+        id: { type: 'string' },
+        kind: { const: 'start' },
+        ...nodeBaseProperties,
+        parentId: { type: 'string' },
       },
       additionalProperties: false,
     },
-  },
-  // Parent membership is intentionally a dedicated proposal operation.
-  additionalProperties: false,
+    {
+      type: 'object',
+      required: ['id', 'kind', 'label', 'position', 'executor'],
+      properties: {
+        id: { type: 'string' },
+        kind: { const: 'step' },
+        ...nodeBaseProperties,
+        parentId: { type: 'string' },
+        ...stepProperties,
+      },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['id', 'kind', 'label', 'position'],
+      properties: {
+        id: { type: 'string' },
+        kind: { const: 'end' },
+        ...nodeBaseProperties,
+        parentId: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+  ],
 };
 
 const subgraphPatchSchema = {
@@ -97,30 +169,7 @@ const operationSchema = {
       required: ['type', 'node'],
       properties: {
         type: { const: 'add_node' },
-        node: {
-          type: 'object',
-          required: ['id', 'kind', 'label', 'position'],
-          properties: {
-            id: { type: 'string' },
-            kind: { type: 'string', enum: nodeKinds },
-            label: { type: 'string' },
-            description: { type: 'string' },
-            position: positionSchema,
-            parentId: { type: 'string' },
-            config: { type: 'object' },
-            hitl: {
-              type: 'object',
-              properties: {
-                enabled: { type: 'boolean' },
-                timing: { enum: ['before', 'after', 'conditional'] },
-                inputType: { enum: ['approval', 'text', 'selection'] },
-                condition: { type: 'string' },
-              },
-              additionalProperties: false,
-            },
-          },
-          additionalProperties: false,
-        },
+        node: addNodeSchema,
       },
     },
     {
@@ -255,7 +304,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only proposal. Operations may add or update canonical source-to-target edges as normal, conditional, command, or fallback routes; a return source/target connection forms derived loop topology and is never a loop mode. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, freeze, or directly modify the accepted graph.',
+          'Creates a review-only proposal. Nodes are exactly Start, Step, or End; every added Step requires an executor, while participation.internalTools, HITL, and modifiers are independent Step semantics. Start and End never accept Step-only fields. Operations may add or update canonical source-to-target edges as normal, conditional, command, or fallback routes; a return source/target connection forms derived loop topology and is never a loop mode. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, freeze, or directly modify the accepted graph.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],

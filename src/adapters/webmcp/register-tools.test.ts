@@ -6,8 +6,20 @@ import { registerWebMcpTools } from './register-tools';
 
 type RegisteredTool = {
   name: string;
+  title: string;
+  description: string;
   inputSchema: Record<string, unknown>;
   execute: (input: unknown) => Promise<unknown>;
+};
+
+type JsonSchema = {
+  required?: string[];
+  properties?: Record<string, JsonSchema>;
+  oneOf?: JsonSchema[];
+  const?: string | boolean;
+  enum?: string[];
+  additionalProperties?: boolean;
+  description?: string;
 };
 
 describe('WebMCP adapter', () => {
@@ -68,30 +80,23 @@ describe('WebMCP adapter', () => {
       'propose_graph_changes',
       'get_branch_scenarios',
     ]);
-    const proposalSchema = registered.get('propose_graph_changes')!.inputSchema as {
-      required?: string[];
-      properties?: {
-        operations?: {
-          items?: {
-            oneOf?: Array<{
-              properties?: {
-                type?: { const?: string };
-                node?: { properties?: Record<string, unknown> };
-                edge?: { properties?: Record<string, unknown> };
-                patch?: { properties?: Record<string, unknown> };
-              };
-            }>;
-          };
-        };
-      };
+    const proposalTool = registered.get('propose_graph_changes')!;
+    const proposalSchema = proposalTool.inputSchema as JsonSchema & {
+      properties?: Record<string, JsonSchema & { items?: JsonSchema }>;
     };
     const variants = proposalSchema.properties?.operations?.items?.oneOf ?? [];
     const operationTypes = variants.map((variant) => variant.properties?.type?.const);
     const addNode = variants.find((variant) => variant.properties?.type?.const === 'add_node');
+    const updateNode = variants.find((variant) => variant.properties?.type?.const === 'update_node');
     const addEdge = variants.find((variant) => variant.properties?.type?.const === 'add_edge');
     const updateEdge = variants.find((variant) => variant.properties?.type?.const === 'update_edge');
-    const edgeModes = (properties?: Record<string, unknown>) =>
-      (properties?.mode as { enum?: string[] } | undefined)?.enum;
+    const edgeModes = (properties?: Record<string, JsonSchema>) => properties?.mode?.enum;
+    const addNodeVariants = addNode?.properties?.node?.oneOf ?? [];
+    const nodeKind = (variant: JsonSchema) => variant.properties?.kind?.const;
+    const startNode = addNodeVariants.find((variant) => nodeKind(variant) === 'start');
+    const stepNode = addNodeVariants.find((variant) => nodeKind(variant) === 'step');
+    const endNode = addNodeVariants.find((variant) => nodeKind(variant) === 'end');
+    const stepOnlyProperties = ['executor', 'participation', 'hitl', 'modifiers'];
 
     expect(proposalSchema.required).toEqual(['operations', 'rationale']);
     expect(operationTypes).toEqual(expect.arrayContaining([
@@ -101,7 +106,47 @@ describe('WebMCP adapter', () => {
       'remove_nodes_from_subgraph',
       'dissolve_subgraph',
     ]));
-    expect(addNode?.properties?.node?.properties).toHaveProperty('parentId');
+    expect(addNodeVariants).toHaveLength(3);
+    expect([nodeKind(startNode!), nodeKind(stepNode!), nodeKind(endNode!)]).toEqual([
+      'start',
+      'step',
+      'end',
+    ]);
+    expect(stepNode?.required).toEqual(['id', 'kind', 'label', 'position', 'executor']);
+    expect(stepNode?.properties).toMatchObject({
+      executor: { enum: ['deterministic', 'ai', 'tool', 'human'] },
+      participation: { properties: { internalTools: { const: true } } },
+      modifiers: {
+        properties: {
+          guardrail: { const: true },
+          sensitiveSideEffect: { const: true },
+          storeRead: { const: true },
+          storeWrite: { const: true },
+          retryFallback: { const: true },
+          opaque: { const: true },
+          readiness: { enum: ['degraded', 'unimplemented'] },
+        },
+      },
+    });
+    expect(stepNode?.properties?.hitl?.properties).toMatchObject({
+      enabled: { type: 'boolean' },
+      timing: { enum: ['before', 'after', 'conditional'] },
+      inputType: { enum: ['approval', 'text', 'selection'] },
+      condition: { type: 'string' },
+    });
+    for (const property of stepOnlyProperties) {
+      expect(startNode?.properties).not.toHaveProperty(property);
+      expect(endNode?.properties).not.toHaveProperty(property);
+    }
+    expect(updateNode?.properties?.patch?.properties).toMatchObject({
+      executor: { enum: ['deterministic', 'ai', 'tool', 'human'] },
+      participation: { properties: { internalTools: { const: true } } },
+      hitl: expect.any(Object),
+      modifiers: expect.any(Object),
+    });
+    expect(updateNode?.properties?.patch?.description).toContain('Step-only');
+    expect(proposalTool.description).toContain('Start, Step, or End');
+    expect(proposalTool.description).toContain('requires an executor');
     expect(addEdge?.properties?.edge?.properties).toMatchObject({
       source: { type: 'string' },
       target: { type: 'string' },
@@ -187,5 +232,64 @@ describe('WebMCP adapter', () => {
     });
     expect(state.graph).toEqual(before);
     expect([...registered.keys()]).toHaveLength(3);
+  });
+
+  it('keeps Step-only updates to a Start node invalid and out of accepted state', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-30T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+    const before = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      {
+        registerTool: async (tool: RegisteredTool) => {
+          registered.set(tool.name, tool);
+        },
+      } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const response = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Try to apply Step semantics to structural nodes.',
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'start',
+          patch: {
+            executor: 'ai',
+            participation: { internalTools: true },
+            modifiers: { guardrail: true, readiness: 'degraded' },
+          },
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      proposal: {
+        status: 'invalid',
+        validationErrors: expect.arrayContaining([
+          expect.objectContaining({ code: 'STEP_FIELDS_REQUIRE_STEP' }),
+        ]),
+      },
+    });
+    expect(state.graph).toEqual(before);
+    expect(state.graph.nodes.find((node) => node.id === 'start')).not.toHaveProperty('executor');
+    expect([...registered.keys()]).toEqual([
+      'get_graph',
+      'propose_graph_changes',
+      'get_branch_scenarios',
+    ]);
   });
 });
