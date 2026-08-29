@@ -14,6 +14,7 @@ import {
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   sampleGraph,
+  validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
 
@@ -129,6 +130,52 @@ describe('projectGraphToCanvas', () => {
     expect(frozenEdge.data.presentation).toMatchObject({ frozen: true, invalid: false });
     expect(frozenEdge.reconnectable).toBe(false);
     expect(proposedEdge.data.presentation.proposalState).toBe('updated');
+  });
+
+  it('projects every edge from a source-scoped routing issue and every invalid connection', () => {
+    const invalid = structuredClone(researchIntakeRoutingGraph);
+    invalid.edges.find((edge) => edge.id === 'supervisor-final-report')!.label = '  ';
+    invalid.edges.find((edge) => edge.id === 'supervisor-researcher')!.label = '  ';
+    invalid.edges.find((edge) => edge.id === 'clarify-write-brief')!.label = '  ';
+    invalid.edges.find((edge) => edge.id === 'brief-supervisor')!.mode = 'conditional';
+    invalid.edges.find((edge) => edge.id === 'researcher-continue')!.mode = 'fallback';
+    invalid.edges.push(
+      { id: 'final-report-extra-normal', source: 'final-report', target: 'awaiting-user-reply', mode: 'normal' },
+      { id: 'researcher-extra-fallback', source: 'researcher', target: 'final-report', mode: 'fallback' },
+      { id: 'clarify-self', source: 'clarify-request', target: 'clarify-request', mode: 'command', label: 'retry' },
+      { id: 'research-intake-start-clarify-duplicate', source: 'research-intake-start', target: 'clarify-request', mode: 'normal' },
+      { id: 'clarify-start', source: 'clarify-request', target: 'research-intake-start', mode: 'command', label: 'restart' },
+    );
+
+    const sourceScopedIssueCodes = new Set([
+      'MULTIPLE_NORMAL_EDGES',
+      'CONDITIONAL_EDGE_COUNT',
+      'MULTIPLE_FALLBACKS',
+      'FALLBACK_WITHOUT_CONDITIONS',
+      'CONDITIONAL_LABEL_REQUIRED',
+      'DUPLICATE_CONDITIONAL_LABEL',
+      'COMMAND_LABEL_REQUIRED',
+    ]);
+    const affectedSources = new Set(
+      validateGraph(invalid)
+        .filter((issue) => sourceScopedIssueCodes.has(issue.code))
+        .map((issue) => issue.path?.replace('nodes.', '')),
+    );
+    const canvas = projectGraphToCanvas(invalid, null);
+
+    expect(affectedSources).toEqual(
+      new Set(['research-intake-start', 'final-report', 'write-research-brief', 'researcher', 'research-supervisor', 'clarify-request']),
+    );
+    for (const source of affectedSources) {
+      expect(canvas.edges.filter((edge) => edge.data.edge.source === source)).not.toHaveLength(0);
+      expect(canvas.edges.filter((edge) => edge.data.edge.source === source).every(
+        (edge) => edge.data.presentation.invalid,
+      )).toBe(true);
+    }
+    expect(canvas.edges.find((edge) => edge.id === 'clarify-self')?.data.presentation.invalid).toBe(true);
+    expect(canvas.edges.find((edge) => edge.id === 'research-intake-start-clarify')?.data.presentation.invalid).toBe(true);
+    expect(canvas.edges.find((edge) => edge.id === 'research-intake-start-clarify-duplicate')?.data.presentation.invalid).toBe(true);
+    expect(canvas.edges.find((edge) => edge.id === 'clarify-start')?.data.presentation.invalid).toBe(true);
   });
 
   it('keeps node dimensions stable while previewing proposal badges', () => {

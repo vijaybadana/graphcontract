@@ -539,6 +539,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   const edgeIds = new Set<string>();
   const subgraphIds = new Set<string>();
   const nodeById = new Map<string, GraphNode>();
+  const edgesByConnection = new Map<string, GraphEdge[]>();
 
   for (const subgraph of normalized.subgraphs) {
     if (subgraphIds.has(subgraph.id)) {
@@ -602,6 +603,17 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
 
     const source = nodeById.get(edge.source)!;
     const target = nodeById.get(edge.target)!;
+    if (edge.source === edge.target) {
+      issues.push(
+        issue(
+          'SELF_CONNECTION',
+          `Edge “${edge.id}” cannot connect “${source.label}” to itself.`,
+          `edges.${edge.id}`,
+        ),
+      );
+    }
+    const connectionKey = `${edge.source}\u0000${edge.target}`;
+    edgesByConnection.set(connectionKey, [...(edgesByConnection.get(connectionKey) ?? []), edge]);
     if (source.parentId !== target.parentId) {
       if (source.parentId && source.kind !== 'end') {
         issues.push(
@@ -621,6 +633,19 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
           ),
         );
       }
+    }
+  }
+
+  for (const connectionEdges of edgesByConnection.values()) {
+    if (connectionEdges.length < 2) continue;
+    for (const edge of connectionEdges) {
+      issues.push(
+        issue(
+          'DUPLICATE_CONNECTION',
+          `Only one connection from “${edge.source}” to “${edge.target}” is allowed.`,
+          `edges.${edge.id}`,
+        ),
+      );
     }
   }
 
@@ -707,7 +732,13 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     const nodeOutgoing = outgoing.get(node.id) ?? [];
     if (node.kind === 'end') {
       if (!node.parentId && nodeOutgoing.length > 0) {
-        issues.push(issue('END_HAS_OUTGOING', `End node “${node.label}” cannot have outgoing edges.`));
+        issues.push(
+          issue(
+            'END_HAS_OUTGOING',
+            `End node “${node.label}” cannot have outgoing edges.`,
+            `nodes.${node.id}`,
+          ),
+        );
       }
       continue;
     }
@@ -721,35 +752,77 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
       issues.push(
         issue('MIXED_ROUTING', `“${node.label}” cannot mix normal and routed edges.`, `nodes.${node.id}`),
       );
+    } else if (normal.length > 1) {
+      issues.push(
+        issue(
+          'MULTIPLE_NORMAL_EDGES',
+          `“${node.label}” can have only one normal outgoing edge.`,
+          `nodes.${node.id}`,
+        ),
+      );
     } else if (normal.length !== 1 && conditional.length === 0 && command.length === 0) {
       issues.push(
         issue('OUTGOING_REQUIRED', `“${node.label}” needs one normal edge, command edge, or two to five conditional edges.`, `nodes.${node.id}`),
       );
-    } else if (normal.length > 1) {
-      issues.push(issue('MULTIPLE_NORMAL_EDGES', `“${node.label}” can have only one normal outgoing edge.`));
     }
 
     if (conditional.length > 0 && (conditional.length < 2 || conditional.length > 5)) {
-      issues.push(issue('CONDITIONAL_EDGE_COUNT', `“${node.label}” must have two to five conditional edges.`));
+      issues.push(
+        issue(
+          'CONDITIONAL_EDGE_COUNT',
+          `“${node.label}” must have two to five conditional edges.`,
+          `nodes.${node.id}`,
+        ),
+      );
     }
     if (fallback.length > 1) {
-      issues.push(issue('MULTIPLE_FALLBACKS', `“${node.label}” can have at most one fallback edge.`));
+      issues.push(
+        issue(
+          'MULTIPLE_FALLBACKS',
+          `“${node.label}” can have at most one fallback edge.`,
+          `nodes.${node.id}`,
+        ),
+      );
     }
     if (fallback.length > 0 && conditional.length === 0) {
-      issues.push(issue('FALLBACK_WITHOUT_CONDITIONS', `“${node.label}” needs conditional edges before a fallback.`));
+      issues.push(
+        issue(
+          'FALLBACK_WITHOUT_CONDITIONS',
+          `“${node.label}” needs conditional edges before a fallback.`,
+          `nodes.${node.id}`,
+        ),
+      );
     }
 
     const labels = conditional.map((edge) => edge.label?.trim() ?? '');
     if (labels.some((label) => !label)) {
-      issues.push(issue('CONDITIONAL_LABEL_REQUIRED', `Every conditional edge from “${node.label}” needs a label.`));
+      issues.push(
+        issue(
+          'CONDITIONAL_LABEL_REQUIRED',
+          `Every conditional edge from “${node.label}” needs a label.`,
+          `nodes.${node.id}`,
+        ),
+      );
     }
     if (new Set(labels).size !== labels.length) {
-      issues.push(issue('DUPLICATE_CONDITIONAL_LABEL', `Conditional labels from “${node.label}” must be unique.`));
+      issues.push(
+        issue(
+          'DUPLICATE_CONDITIONAL_LABEL',
+          `Conditional labels from “${node.label}” must be unique.`,
+          `nodes.${node.id}`,
+        ),
+      );
     }
 
     const commandLabels = command.map((edge) => edge.label?.trim() ?? '');
     if (commandLabels.some((label) => !label)) {
-      issues.push(issue('COMMAND_LABEL_REQUIRED', `Every command edge from “${node.label}” needs a label.`));
+      issues.push(
+        issue(
+          'COMMAND_LABEL_REQUIRED',
+          `Every command edge from “${node.label}” needs a label.`,
+          `nodes.${node.id}`,
+        ),
+      );
     }
 
     for (const edge of [...conditional, ...command]) {
@@ -765,8 +838,12 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     }
   }
 
-  if (starts[0] && (incoming.get(starts[0].id) ?? []).length > 0) {
-    issues.push(issue('START_HAS_INCOMING', 'The Start node cannot have incoming edges.'));
+  if (starts[0]) {
+    for (const edge of incoming.get(starts[0].id) ?? []) {
+      issues.push(
+        issue('START_HAS_INCOMING', 'The Start node cannot have incoming edges.', `edges.${edge.id}`),
+      );
+    }
   }
 
   if (starts[0]) {

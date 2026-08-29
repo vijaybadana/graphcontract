@@ -61,6 +61,45 @@ describe('workspace application service', () => {
     expect(approval.state.graph).toEqual(before);
   });
 
+  it('keeps self and duplicate connection proposals invalid, unapprovable, and out of accepted state', () => {
+    const initial = service.createInitial();
+    const before = structuredClone(initial.graph);
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Add two invalid routes for review.',
+      operations: [
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'classifier-self',
+            source: 'classifier',
+            target: 'classifier',
+            mode: 'conditional',
+            label: 'retry',
+          },
+        },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'start-classifier-duplicate',
+            source: 'start',
+            target: 'classifier',
+            mode: 'normal',
+          },
+        },
+      ],
+    });
+
+    expect(proposed.result?.proposal).toMatchObject({ status: 'invalid' });
+    expect(proposed.result?.proposal.validationErrors?.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(['SELF_CONNECTION', 'DUPLICATE_CONNECTION']),
+    );
+    expect(proposed.state.graph).toEqual(before);
+
+    const approval = service.approveProposal(proposed.state);
+    expect(approval.result?.ok).toBe(false);
+    expect(approval.state.graph).toEqual(before);
+  });
+
   it('approves a canonical source-to-target return edge as derived loop topology', () => {
     const initial = service.createInitial();
     const proposed = service.submitProposal(initial, {

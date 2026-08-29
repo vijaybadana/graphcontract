@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ReactNode } from 'react';
 
 import type { CanvasEdgePresentation } from '@/src/adapters/react-flow/project-graph';
+import { projectGraphToCanvas } from '@/src/adapters/react-flow/project-graph';
+import { researchIntakeRoutingGraph } from '@/src/domain';
 import { RoutingEdge, routingEdgeTokens } from './routing-edge';
 
 afterEach(() => cleanup());
@@ -131,6 +133,31 @@ describe('RoutingEdge in React Flow', () => {
       expect(document.querySelector('[data-edge-id="clarify-write-brief"]')?.getAttribute('data-frozen')).toBe('true');
     });
     expect(document.querySelector('[data-edge-id="clarify-write-brief"]')?.textContent).toContain('Frozen');
+  });
+
+  it('mounts a source-scoped validation failure as an actionable invalid route', async () => {
+    const invalid = structuredClone(researchIntakeRoutingGraph);
+    invalid.edges.find((edge) => edge.id === 'supervisor-final-report')!.label = '  ';
+    const edge = projectGraphToCanvas(invalid, null).edges.find(
+      (candidate) => candidate.id === 'supervisor-researcher',
+    )!;
+
+    render(
+      <MountedRoutingPreview>
+        <RoutingEdgePreview
+          id={edge.id}
+          label={edge.label as string | undefined}
+          presentation={edge.data.presentation}
+        />
+      </MountedRoutingPreview>,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-edge-id="supervisor-researcher"]')?.getAttribute('data-invalid')).toBe('true');
+    });
+    const label = document.querySelector('[data-edge-id="supervisor-researcher"]')!;
+    expect(label.textContent).toContain('Invalid');
+    expect(label.getAttribute('aria-label')).toContain('invalid');
   });
 
   it('uses stroke pattern and lock precedence for hoverable routing states', () => {

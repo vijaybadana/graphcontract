@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createProposal, sampleGraph } from '@/src/domain';
+import { createWorkspaceService } from '@/src/application/workspace';
 import { registerWebMcpTools } from './register-tools';
 
 type RegisteredTool = {
@@ -121,5 +122,70 @@ describe('WebMCP adapter', () => {
       'command',
       'fallback',
     ]);
+  });
+
+  it('returns an invalid self or duplicate proposal without changing the accepted graph', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-30T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+    const before = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      {
+        registerTool: async (tool: RegisteredTool) => {
+          registered.set(tool.name, tool);
+        },
+      } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const response = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Try invalid canonical connections.',
+      operations: [
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'classifier-self',
+            source: 'classifier',
+            target: 'classifier',
+            mode: 'conditional',
+            label: 'retry',
+          },
+        },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'start-classifier-duplicate',
+            source: 'start',
+            target: 'classifier',
+            mode: 'normal',
+          },
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      proposal: {
+        status: 'invalid',
+        validationErrors: expect.arrayContaining([
+          expect.objectContaining({ code: 'SELF_CONNECTION' }),
+          expect.objectContaining({ code: 'DUPLICATE_CONNECTION' }),
+        ]),
+      },
+    });
+    expect(state.graph).toEqual(before);
+    expect([...registered.keys()]).toHaveLength(3);
   });
 });
