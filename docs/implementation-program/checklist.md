@@ -11,19 +11,19 @@
 
 ## Checklist
 
-- [ ] **1. Close and baseline routing semantics**
+- [x] **1. Close and baseline routing semantics**
   Spec ref: `docs/epics/routing-semantics/design-contract.md`
   What to build: Finish the active Edge, Conditional, Command, Loop and Fallback package; obtain final owner review and record its commit as the implementation-program baseline.
   Acceptance: Routing visuals, schema, migrations, proposals, scenarios, persistence and downloads are browser-verified; working tree is clean.
   Verify: Full test suite, lint, production build, real Chromium routing journey, `git status --short`.
 
-- [ ] **2. Normalize Step semantics and migrations**
+- [x] **2. Normalize Step semantics and migrations**
   Spec ref: `lead-handover.md > Package 1 — normalized Step and modifier system`
   What to build: Replace incompatible work-node classes with one canonical Step plus presets/modifiers while preserving legacy imports and visible meaning.
   Acceptance: All old fixtures migrate; new Step combinations parse, validate, persist, undo and round-trip through export.
   Verify: Focused domain/migration/application/state tests plus fixture snapshot comparison.
 
-- [ ] **3. Build Step component, palette presets and inspector**
+- [x] **3. Build Step component, palette presets and inspector**
   Spec ref: `docs/design-system/implementation-contract.md > Step component anatomy`
   What to build: Implement compact node anatomy, modifier rail/overflow, states, Phosphor icons, palette presets and WebMCP-editable inspector fields.
   Acceptance: Step, Agent, Action, Tool and Human review presets all create the same canonical object; complex modifier combinations remain readable and accessible.
