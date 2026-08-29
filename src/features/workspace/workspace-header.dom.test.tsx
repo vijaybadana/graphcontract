@@ -48,4 +48,30 @@ describe('WorkspaceHeader freeze control', () => {
     expect(screen.getByRole('button', { name: 'Unfreeze contract; currently frozen' })).toBeTruthy();
     expect(screen.getByText('Unfreeze')).toBeTruthy();
   });
+
+  it('locks Reset example graph for every proposal review state', () => {
+    const baseProps = {
+      graphName: 'Research Intake',
+      graphStatus: 'draft' as const,
+      webMcpStatus: 'connected' as const,
+      nodeCount: 8,
+      edgeCount: 8,
+      issueCount: 0,
+      paletteOpen: true,
+      inspectorOpen: true,
+      canUndo: false,
+      canRedo: false,
+      canDuplicate: false,
+      canDelete: false,
+      canFreeze: false,
+      ...callbacks,
+    };
+
+    render(<WorkspaceHeader {...baseProps} proposalPending />);
+    expect(screen.getByRole('button', { name: 'Reset example graph' }).disabled).toBe(true);
+
+    cleanup();
+    render(<WorkspaceHeader {...baseProps} proposalPending={false} />);
+    expect(screen.getByRole('button', { name: 'Reset example graph' }).disabled).toBe(false);
+  });
 });

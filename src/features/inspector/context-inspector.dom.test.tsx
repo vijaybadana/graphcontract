@@ -4,7 +4,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createProposal, researchIntakeRoutingGraph } from '@/src/domain';
+import { createProposal, researchIntakeRoutingGraph, sampleGraph } from '@/src/domain';
 import { useGraphStore } from '@/src/state/workspace-store';
 import { ContextInspector } from './context-inspector';
 
@@ -22,6 +22,17 @@ function selectEdge(edgeId: string) {
       subgraphIds: [],
       edgeIds: [edgeId],
       primary: { type: 'edge', id: edgeId },
+    },
+  });
+}
+
+function selectNode(nodeId: string) {
+  useGraphStore.setState({
+    selection: {
+      nodeIds: [nodeId],
+      subgraphIds: [],
+      edgeIds: [],
+      primary: { type: 'node', id: nodeId },
     },
   });
 }
@@ -49,6 +60,79 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ContextInspector routing details', () => {
+  it('edits normalized Step executor, participation, HITL, and modifier summaries independently', () => {
+    useGraphStore.setState({ graph: structuredClone(sampleGraph) });
+    selectNode('classifier');
+    renderInspector();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Step executor' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Tool' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Internal tools' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+    fireEvent.click(screen.getByRole('button', { name: 'HITL timing' }));
+    fireEvent.click(screen.getByRole('option', { name: 'After' }));
+    fireEvent.click(screen.getByRole('button', { name: 'HITL input type' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Text' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Human input condition' }), {
+      target: { value: 'risk.requiresReview === true' },
+    });
+    for (const label of [
+      'Guardrail',
+      'Sensitive side effect',
+      'Store read',
+      'Store write',
+      'Retry or fallback',
+      'Opaque or prebuilt',
+    ]) {
+      fireEvent.click(screen.getByRole('checkbox', { name: label }));
+    }
+    fireEvent.change(screen.getByRole('combobox', { name: 'Readiness' }), {
+      target: { value: 'degraded' },
+    });
+
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier')).toMatchObject({
+      kind: 'step',
+      executor: 'tool',
+      participation: { internalTools: true },
+      hitl: {
+        enabled: true,
+        timing: 'after',
+        inputType: 'text',
+        condition: 'risk.requiresReview === true',
+      },
+      modifiers: {
+        guardrail: true,
+        sensitiveSideEffect: true,
+        storeRead: true,
+        storeWrite: true,
+        retryFallback: true,
+        opaque: true,
+        readiness: 'degraded',
+      },
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Store read' }));
+    const classifier = useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier');
+    expect(classifier).toMatchObject({
+      executor: 'tool',
+      hitl: { enabled: true, timing: 'after', inputType: 'text' },
+      modifiers: { sensitiveSideEffect: true, storeWrite: true, readiness: 'degraded' },
+    });
+    expect(classifier?.kind === 'step' && classifier.modifiers?.storeRead).toBeUndefined();
+  });
+
+  it('keeps Start and End structural so no Step-only fields are exposed', () => {
+    useGraphStore.setState({ graph: structuredClone(sampleGraph) });
+    selectNode('start');
+    renderInspector();
+
+    expect(screen.getByText('Node details')).toBeTruthy();
+    expect(screen.queryByText('Executor')).toBeNull();
+    expect(screen.queryByText('Participation')).toBeNull();
+    expect(screen.queryByText('Human input')).toBeNull();
+    expect(screen.queryByText('Modifier summary')).toBeNull();
+  });
+
   it('edits a command route label, condition, and destination through undoable store actions', () => {
     selectEdge('clarify-write-brief');
     renderInspector();

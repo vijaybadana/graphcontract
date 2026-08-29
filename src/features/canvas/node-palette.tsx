@@ -19,6 +19,9 @@ import './node-palette.css';
 
 /** Matches the application creation API; work presets create canonical Steps. */
 export type PaletteKind = NodeCreationPreset | 'subgraph';
+/** Existing drag payloads used `human_input`; accept it at the UI boundary
+ * while keeping the canonical creation preset named `humanReview`. */
+export type PalettePayloadKind = PaletteKind | 'human_input';
 export type PaletteItem = {
   kind: PaletteKind;
   label: string;
@@ -35,6 +38,13 @@ export const paletteItems: readonly PaletteItem[] = [
   { kind: 'tool', label: 'Tool', group: 'Work' },
   { kind: 'humanReview', label: 'Human review', group: 'Human' },
 ];
+
+/** One boundary for palette clicks and drag payloads. The palette retains its
+ * authored payload, while every work alias converges on a canonical preset. */
+export function normalizePalettePreset(payload: string): PaletteKind | null {
+  const kind = payload === 'human_input' ? 'humanReview' : payload;
+  return paletteItems.some((item) => item.kind === kind) ? (kind as PaletteKind) : null;
+}
 
 const groups: PaletteItem['group'][] = ['Flow', 'Structure', 'Work', 'Human'];
 
@@ -221,7 +231,7 @@ function NodePaletteContents({
   );
 }
 
-export function readDroppedPaletteKind(event: DragEvent<HTMLDivElement>): PaletteKind | null {
-  const kind = event.dataTransfer.getData('application/graphcontract-node') as PaletteKind;
-  return paletteItems.some((item) => item.kind === kind) ? kind : null;
+export function readDroppedPaletteKind(event: DragEvent<HTMLDivElement>): PalettePayloadKind | null {
+  const payload = event.dataTransfer.getData('application/graphcontract-node');
+  return normalizePalettePreset(payload) ? (payload as PalettePayloadKind) : null;
 }

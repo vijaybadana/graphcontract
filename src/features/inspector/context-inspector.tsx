@@ -7,7 +7,7 @@ import {
   Shield,
   WarningCircle,
 } from '@phosphor-icons/react';
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useRef } from 'react';
 
 import './context-inspector.css';
 
@@ -17,27 +17,40 @@ import {
   GraphNode,
   GraphProposal,
   GraphSubgraph,
+  StepExecutor,
+  StepModifierSummary,
   ValidationIssue,
   validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
 import { topologyDerivedLoopEdgeIds } from '@/src/adapters/react-flow/project-graph';
 import { evaluateConnection } from '@/src/application/connection-policy';
+import type { StepModifierInspectorSection } from '@/src/features/canvas/contract-node';
 import {
   InspectorSelect,
   InspectorSelectOption,
 } from '@/src/features/inspector/inspector-select';
 import { useGraphStore } from '@/src/state/workspace-store';
 
+type StepNode = Extract<GraphNode, { kind: 'step' }>;
+type StepHitlConfig = NonNullable<StepNode['hitl']>;
+type StepReadiness = NonNullable<StepNode['modifiers']>['readiness'];
+
+const executorOptions: readonly InspectorSelectOption<StepExecutor>[] = [
+  { value: 'deterministic', label: 'Deterministic' },
+  { value: 'ai', label: 'AI' },
+  { value: 'tool', label: 'Tool' },
+  { value: 'human', label: 'Human' },
+];
 const hitlTimingOptions: readonly InspectorSelectOption<
-  NonNullable<NonNullable<GraphNode['hitl']>['timing']>
+  NonNullable<StepHitlConfig['timing']>
 >[] = [
   { value: 'before', label: 'Before' },
   { value: 'after', label: 'After' },
   { value: 'conditional', label: 'Conditional' },
 ];
 const hitlInputOptions: readonly InspectorSelectOption<
-  NonNullable<NonNullable<GraphNode['hitl']>['inputType']>
+  NonNullable<StepHitlConfig['inputType']>
 >[] = [
   { value: 'approval', label: 'Approval' },
   { value: 'text', label: 'Text' },
@@ -51,6 +64,11 @@ const edgeModeOptions: readonly InspectorSelectOption<GraphEdge['mode']>[] = [
 ];
 
 const noParentSubgraphValue = '__no_subgraph__';
+
+export type InspectorFocusRequest = {
+  section: StepModifierInspectorSection;
+  requestId: number;
+};
 
 export function subgraphParentOptions(
   subgraphs: GraphSubgraph[],
@@ -126,7 +144,7 @@ function edgeDestinationOptions(
     : [{ value: edge.target, label: `Missing target · ${edge.target}` }, ...destinations];
 }
 
-export function ContextInspector() {
+export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFocusRequest | null }) {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
   const selection = useGraphStore((state) => state.selection);
@@ -168,6 +186,36 @@ export function ContextInspector() {
     graph.nodes.some((node) => node.id === nodeId),
   );
   const parentOptions = subgraphParentOptions(graph.subgraphs);
+  const stepSectionRefs = useRef<
+    Partial<Record<StepModifierInspectorSection, HTMLElement>>
+  >({});
+
+  useEffect(() => {
+    if (!focusRequest || node?.kind !== 'step') return;
+    const frame = requestAnimationFrame(() => {
+      stepSectionRefs.current[focusRequest.section]?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusRequest, node?.id, node?.kind]);
+
+  const updateModifierFlag = (
+    key: Exclude<keyof StepModifierSummary, 'readiness'>,
+    enabled: boolean,
+  ) => {
+    if (node?.kind !== 'step') return;
+    const modifiers = { ...node.modifiers };
+    if (enabled) modifiers[key] = true;
+    else delete modifiers[key];
+    updateNode(node.id, { modifiers });
+  };
+
+  const updateReadiness = (readiness: StepReadiness | 'ready') => {
+    if (node?.kind !== 'step') return;
+    const modifiers = { ...node.modifiers };
+    if (readiness === 'ready') delete modifiers.readiness;
+    else modifiers.readiness = readiness;
+    updateNode(node.id, { modifiers });
+  };
 
   return (
     <section className="context-inspector" aria-label="Context inspector">
@@ -344,8 +392,63 @@ export function ContextInspector() {
               </Field>
             </div>
           </section>
-          {['agent', 'action', 'tool'].includes(node.kind) && (
-            <section className="context-inspector__group context-inspector__group--tinted" aria-labelledby="human-input-heading">
+          {node.kind === 'step' && (
+            <>
+            <section
+              ref={(element) => { stepSectionRefs.current.executor = element ?? undefined; }}
+              id="inspector-step-executor"
+              data-inspector-section="executor"
+              tabIndex={-1}
+              className="context-inspector__group context-inspector__group--tinted"
+              aria-labelledby="step-executor-heading"
+            >
+              <h3 id="step-executor-heading">Executor</h3>
+              <div className="context-inspector__fields">
+                <Field label="Step executor">
+                  <InspectorSelect
+                    value={node.executor}
+                    options={executorOptions}
+                    disabled={!editable}
+                    ariaLabel="Step executor"
+                    onChange={(executor) => updateNode(node.id, { executor })}
+                  />
+                </Field>
+              </div>
+            </section>
+            <section
+              ref={(element) => { stepSectionRefs.current.participation = element ?? undefined; }}
+              id="inspector-step-participation"
+              data-inspector-section="participation"
+              tabIndex={-1}
+              className="context-inspector__group context-inspector__group--tinted"
+              aria-labelledby="step-participation-heading"
+            >
+              <div className="context-inspector__toggle-row">
+                <h3 id="step-participation-heading">Participation</h3>
+                <label className="context-inspector__toggle-label">
+                  <span>Internal tools</span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(node.participation?.internalTools)}
+                    disabled={!editable}
+                    onChange={(event) =>
+                      updateNode(node.id, {
+                        participation: event.target.checked ? { internalTools: true } : {},
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <p className="context-inspector__help">Internal calls do not change the Step executor.</p>
+            </section>
+            <section
+              ref={(element) => { stepSectionRefs.current.hitl = element ?? undefined; }}
+              id="inspector-step-hitl"
+              data-inspector-section="hitl"
+              tabIndex={-1}
+              className="context-inspector__group context-inspector__group--tinted"
+              aria-labelledby="human-input-heading"
+            >
               <div className="context-inspector__toggle-row">
                 <h3 id="human-input-heading">Human input</h3>
                 <label className="context-inspector__toggle-label">
@@ -354,7 +457,14 @@ export function ContextInspector() {
                   type="checkbox"
                   checked={Boolean(node.hitl?.enabled)}
                   disabled={!editable}
-                  onChange={(event) => updateNode(node.id, { hitl: { enabled: event.target.checked, timing: node.hitl?.timing ?? 'before', inputType: node.hitl?.inputType ?? 'approval' } })}
+                  onChange={(event) => updateNode(node.id, {
+                    hitl: {
+                      ...node.hitl,
+                      enabled: event.target.checked,
+                      timing: node.hitl?.timing ?? 'before',
+                      inputType: node.hitl?.inputType ?? 'approval',
+                    },
+                  })}
                 />
                 </label>
               </div>
@@ -365,6 +475,7 @@ export function ContextInspector() {
                       disabled={!editable}
                       value={node.hitl.timing ?? 'before'}
                       options={hitlTimingOptions}
+                      ariaLabel="HITL timing"
                       onChange={(timing) =>
                         updateNode(node.id, { hitl: { ...node.hitl!, timing } })
                       }
@@ -375,14 +486,77 @@ export function ContextInspector() {
                       disabled={!editable}
                       value={node.hitl.inputType ?? 'approval'}
                       options={hitlInputOptions}
+                      ariaLabel="HITL input type"
                       onChange={(inputType) =>
                         updateNode(node.id, { hitl: { ...node.hitl!, inputType } })
                       }
                     />
                   </Field>
+                  <Field label="Condition">
+                    <input
+                      aria-label="Human input condition"
+                      value={node.hitl.condition ?? ''}
+                      disabled={!editable}
+                      onChange={(event) =>
+                        updateNode(node.id, { hitl: { ...node.hitl!, condition: event.target.value } })
+                      }
+                      className="input"
+                      placeholder="Optional condition"
+                    />
+                  </Field>
                 </div>
               )}
             </section>
+            <section
+              ref={(element) => { stepSectionRefs.current.modifiers = element ?? undefined; }}
+              id="inspector-step-modifiers"
+              data-inspector-section="modifiers"
+              tabIndex={-1}
+              className="context-inspector__group context-inspector__group--tinted"
+              aria-labelledby="step-modifiers-heading"
+            >
+              <h3 id="step-modifiers-heading">Modifier summary</h3>
+              <div className="context-inspector__fields">
+                <label className="context-inspector__toggle-label">
+                  <span>Guardrail</span>
+                  <input type="checkbox" checked={Boolean(node.modifiers?.guardrail)} disabled={!editable} onChange={(event) => updateModifierFlag('guardrail', event.target.checked)} />
+                </label>
+                <label className="context-inspector__toggle-label">
+                  <span>Sensitive side effect</span>
+                  <input type="checkbox" checked={Boolean(node.modifiers?.sensitiveSideEffect)} disabled={!editable} onChange={(event) => updateModifierFlag('sensitiveSideEffect', event.target.checked)} />
+                </label>
+                <label className="context-inspector__toggle-label">
+                  <span>Store read</span>
+                  <input type="checkbox" checked={Boolean(node.modifiers?.storeRead)} disabled={!editable} onChange={(event) => updateModifierFlag('storeRead', event.target.checked)} />
+                </label>
+                <label className="context-inspector__toggle-label">
+                  <span>Store write</span>
+                  <input type="checkbox" checked={Boolean(node.modifiers?.storeWrite)} disabled={!editable} onChange={(event) => updateModifierFlag('storeWrite', event.target.checked)} />
+                </label>
+                <label className="context-inspector__toggle-label">
+                  <span>Retry or fallback</span>
+                  <input type="checkbox" checked={Boolean(node.modifiers?.retryFallback)} disabled={!editable} onChange={(event) => updateModifierFlag('retryFallback', event.target.checked)} />
+                </label>
+                <label className="context-inspector__toggle-label">
+                  <span>Opaque or prebuilt</span>
+                  <input type="checkbox" checked={Boolean(node.modifiers?.opaque)} disabled={!editable} onChange={(event) => updateModifierFlag('opaque', event.target.checked)} />
+                </label>
+                <Field label="Readiness">
+                  <select
+                    aria-label="Readiness"
+                    value={node.modifiers?.readiness ?? 'ready'}
+                    disabled={!editable}
+                    onChange={(event) => updateReadiness(event.target.value as StepReadiness | 'ready')}
+                    className="input"
+                  >
+                    <option value="ready">Ready</option>
+                    <option value="degraded">Degraded</option>
+                    <option value="unimplemented">Unimplemented</option>
+                  </select>
+                </Field>
+              </div>
+            </section>
+            </>
           )}
           <div className="context-inspector__actions">
             <button

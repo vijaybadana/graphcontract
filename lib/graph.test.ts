@@ -110,7 +110,8 @@ describe('proposals and scenarios', () => {
           type: 'add_node',
           node: {
             id: 'review-agent',
-            kind: 'agent',
+            kind: 'step',
+            executor: 'ai',
             label: 'Review agent',
             parentId: subgraph.id,
             position: { x: 60, y: 80 },
@@ -156,7 +157,8 @@ describe('proposals and scenarios', () => {
         type: 'add_node',
         node: {
           id: 'review-agent',
-          kind: 'agent',
+          kind: 'step',
+          executor: 'ai',
           label: 'Review agent',
           parentId: 'review-area',
           position: { x: 50, y: 70 },
@@ -189,7 +191,8 @@ describe('proposals and scenarios', () => {
         type: 'add_node',
         node: {
           id: 'orphaned-review-agent',
-          kind: 'agent',
+          kind: 'step',
+          executor: 'ai',
           label: 'Orphaned review agent',
           parentId: 'later-subgraph',
           position: { x: 0, y: 0 },
@@ -243,7 +246,8 @@ describe('proposals and scenarios', () => {
           type: 'add_node',
           node: {
             id: 'billing-review-agent',
-            kind: 'agent',
+            kind: 'step',
+            executor: 'ai',
             label: 'Billing review',
             parentId: 'billing-review',
             position: { x: 210, y: 100 },
@@ -309,7 +313,8 @@ describe('proposals and scenarios', () => {
         type: 'add_node',
         node: {
           id: 'fraud',
-          kind: 'action',
+          kind: 'step',
+          executor: 'deterministic',
           label: 'Fraud Check',
           position: { x: 690, y: 20 },
         },
@@ -332,7 +337,8 @@ describe('proposals and scenarios', () => {
         type: 'add_node',
         node: {
           id: 'human-approval',
-          kind: 'human_input',
+          kind: 'step',
+          executor: 'human',
           label: 'Human Approval',
           position: { x: 880, y: 20 },
         },

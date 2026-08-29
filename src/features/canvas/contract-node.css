@@ -71,5 +71,5 @@
 .contract-node-membership-status { border: 1px solid #f2c45f; border-radius: 999px; padding: .25rem .3125rem; background: #fff7df; color: #8b5b08; }
 .contract-node-handle { width: .6875rem !important; height: .6875rem !important; border: 2px solid #fff !important; background: var(--node-accent) !important; }
 
-@media (max-width: 480px) { .contract-node-shell { width: 12rem; } .contract-node-heading { gap: .5rem; padding-inline: .625rem; } .contract-node-meta { padding-inline: .625rem; } .contract-node-divider { margin-inline: .625rem; } .contract-node-modifier-chip { max-width: 3rem; } }
+@media (max-width: 480px) { .contract-node-heading { gap: .5rem; padding-inline: .625rem; } .contract-node-meta { padding-inline: .625rem; } .contract-node-divider { margin-inline: .625rem; } .contract-node-modifier-chip { max-width: 3rem; } }
 @media (prefers-reduced-motion: reduce) { .contract-node-shell { transition: none; } }

@@ -31,16 +31,24 @@ import { NodeKind, validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
-import { ContractNode } from '@/src/features/canvas/contract-node';
+import {
+  ContractNode,
+  type StepModifierPresentation,
+} from '@/src/features/canvas/contract-node';
 import { RoutingEdge } from '@/src/features/canvas/routing-edge';
 import {
   NodePalette,
   PaletteKind,
+  PalettePayloadKind,
+  normalizePalettePreset,
   readDroppedPaletteKind,
 } from '@/src/features/canvas/node-palette';
 import { SubgraphNode } from '@/src/features/canvas/subgraph-node';
 import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
-import { ContextInspector } from '@/src/features/inspector/context-inspector';
+import {
+  ContextInspector,
+  type InspectorFocusRequest,
+} from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
 import {
@@ -74,10 +82,7 @@ const defaultEdgeOptions: DefaultEdgeOptions = {
 };
 const minimapColors: Record<NodeKind, string> = {
   start: '#34d399',
-  agent: '#d79049',
-  action: '#a78bfa',
-  tool: '#38bdf8',
-  human_input: '#fb7185',
+  step: '#64748b',
   end: '#52525b',
 };
 
@@ -118,12 +123,41 @@ export function GraphWorkspace() {
   const [paletteWidth, setPaletteWidth] = useState(232);
   const [inspectorWidth, setInspectorWidth] = useState(344);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
+  const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
   const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
 
   const editable = graph.status === 'draft' && !proposal;
+  const openInspectorForSelection = useCallback(() => {
+    setRightTab('review');
+    setShowInspector(true);
+    if (isCompactWorkspace) {
+      setShowPalette(false);
+      setCompactPanelPreference('inspector');
+    }
+  }, [isCompactWorkspace]);
+  const activateStepModifier = useCallback(
+    (nodeId: string, modifier: StepModifierPresentation) => {
+      // Projection owns the chip; workspace owns the accepted selection and
+      // inspector navigation. Proposal-only ghost nodes intentionally remain
+      // review-only because they are absent from the accepted graph.
+      if (!graph.nodes.some((node) => node.id === nodeId && node.kind === 'step')) return;
+      setSelection({
+        nodeIds: [nodeId],
+        subgraphIds: [],
+        edgeIds: [],
+        primary: { type: 'node', id: nodeId },
+      });
+      openInspectorForSelection();
+      setInspectorFocusRequest({
+        section: modifier.inspectorSection,
+        requestId: Date.now(),
+      });
+    },
+    [graph.nodes, openInspectorForSelection, setSelection],
+  );
   const { inspectorVisible, paletteVisible } = resolveWorkspacePanelVisibility({
     compact: isCompactWorkspace,
     paletteRequested: showPalette,
@@ -143,20 +177,27 @@ export function GraphWorkspace() {
     const projected = projectGraphToCanvas(graph, proposal);
     return {
       ...projected,
-      nodes: projected.nodes.map((node) =>
-        node.type === 'subgraph'
-          ? {
-              ...node,
-              data: {
-                ...node.data,
-                collapseEditable: editable,
-                onToggleCollapse: editable ? toggleSubgraphCollapse : undefined,
-              },
-            }
-          : node,
-      ),
+      nodes: projected.nodes.map((node) => {
+        if (node.type === 'subgraph') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              collapseEditable: editable,
+              onToggleCollapse: editable ? toggleSubgraphCollapse : undefined,
+            },
+          };
+        }
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            onModifierActivate: activateStepModifier,
+          },
+        };
+      }),
     };
-  }, [editable, graph, proposal, toggleSubgraphCollapse]);
+  }, [activateStepModifier, editable, graph, proposal, toggleSubgraphCollapse]);
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
     projectedEdges: canvas.edges,
@@ -335,15 +376,6 @@ export function GraphWorkspace() {
     [canvas.nodes, editable, graph, updateEdge],
   );
 
-  const openInspectorForSelection = useCallback(() => {
-    setRightTab('review');
-    setShowInspector(true);
-    if (isCompactWorkspace) {
-      setShowPalette(false);
-      setCompactPanelPreference('inspector');
-    }
-  }, [isCompactWorkspace]);
-
   const handleSelectionChange = useCallback(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
       const nextSelection = workspaceSelectionFromCanvas(
@@ -387,9 +419,10 @@ export function GraphWorkspace() {
     [makePrimary],
   );
 
-  const addAtCenter = useCallback(
-    (kind: PaletteKind) => {
-      const position = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+  const addPalettePayload = useCallback(
+    (payload: PalettePayloadKind, position: { x: number; y: number }) => {
+      const kind = normalizePalettePreset(payload);
+      if (!kind || !editable) return;
       if (kind === 'subgraph') {
         createSubgraph({ position });
         openInspectorForSelection();
@@ -397,23 +430,26 @@ export function GraphWorkspace() {
       }
       addNode(kind, position);
     },
-    [addNode, createSubgraph, openInspectorForSelection, screenToFlowPosition],
+    [addNode, createSubgraph, editable, openInspectorForSelection],
+  );
+
+  const addAtCenter = useCallback(
+    (kind: PaletteKind) => {
+      const position = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      addPalettePayload(kind, position);
+    },
+    [addPalettePayload, screenToFlowPosition],
   );
 
   const onDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
-      const kind = readDroppedPaletteKind(event);
-      if (!kind || !editable) return;
+      const payload = readDroppedPaletteKind(event);
+      if (!payload) return;
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      if (kind === 'subgraph') {
-        createSubgraph({ position });
-        openInspectorForSelection();
-        return;
-      }
-      addNode(kind, position);
+      addPalettePayload(payload, position);
     },
-    [addNode, createSubgraph, editable, openInspectorForSelection, screenToFlowPosition],
+    [addPalettePayload, screenToFlowPosition],
   );
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
@@ -645,7 +681,7 @@ export function GraphWorkspace() {
               aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector focusRequest={inspectorFocusRequest} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
             </div>
             <PanelResizer
               side="right"

@@ -20,6 +20,7 @@ import {
 } from '@/src/domain';
 import { layoutWorkflowGraph } from './layout-workflow';
 import { createDraftEdge } from './connection-policy';
+import { CONTRACT_NODE_HEIGHT, CONTRACT_NODE_WIDTH } from './canvas-geometry';
 
 export type WorkspaceCore = {
   graph: WorkflowGraph;
@@ -94,8 +95,6 @@ function createNodeFromPreset(
 const clone = <T,>(value: T): T => structuredClone(value);
 const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
   ['executor', 'participation', 'modifiers', 'hitl'].some((field) => field in patch);
-const CANVAS_NODE_WIDTH = 184;
-const CANVAS_NODE_HEIGHT = 114;
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
 
@@ -125,8 +124,8 @@ const dropParentForNode = (
 ): GraphSubgraph | undefined => {
   const absolute = absoluteNodePosition(graph, node);
   const centre = {
-    x: absolute.x + CANVAS_NODE_WIDTH / 2,
-    y: absolute.y + CANVAS_NODE_HEIGHT / 2,
+    x: absolute.x + CONTRACT_NODE_WIDTH / 2,
+    y: absolute.y + CONTRACT_NODE_HEIGHT / 2,
   };
   const matches = graph.subgraphs.filter(
     (subgraph) =>

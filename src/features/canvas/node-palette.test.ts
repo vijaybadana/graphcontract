@@ -5,6 +5,7 @@ import {
   filterPaletteItems,
   getContractHealthLabel,
   isPaletteItemSingletonDisabled,
+  normalizePalettePreset,
   paletteItems,
   readDroppedPaletteKind,
 } from './node-palette';
@@ -34,6 +35,12 @@ describe('contract health presentation', () => {
         dataTransfer: { getData: () => 'humanReview' },
       } as never),
     ).toBe('humanReview');
+    expect(
+      readDroppedPaletteKind({
+        dataTransfer: { getData: () => 'human_input' },
+      } as never),
+    ).toBe('human_input');
+    expect(normalizePalettePreset('human_input')).toBe('humanReview');
   });
 
   it('keeps outer Start and End singleton-only until a subgraph needs member endpoints', () => {

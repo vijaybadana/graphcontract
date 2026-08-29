@@ -8,10 +8,12 @@ import {
   validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
+import {
+  CONTRACT_NODE_HEIGHT,
+  CONTRACT_NODE_WIDTH,
+} from '@/src/application/canvas-geometry';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 
-const CONTRACT_NODE_WIDTH = 220;
-const CONTRACT_NODE_HEIGHT = 134;
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
 

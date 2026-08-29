@@ -1,3 +1,8 @@
+import {
+  CONTRACT_NODE_HEIGHT,
+  CONTRACT_NODE_WIDTH,
+} from '@/src/application/canvas-geometry';
+
 export type CanvasPosition = { x: number; y: number };
 
 export type CanvasNodeBox = {
@@ -22,12 +27,9 @@ export type AlignmentSnapResult = {
   collidingNodeIds: string[];
 };
 
-const DEFAULT_NODE_WIDTH = 184;
-const DEFAULT_NODE_HEIGHT = 114;
-
 const dimensionsOf = (node: CanvasNodeBox) => ({
-  width: node.measured?.width ?? node.width ?? node.initialWidth ?? DEFAULT_NODE_WIDTH,
-  height: node.measured?.height ?? node.height ?? node.initialHeight ?? DEFAULT_NODE_HEIGHT,
+  width: node.measured?.width ?? node.width ?? node.initialWidth ?? CONTRACT_NODE_WIDTH,
+  height: node.measured?.height ?? node.height ?? node.initialHeight ?? CONTRACT_NODE_HEIGHT,
 });
 
 const anchors = (origin: number, size: number) => [

@@ -117,7 +117,7 @@ export function WorkspaceHeader({
         <div className="workspace-command-divider workspace-canvas-command-divider" />
         <div className="workspace-command-group workspace-canvas-command-group" role="group" aria-label="Canvas controls">
           <HeaderIconButton label="Fit graph" icon={FrameCorners} onClick={onFit} />
-          <HeaderIconButton label="Reset example graph" icon={ArrowsClockwise} onClick={onReset} />
+          <HeaderIconButton label="Reset example graph" icon={ArrowsClockwise} disabled={proposalPending} onClick={onReset} />
         </div>
       </section>
 

@@ -16,7 +16,7 @@ import {
   WarningCircleIcon,
   WrenchIcon,
 } from '@phosphor-icons/react';
-import { useId, useState } from 'react';
+import { type Ref, useId, useRef, useState } from 'react';
 
 import { GraphNode } from '@/src/domain';
 import './contract-node.css';
@@ -249,15 +249,18 @@ function ModifierChip({
   modifier,
   nodeId,
   onActivate,
+  buttonRef,
 }: {
   modifier: StepModifierPresentation;
   nodeId: string;
   onActivate?: ContractNodeData['onModifierActivate'];
+  buttonRef?: Ref<HTMLButtonElement>;
 }) {
   return (
     <button
       type="button"
       className={`contract-node-modifier-chip contract-node-modifier-chip--${modifier.tone} nodrag nopan`}
+      ref={buttonRef}
       data-modifier-id={modifier.id}
       aria-label={`${modifier.accessibleLabel}. Focus ${modifier.inspectorSection} in the inspector.`}
       title={`${modifier.accessibleLabel} · configure in inspector`}
@@ -273,10 +276,16 @@ function StepModifierRail({ data }: { data: Extract<ContractNodeData, { kind: 's
   const modifiers = stepModifierPresentations(data);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const overflowId = useId();
+  const firstOverflowModifierRef = useRef<HTMLButtonElement>(null);
   const visible = modifiers.slice(0, 3);
   const overflow = modifiers.slice(3);
 
   if (modifiers.length === 0) return null;
+
+  const openOverflowForKeyboard = () => {
+    setOverflowOpen(true);
+    requestAnimationFrame(() => firstOverflowModifierRef.current?.focus());
+  };
 
   return (
     <div className="contract-node-modifier-rail" aria-label="Step modifiers">
@@ -297,6 +306,12 @@ function StepModifierRail({ data }: { data: Extract<ContractNodeData, { kind: 's
             aria-controls={overflowId}
             aria-label={`Show ${overflow.length} more modifiers for ${data.label}`}
             onClick={() => setOverflowOpen((open) => !open)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openOverflowForKeyboard();
+              }
+            }}
           >
             +{overflow.length}
           </button>
@@ -308,6 +323,7 @@ function StepModifierRail({ data }: { data: Extract<ContractNodeData, { kind: 's
                   modifier={modifier}
                   nodeId={data.id}
                   onActivate={data.onModifierActivate}
+                  buttonRef={modifier.id === overflow[0]?.id ? firstOverflowModifierRef : undefined}
                 />
               ))}
             </div>
