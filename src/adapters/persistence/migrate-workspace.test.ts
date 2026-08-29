@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createWorkspaceService } from '@/src/application/workspace';
-import { sampleGraph } from '@/src/domain';
+import { researchIntakeRoutingGraph, sampleGraph } from '@/src/domain';
 import { migrateWorkspaceV3 } from './migrate-workspace';
 
 const service = createWorkspaceService({
@@ -36,7 +36,7 @@ describe('workspace persistence migration', () => {
     );
   });
 
-  it('preserves valid legacy graph data and supplies its empty subgraph collection', () => {
+  it('preserves valid pre-command graph data and supplies its empty subgraph collection', () => {
     const legacy = structuredClone(sampleGraph);
     delete (legacy as { subgraphs?: unknown }).subgraphs;
 
@@ -50,6 +50,26 @@ describe('workspace persistence migration', () => {
       nodes: sampleGraph.nodes,
       edges: sampleGraph.edges,
       subgraphs: [],
+    });
+  });
+
+  it('keeps a persisted Command graph with a topology-derived loop', () => {
+    const migrated = migrateWorkspaceV3(
+      { graph: structuredClone(researchIntakeRoutingGraph), proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph).toMatchObject({
+      id: researchIntakeRoutingGraph.id,
+      edges: expect.arrayContaining([
+        expect.objectContaining({ mode: 'command', label: 'ready' }),
+        expect.objectContaining({
+          id: 'researcher-continue',
+          mode: 'normal',
+          source: 'researcher',
+          target: 'research-supervisor',
+        }),
+      ]),
     });
   });
 });

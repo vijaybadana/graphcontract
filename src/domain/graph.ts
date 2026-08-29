@@ -10,7 +10,7 @@ export const nodeKinds = [
 ] as const;
 
 export type NodeKind = (typeof nodeKinds)[number];
-export type EdgeMode = 'normal' | 'conditional' | 'fallback';
+export type EdgeMode = 'normal' | 'conditional' | 'command' | 'fallback';
 
 export type HitlConfig = {
   enabled: boolean;
@@ -169,7 +169,7 @@ export const graphEdgeSchema = z.object({
   id: z.string().min(1),
   source: z.string().min(1),
   target: z.string().min(1),
-  mode: z.enum(['normal', 'conditional', 'fallback']),
+  mode: z.enum(['normal', 'conditional', 'command', 'fallback']),
   label: z.string().optional(),
   condition: z.string().optional(),
 });
@@ -394,6 +394,121 @@ export const researchSupervisorGraph: WorkflowGraph = {
   ],
 };
 
+/** The canonical routing-semantics fixture. A return edge is normal topology,
+ * so loop presentation can be derived without persisting a separate mode. */
+export const researchIntakeRoutingGraph: WorkflowGraph = {
+  schemaVersion: '1',
+  id: 'research-intake-routing-demo',
+  name: 'Research Intake Routing',
+  status: 'draft',
+  updatedAt: '2026-08-30T00:00:00.000Z',
+  nodes: [
+    { id: 'research-intake-start', kind: 'start', label: 'Start', position: { x: 40, y: 280 } },
+    {
+      id: 'clarify-request',
+      kind: 'agent',
+      label: 'Clarify Request',
+      description: 'Clarifies the research request before authoring the brief.',
+      position: { x: 180, y: 280 },
+    },
+    {
+      id: 'awaiting-user-reply',
+      kind: 'end',
+      label: 'Awaiting user reply',
+      position: { x: 420, y: 80 },
+    },
+    {
+      id: 'write-research-brief',
+      kind: 'agent',
+      label: 'Write Research Brief',
+      position: { x: 480, y: 280 },
+    },
+    {
+      id: 'research-supervisor',
+      kind: 'agent',
+      label: 'Research Supervisor',
+      position: { x: 730, y: 280 },
+    },
+    {
+      id: 'final-report',
+      kind: 'agent',
+      label: 'Final Report',
+      position: { x: 980, y: 280 },
+    },
+    { id: 'report-complete', kind: 'end', label: 'Report complete', position: { x: 1180, y: 280 } },
+    {
+      id: 'researcher',
+      kind: 'agent',
+      label: 'Researcher',
+      position: { x: 700, y: 500 },
+    },
+    {
+      id: 'human-review',
+      kind: 'end',
+      label: 'Human Review',
+      description: 'The fallback route ends in human review.',
+      position: { x: 980, y: 500 },
+    },
+  ],
+  edges: [
+    { id: 'research-intake-start-clarify', source: 'research-intake-start', target: 'clarify-request', mode: 'normal' },
+    {
+      id: 'clarify-write-brief',
+      source: 'clarify-request',
+      target: 'write-research-brief',
+      mode: 'command',
+      label: 'ready',
+      condition: 'state.ready === true',
+    },
+    {
+      id: 'clarify-await-reply',
+      source: 'clarify-request',
+      target: 'awaiting-user-reply',
+      mode: 'command',
+      label: 'needs clarification',
+      condition: 'state.needsClarification === true',
+    },
+    {
+      id: 'brief-supervisor',
+      source: 'write-research-brief',
+      target: 'research-supervisor',
+      mode: 'normal',
+    },
+    {
+      id: 'supervisor-final-report',
+      source: 'research-supervisor',
+      target: 'final-report',
+      mode: 'conditional',
+      label: 'enough evidence',
+      condition: 'evidence.isSufficient === true',
+    },
+    {
+      id: 'supervisor-researcher',
+      source: 'research-supervisor',
+      target: 'researcher',
+      mode: 'conditional',
+      label: 'more research',
+      condition: 'evidence.isSufficient === false',
+    },
+    {
+      id: 'supervisor-human-review',
+      source: 'research-supervisor',
+      target: 'human-review',
+      mode: 'fallback',
+      label: 'fallback',
+    },
+    { id: 'final-report-complete', source: 'final-report', target: 'report-complete', mode: 'normal' },
+    {
+      id: 'researcher-continue',
+      source: 'researcher',
+      target: 'research-supervisor',
+      mode: 'normal',
+      label: 'continue',
+    },
+  ],
+  subgraphs: [],
+};
+
 const issue = (code: string, message: string, path?: string): ValidationIssue => ({
   code,
   message,
@@ -589,15 +704,16 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
 
     const normal = nodeOutgoing.filter((edge) => edge.mode === 'normal');
     const conditional = nodeOutgoing.filter((edge) => edge.mode === 'conditional');
+    const command = nodeOutgoing.filter((edge) => edge.mode === 'command');
     const fallback = nodeOutgoing.filter((edge) => edge.mode === 'fallback');
 
-    if (normal.length > 0 && (conditional.length > 0 || fallback.length > 0)) {
+    if (normal.length > 0 && (conditional.length > 0 || command.length > 0 || fallback.length > 0)) {
       issues.push(
-        issue('MIXED_ROUTING', `“${node.label}” cannot mix normal and conditional routing.`, `nodes.${node.id}`),
+        issue('MIXED_ROUTING', `“${node.label}” cannot mix normal and routed edges.`, `nodes.${node.id}`),
       );
-    } else if (normal.length !== 1 && conditional.length === 0) {
+    } else if (normal.length !== 1 && conditional.length === 0 && command.length === 0) {
       issues.push(
-        issue('OUTGOING_REQUIRED', `“${node.label}” needs one normal edge or two to five conditional edges.`, `nodes.${node.id}`),
+        issue('OUTGOING_REQUIRED', `“${node.label}” needs one normal edge, command edge, or two to five conditional edges.`, `nodes.${node.id}`),
       );
     } else if (normal.length > 1) {
       issues.push(issue('MULTIPLE_NORMAL_EDGES', `“${node.label}” can have only one normal outgoing edge.`));
@@ -620,6 +736,23 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     if (new Set(labels).size !== labels.length) {
       issues.push(issue('DUPLICATE_CONDITIONAL_LABEL', `Conditional labels from “${node.label}” must be unique.`));
     }
+
+    const commandLabels = command.map((edge) => edge.label?.trim() ?? '');
+    if (commandLabels.some((label) => !label)) {
+      issues.push(issue('COMMAND_LABEL_REQUIRED', `Every command edge from “${node.label}” needs a label.`));
+    }
+
+    for (const edge of [...conditional, ...command]) {
+      if (edge.condition !== undefined && !edge.condition.trim()) {
+        issues.push(
+          issue(
+            edge.mode === 'conditional' ? 'CONDITIONAL_CONDITION_REQUIRED' : 'COMMAND_CONDITION_REQUIRED',
+            `Every supplied ${edge.mode} condition must be readable.`,
+            `edges.${edge.id}.condition`,
+          ),
+        );
+      }
+    }
   }
 
   if (starts[0] && (incoming.get(starts[0].id) ?? []).length > 0) {
@@ -628,23 +761,16 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
 
   if (starts[0]) {
     const visited = new Set<string>();
-    const visiting = new Set<string>();
-    let cycleFound = false;
 
     const visit = (nodeId: string) => {
-      if (visiting.has(nodeId)) {
-        cycleFound = true;
-        return;
-      }
       if (visited.has(nodeId)) return;
-      visiting.add(nodeId);
-      for (const edge of outgoing.get(nodeId) ?? []) visit(edge.target);
-      visiting.delete(nodeId);
+      // A return edge is a valid routing loop. Its presentation is derived
+      // from this topology; no separate persisted edge mode is introduced.
       visited.add(nodeId);
+      for (const edge of outgoing.get(nodeId) ?? []) visit(edge.target);
     };
 
     visit(starts[0].id);
-    if (cycleFound) issues.push(issue('CYCLE_DETECTED', 'MVP contracts must be acyclic.'));
 
     const unreachable = normalized.nodes.filter((node) => !visited.has(node.id));
     if (unreachable.length > 0) {
