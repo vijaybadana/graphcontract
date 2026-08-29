@@ -27,6 +27,7 @@
 .context-inspector__toggle-label { color: #536158; font-size: 11px; font-weight: 650; }
 .context-inspector__toggle-label input { accent-color: #27855f; }
 .context-inspector__two-column-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 11px; }
-.context-inspector__actions .danger-button { width: 100%; }
+.context-inspector__actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.context-inspector__actions .danger-button { grid-column: 1 / -1; width: 100%; }
 
 @media (max-width: 360px) { .context-inspector__two-column-fields { grid-template-columns: 1fr; } }

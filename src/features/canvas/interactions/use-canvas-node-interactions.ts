@@ -111,6 +111,23 @@ export function useCanvasInteractions({
     );
   }, [projectedEdges, setEdges]);
 
+  const clearRenderedSelection = useCallback(() => {
+    setNodes((currentNodes) =>
+      currentNodes.some((node) => node.selected)
+        ? currentNodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+        : currentNodes,
+    );
+    setEdges((currentEdges) =>
+      currentEdges.some((edge) => edge.selected)
+        ? currentEdges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
+        : currentEdges,
+    );
+  }, [setEdges, setNodes]);
+
+  useEffect(() => {
+    if (!editable) clearRenderedSelection();
+  }, [clearRenderedSelection, editable]);
+
   const onNodeDragStart = useCallback<OnNodeDrag<ContractFlowNode>>((_, node, draggedNodes) => {
     draggingRef.current = true;
     lastDragRef.current = {
@@ -202,5 +219,6 @@ export function useCanvasInteractions({
     onNodeDragStart,
     onNodeDrag,
     onNodeDragStop,
+    clearRenderedSelection,
   };
 }

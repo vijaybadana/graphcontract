@@ -39,6 +39,7 @@ import { PanelResizer } from '@/src/features/workspace/panel-resizer';
 import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
 import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
 import { WebMcpStatus, WorkspaceHeader } from '@/src/features/workspace/workspace-header';
+import { useMediaQuery } from '@/src/features/workspace/use-media-query';
 import { useGraphStore } from '@/src/state/workspace-store';
 
 import './graph-workspace.css';
@@ -91,6 +92,7 @@ export function GraphWorkspace() {
   const [paletteWidth, setPaletteWidth] = useState(232);
   const [inspectorWidth, setInspectorWidth] = useState(344);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
+  const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
   const { screenToFlowPosition } = useReactFlow<ContractFlowNode, Edge>();
@@ -109,11 +111,11 @@ export function GraphWorkspace() {
   const fitPadding = useMemo(
     () => ({
       top: '110px' as const,
-      right: `${showInspector ? inspectorWidth + 32 : 32}px` as const,
+      right: `${!isCompactWorkspace && showInspector ? inspectorWidth + 32 : 32}px` as const,
       bottom: '94px' as const,
-      left: `${showPalette ? paletteWidth + 32 : 32}px` as const,
+      left: `${!isCompactWorkspace && showPalette ? paletteWidth + 32 : 32}px` as const,
     }),
-    [inspectorWidth, paletteWidth, showInspector, showPalette],
+    [inspectorWidth, isCompactWorkspace, paletteWidth, showInspector, showPalette],
   );
   const { fitGraph } = useCoalescedFitView<ContractFlowNode, Edge>({
     enabled: hasHydrated,
@@ -158,23 +160,45 @@ export function GraphWorkspace() {
   }, [notice, clearNotice]);
 
   useEffect(() => {
-    if (selection.primary || proposal || (rightTab === 'scenarios' && scenarios.length > 0)) {
+    if (!proposal) return;
+    setRightTab('review');
+    setShowInspector(true);
+    if (isCompactWorkspace) setShowPalette(false);
+  }, [isCompactWorkspace, proposal]);
+
+  useEffect(() => {
+    if (selection.primary || (rightTab === 'scenarios' && scenarios.length > 0)) {
       setShowInspector(true);
-      if (window.matchMedia('(max-width: 880px)').matches) setShowPalette(false);
+      if (isCompactWorkspace) setShowPalette(false);
     }
-  }, [proposal, rightTab, scenarios.length, selection.primary]);
+  }, [isCompactWorkspace, rightTab, scenarios.length, selection.primary]);
+
+  useEffect(() => {
+    if (isCompactWorkspace && showPalette && showInspector) setShowPalette(false);
+  }, [isCompactWorkspace, showInspector, showPalette]);
 
   const togglePalette = () => {
     const next = !showPalette;
-    if (next && window.matchMedia('(max-width: 880px)').matches) setShowInspector(false);
+    if (next && isCompactWorkspace) setShowInspector(false);
     setShowPalette(next);
   };
 
   const toggleInspector = () => {
     const next = !showInspector;
-    if (next && window.matchMedia('(max-width: 880px)').matches) setShowPalette(false);
+    if (next && isCompactWorkspace) setShowPalette(false);
     setShowInspector(next);
   };
+
+  const handleInspectorTabChange = useCallback(
+    (tab: 'review' | 'scenarios') => {
+      setRightTab(tab);
+      if (tab === 'scenarios') {
+        clearSelection();
+        canvasInteractions.clearRenderedSelection();
+      }
+    },
+    [canvasInteractions.clearRenderedSelection, clearSelection],
+  );
 
   useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
@@ -309,8 +333,10 @@ export function GraphWorkspace() {
   const handleFreeze = () => {
     const result = freezeGraph();
     if (result.ok) {
+      canvasInteractions.clearRenderedSelection();
       setRightTab('scenarios');
       setShowInspector(true);
+      if (isCompactWorkspace) setShowPalette(false);
     }
   };
 
@@ -491,7 +517,7 @@ export function GraphWorkspace() {
               <InspectorTabs
                 active={rightTab}
                 scenarioCount={scenarios.length}
-                onChange={setRightTab}
+                onChange={handleInspectorTabChange}
               />
               <PanelCollapseButton
                 side="right"

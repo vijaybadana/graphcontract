@@ -1,3 +1,4 @@
+import { useReactFlow } from '@xyflow/react';
 import { ReactNode } from 'react';
 
 import './context-inspector.css';
@@ -35,9 +36,11 @@ export function ContextInspector() {
   const selection = useGraphStore((state) => state.selection);
   const updateNode = useGraphStore((state) => state.updateNode);
   const removeNode = useGraphStore((state) => state.removeNode);
+  const duplicateSelection = useGraphStore((state) => state.duplicateSelection);
   const updateEdge = useGraphStore((state) => state.updateEdge);
   const removeEdge = useGraphStore((state) => state.removeEdge);
   const editable = graph.status === 'draft' && !proposal;
+  const { fitView } = useReactFlow();
   const primary = selection.primary;
   const node = primary?.type === 'node' ? graph.nodes.find((item) => item.id === primary.id) : undefined;
   const edge = primary?.type === 'edge' ? graph.edges.find((item) => item.id === primary.id) : undefined;
@@ -112,6 +115,21 @@ export function ContextInspector() {
             </section>
           )}
           <div className="context-inspector__actions">
+            <button
+              type="button"
+              onClick={() => void fitView({ nodes: [{ id: node.id }], duration: 180, padding: 1.4 })}
+              className="secondary-button"
+            >
+              Focus node
+            </button>
+            <button
+              type="button"
+              disabled={!editable}
+              onClick={duplicateSelection}
+              className="secondary-button"
+            >
+              Duplicate selection
+            </button>
             <button disabled={!editable} onClick={() => removeNode(node.id)} className="danger-button">Remove node</button>
           </div>
         </div>

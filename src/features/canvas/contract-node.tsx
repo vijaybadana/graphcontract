@@ -11,7 +11,6 @@ import {
 } from '@phosphor-icons/react';
 
 import { GraphNode } from '@/src/domain';
-import { ContractNodeToolbar } from './contract-node-toolbar';
 import './contract-node.css';
 
 export type ContractNodeData = GraphNode & {
@@ -53,12 +52,10 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
   const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
 
   return (
-    <>
-      <ContractNodeToolbar node={data} selected={selected} />
-      <div
-        data-kind={data.kind}
-        className={`contract-node-shell ${selected ? 'is-selected' : ''} ${proposalClass}`}
-      >
+    <div
+      data-kind={data.kind}
+      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${proposalClass}`}
+    >
         {data.kind !== 'start' && (
           <Handle
             type="target"
@@ -101,7 +98,6 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
             className="contract-node-handle"
           />
         )}
-      </div>
-    </>
+    </div>
   );
 }

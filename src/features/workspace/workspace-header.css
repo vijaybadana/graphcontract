@@ -60,7 +60,7 @@
 
 .workspace-brand-copy span {
   margin-top: 3px;
-  color: rgb(17 24 39 / 48%);
+  color: rgb(17 24 39 / 62%);
   font-size: 9px;
   white-space: nowrap;
 }
@@ -96,7 +96,7 @@
   place-items: center;
   padding-right: 8px;
   border-right: 1px solid rgb(17 24 39 / 8%);
-  color: rgb(17 24 39 / 42%);
+  color: rgb(17 24 39 / 60%);
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -133,7 +133,7 @@
 
 .workspace-contract-counts {
   grid-column: 2 / 4;
-  color: rgb(17 24 39 / 43%);
+  color: rgb(17 24 39 / 62%);
 }
 
 .workspace-command-divider {
@@ -155,7 +155,7 @@
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 9px;
-  color: rgb(17 24 39 / 55%);
+  color: rgb(17 24 39 / 68%);
   transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
 
@@ -180,7 +180,7 @@
 
 .workspace-icon-button:disabled {
   cursor: not-allowed;
-  opacity: 0.28;
+  opacity: 0.42;
 }
 
 .workspace-action-island {
@@ -193,7 +193,7 @@
   align-items: center;
   gap: 6px;
   padding: 0 7px;
-  color: rgb(17 24 39 / 55%);
+  color: rgb(17 24 39 / 66%);
   font-size: 9px;
   font-weight: 680;
   white-space: nowrap;

@@ -82,7 +82,7 @@
   overflow: hidden;
   border-radius: 7px;
   padding: 7px 8px;
-  color: rgb(17 24 39 / 47%);
+  color: rgb(17 24 39 / 64%);
   font-size: 10px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -200,7 +200,7 @@
   to { opacity: 1; transform: translateX(0); }
 }
 
-@media (max-width: 880px) {
+@media (max-width: 1099px) {
   .workspace-stage {
     --palette-width: min(232px, calc(100vw - 20px));
     --inspector-width: min(344px, calc(100vw - 20px));

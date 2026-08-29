@@ -95,7 +95,7 @@
 .contract-node-title { margin: 0; }
 
 .contract-node-kind {
-  color: color-mix(in srgb, var(--node-accent-ink) 64%, white);
+  color: color-mix(in srgb, var(--node-accent-ink) 78%, white);
   font-size: 0.5625rem;
   font-weight: 800;
   letter-spacing: 0.12em;

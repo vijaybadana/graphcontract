@@ -1,7 +1,23 @@
-import { downloadGraphContract, downloadGraphScenarios, downloadPythonTests } from '@/src/adapters/exports/downloads';
+import { useEffect, useMemo, useState } from 'react';
+
+import {
+  buildGraphContractDownload,
+  buildGraphScenariosDownload,
+  buildPythonTestsDownload,
+  DownloadArtifact,
+} from '@/src/adapters/exports/downloads';
 import { BranchScenario, WorkflowGraph } from '@/src/domain';
 
 export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scenarios: BranchScenario[] }) {
+  const downloads = useMemo(
+    () => [
+      buildGraphContractDownload(graph),
+      buildGraphScenariosDownload(graph, scenarios),
+      buildPythonTestsDownload(graph, scenarios),
+    ],
+    [graph, scenarios],
+  );
+
   if (graph.status !== 'frozen') {
     return (
       <div className="rounded-2xl border border-dashed border-black/15 bg-white p-5 text-center">
@@ -27,10 +43,29 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
         ))}
       </div>
       <div className="mt-4 space-y-2">
-        <button onClick={() => downloadGraphContract(graph)} className="download-button">Download graph-contract.json</button>
-        <button onClick={() => downloadGraphScenarios(graph, scenarios)} className="download-button">Download graph-test-scenarios.json</button>
-        <button onClick={() => downloadPythonTests(graph, scenarios)} className="download-button">Download test_graph_paths.py</button>
+        {downloads.map((download) => <DownloadLink key={download.filename} artifact={download} />)}
       </div>
     </section>
+  );
+}
+
+function DownloadLink({ artifact }: { artifact: DownloadArtifact }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const nextUrl = URL.createObjectURL(new Blob([artifact.content], { type: artifact.type }));
+    setUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [artifact.content, artifact.type]);
+
+  return (
+    <a
+      href={url ?? undefined}
+      download={artifact.filename}
+      aria-disabled={!url}
+      className="download-button"
+    >
+      Download {artifact.filename}
+    </a>
   );
 }

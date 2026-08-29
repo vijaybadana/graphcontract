@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, useMemo, useState } from 'react';
+import { DragEvent, useEffect, useMemo, useState } from 'react';
 import { FlagCheckeredIcon, HandIcon, LightningIcon, PlayCircleIcon, RobotIcon, WrenchIcon } from '@phosphor-icons/react';
 
 import { GraphProposal, NodeKind, nodeKinds, WorkflowGraph } from '@/src/domain';
@@ -62,6 +62,11 @@ export function NodePalette({
   onCollapse: () => void;
 }) {
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (graph.status === 'frozen') setQuery('');
+  }, [graph.status]);
+
   const normalizedQuery = query.trim().toLowerCase();
   const visiblePalette = useMemo(
     () => palette.filter((item) => item.label.toLowerCase().includes(normalizedQuery)),

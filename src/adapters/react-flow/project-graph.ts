@@ -66,7 +66,7 @@ export function projectGraphToCanvas(
     const added = visibleProposal?.diff.addedEdgeIds.includes(edge.id);
     const removed = visibleProposal?.diff.removedEdgeIds.includes(edge.id);
     const updated = visibleProposal?.diff.updatedEdgeIds.includes(edge.id);
-    const color = added ? '#159160' : removed ? '#db4b55' : updated ? '#c47b24' : '#676b68';
+    const color = added ? '#159160' : removed ? '#db4b55' : updated ? '#c47b24' : '#4f5954';
     return {
       id: patched.id,
       type: 'smoothstep',
@@ -85,8 +85,8 @@ export function projectGraphToCanvas(
         strokeDasharray: removed ? '6 5' : undefined,
         opacity: removed ? 0.65 : 1,
       },
-      labelStyle: { fill: '#494c49', fontSize: 11, fontWeight: 700 },
-      labelBgStyle: { fill: '#fbfaf7', fillOpacity: 0.92 },
+      labelStyle: { fill: '#303a35', fontSize: 11, fontWeight: 720 },
+      labelBgStyle: { fill: '#ffffff', fillOpacity: 1 },
       labelBgPadding: [5, 3] as [number, number],
       labelBgBorderRadius: 6,
       data: patched,
