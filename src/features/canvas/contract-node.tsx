@@ -44,9 +44,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
     <>
       <ContractNodeToolbar node={data} selected={selected} />
       <div
-        className={`contract-node-shell h-[104px] w-44 rounded-2xl border-2 px-4 py-3 shadow-md transition-[background-color,border-color,box-shadow,opacity,transform] ${colors[data.kind]} ${
-          selected ? 'ring-4 ring-black/10' : ''
-        } ${proposalClass}`}
+        className={`contract-node-shell h-[104px] w-44 rounded-2xl border-2 px-4 py-3 shadow-md transition-[background-color,border-color,box-shadow,opacity,transform] ${colors[data.kind]} ${proposalClass}`}
       >
         {data.kind !== 'start' && (
           <Handle

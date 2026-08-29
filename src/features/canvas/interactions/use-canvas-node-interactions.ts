@@ -91,8 +91,11 @@ export function useCanvasInteractions({
   const lastDragRef = useRef<DragSnapshot | null>(null);
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const selectedEdgeIdsRef = useRef(selectedEdgeIds);
-  selectedNodeIdsRef.current = selectedNodeIds;
-  selectedEdgeIdsRef.current = selectedEdgeIds;
+
+  useEffect(() => {
+    selectedNodeIdsRef.current = selectedNodeIds;
+    selectedEdgeIdsRef.current = selectedEdgeIds;
+  }, [selectedEdgeIds, selectedNodeIds]);
 
   useEffect(() => {
     if (!draggingRef.current) {

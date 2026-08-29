@@ -112,6 +112,15 @@ textarea:focus-visible {
   box-shadow: 0 22px 48px rgb(24 33 29 / 20%);
 }
 
+.react-flow__node.selected .contract-node-shell {
+  border-color: #0284c7 !important;
+  outline: 3px solid #0284c7;
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 6px rgb(14 165 233 / 18%),
+    0 16px 32px rgb(14 116 144 / 20%);
+}
+
 .react-flow__node.canvas-node--collision-target .contract-node-shell,
 .react-flow__node.canvas-node--collision-source .contract-node-shell {
   outline: 3px solid rgb(244 63 94 / 65%);
