@@ -122,8 +122,16 @@ export type BranchCondition = {
   nodeId: string;
   nodeLabel: string;
   edgeId: string;
+  mode: EdgeMode;
   label: string;
   condition?: string;
+  isFallback?: boolean;
+};
+
+/** A graph edge as taken by one enumerated scenario path. */
+export type ScenarioEdge = GraphEdge & {
+  /** True when this connection returns to an ancestor in the graph topology. */
+  isLoop?: boolean;
   isFallback?: boolean;
 };
 
@@ -131,6 +139,8 @@ export type BranchScenario = {
   id: string;
   name: string;
   triggeringConditions: BranchCondition[];
+  /** Ordered edges retain the authored routing data needed by scenario exports. */
+  traversedEdges: ScenarioEdge[];
   orderedPath: string[];
   expectedNodes: string[];
   expectedTerminalNode: string;
@@ -1060,11 +1070,42 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
   }
   for (const edges of outgoing.values()) {
-    edges.sort((a, b) => (a.label ?? '').localeCompare(b.label ?? ''));
+    edges.sort((a, b) =>
+      [a.source, a.target, a.mode, a.label ?? '', a.condition ?? '', a.id]
+        .join('\u0000')
+        .localeCompare([b.source, b.target, b.mode, b.label ?? '', b.condition ?? '', b.id].join('\u0000')),
+    );
   }
 
+  // A loop is derived from topology, rather than from a stored edge mode. A
+  // depth-first back edge is sufficient to break every reachable directed
+  // cycle, and the sorted outgoing order makes the derived set stable.
+  const loopEdgeIds = new Set<string>();
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const findLoopEdges = (nodeId: string) => {
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId);
+    for (const edge of outgoing.get(nodeId) ?? []) {
+      if (visiting.has(edge.target)) {
+        loopEdgeIds.add(edge.id);
+      } else {
+        findLoopEdges(edge.target);
+      }
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  };
+  findLoopEdges(start.id);
+
   const scenarios: BranchScenario[] = [];
-  const walk = (nodeId: string, path: string[], conditions: BranchCondition[]) => {
+  const walk = (
+    nodeId: string,
+    path: string[],
+    conditions: BranchCondition[],
+    traversedEdges: ScenarioEdge[],
+    traversedLoopEdgeIds: ReadonlySet<string>,
+  ) => {
     const node = nodeMap.get(nodeId);
     if (!node) return;
     const nextPath = [...path, nodeId];
@@ -1074,6 +1115,7 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
         id: `scenario-${number}`,
         name: `Path ${number}: ${nextPath.map((id) => nodeMap.get(id)?.label ?? id).join(' → ')}`,
         triggeringConditions: conditions,
+        traversedEdges,
         orderedPath: nextPath,
         expectedNodes: nextPath,
         expectedTerminalNode: nodeId,
@@ -1082,6 +1124,13 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     }
 
     for (const edge of outgoing.get(nodeId) ?? []) {
+      const isLoop = loopEdgeIds.has(edge.id);
+      if (isLoop && traversedLoopEdgeIds.has(edge.id)) continue;
+      const scenarioEdge: ScenarioEdge = {
+        ...edge,
+        isLoop: isLoop || undefined,
+        isFallback: edge.mode === 'fallback' || undefined,
+      };
       const branch =
         edge.mode === 'normal'
           ? conditions
@@ -1091,16 +1140,26 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
                 nodeId,
                 nodeLabel: node.label,
                 edgeId: edge.id,
+                mode: edge.mode,
                 label: edge.label || (edge.mode === 'fallback' ? 'fallback' : 'condition'),
                 condition: edge.condition,
                 isFallback: edge.mode === 'fallback' || undefined,
               },
             ];
-      walk(edge.target, nextPath, branch);
+      const nextTraversedLoopEdgeIds = isLoop
+        ? new Set([...traversedLoopEdgeIds, edge.id])
+        : traversedLoopEdgeIds;
+      walk(
+        edge.target,
+        nextPath,
+        branch,
+        [...traversedEdges, scenarioEdge],
+        nextTraversedLoopEdgeIds,
+      );
     }
   };
 
-  walk(start.id, [], []);
+  walk(start.id, [], [], [], new Set());
   return scenarios;
 }
 

@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  enumerateScenarios,
   researchIntakeRoutingGraph,
   validateGraph,
   workflowGraphSchema,
 } from './graph';
+import {
+  buildGraphContractDownload,
+  buildGraphScenariosDownload,
+} from '../adapters/exports/downloads';
 
 describe('routing edge semantics', () => {
   it('keeps the Research Intake topology valid with commands and a derived return loop', () => {
@@ -52,6 +57,81 @@ describe('routing edge semantics', () => {
         'COMMAND_CONDITION_REQUIRED',
         'MULTIPLE_FALLBACKS',
       ]),
+    );
+  });
+
+  it('enumerates a derived loop once per path and preserves routing data in exports', () => {
+    const scenarios = enumerateScenarios(researchIntakeRoutingGraph);
+
+    expect(scenarios).toEqual(enumerateScenarios(researchIntakeRoutingGraph));
+    expect(scenarios).toHaveLength(5);
+
+    const loopScenario = scenarios.find((scenario) =>
+      scenario.traversedEdges.some((edge) => edge.id === 'researcher-continue'),
+    );
+    expect(loopScenario).toMatchObject({
+      orderedPath: [
+        'research-intake-start',
+        'clarify-request',
+        'write-research-brief',
+        'research-supervisor',
+        'researcher',
+        'research-supervisor',
+        'final-report',
+        'report-complete',
+      ],
+      expectedTerminalNode: 'report-complete',
+      traversedEdges: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'researcher-continue',
+          mode: 'normal',
+          label: 'continue',
+          isLoop: true,
+        }),
+        expect.objectContaining({
+          id: 'supervisor-final-report',
+          mode: 'conditional',
+          label: 'enough evidence',
+          condition: 'evidence.isSufficient === true',
+        }),
+      ]),
+    });
+    expect(loopScenario?.traversedEdges.filter((edge) => edge.isLoop)).toHaveLength(1);
+    expect(loopScenario?.triggeringConditions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          edgeId: 'clarify-write-brief',
+          mode: 'command',
+          label: 'ready',
+          condition: 'state.ready === true',
+        }),
+        expect.objectContaining({
+          edgeId: 'supervisor-final-report',
+          mode: 'conditional',
+          label: 'enough evidence',
+          condition: 'evidence.isSufficient === true',
+        }),
+      ]),
+    );
+
+    const fallbackScenario = scenarios.find((scenario) =>
+      scenario.traversedEdges.some((edge) => edge.mode === 'fallback'),
+    );
+    expect(fallbackScenario?.traversedEdges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mode: 'fallback',
+          label: 'fallback',
+          isFallback: true,
+        }),
+      ]),
+    );
+
+    expect(JSON.parse(buildGraphContractDownload(researchIntakeRoutingGraph).content).edges).toEqual(
+      researchIntakeRoutingGraph.edges,
+    );
+    expect(JSON.parse(buildGraphScenariosDownload(researchIntakeRoutingGraph, scenarios).content).scenarios).toEqual(
+      scenarios,
     );
   });
 });
