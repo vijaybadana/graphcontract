@@ -2,9 +2,10 @@
 
 Execution: focused Gastown follow-up discovered during Lead browser acceptance.
 
-## Package
+## Packages
 
-- `ST-B` — ensure palette-created and palette-dropped subgraphs open the existing Edit & review inspector immediately, while preserving desktop panel collapsibility and compact one-panel exclusivity; add a narrow regression test; Terra High.
+- `ST-BR` — read-only confirmation of the smallest event-bound creation/inspector seam and decisive test; Terra Low.
+- `ST-B` — ensure palette-created and palette-dropped subgraphs open the existing Edit & review inspector immediately, while preserving desktop panel collapsibility and compact one-panel exclusivity; add a narrow regression test; Terra High; depends on `ST-BR`.
 
 ## Frozen boundaries
 
