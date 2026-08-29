@@ -5,6 +5,7 @@ import { callWebMcpTool, expect } from '../fixtures';
 export type E2EGraphNode = {
   id: string;
   kind: string;
+  executor?: 'deterministic' | 'ai' | 'tool' | 'human';
   label: string;
   parentId?: string;
   position: { x: number; y: number };

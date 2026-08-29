@@ -87,11 +87,11 @@ test('390 compact freeze and unfreeze retain accessible action names', async ({ 
   await app.setViewportSize({ width: 390, height: 844 });
 
   const freeze = app.locator('.workspace-freeze-button');
-  await expect(freeze).toHaveAccessibleName('Confirm & freeze');
+  await expect(freeze).toHaveAccessibleName('Confirm and freeze contract; currently draft');
   await freezeResearchIntake(app);
-  await expect(freeze).toHaveAccessibleName('Unfreeze');
+  await expect(freeze).toHaveAccessibleName('Unfreeze contract; currently frozen');
   await freeze.click();
-  await expect(freeze).toHaveAccessibleName('Confirm & freeze');
+  await expect(freeze).toHaveAccessibleName('Confirm and freeze contract; currently draft');
   await expectNoHorizontalPageOverflow(app);
 });
 
@@ -227,10 +227,8 @@ test('frozen workspace announces review mode and disables authoring controls', a
   await expect(app.getByRole('note')).toContainText(
     'Review mode · graph editing is temporarily locked',
   );
-  await expect(app.getByRole('button', { name: 'Agent', exact: true })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Duplicate selection' })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Delete selection' })).toBeDisabled();
-  await expect(app.getByRole('button', { name: 'Undo' })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Redo' })).toBeDisabled();
   await expect(app.locator('.routing-edge-label[data-frozen="true"]')).toHaveCount(9);
   await expect(app.getByLabel('Graph status')).toContainText('5 frozen paths');

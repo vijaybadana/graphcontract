@@ -34,7 +34,7 @@ test('a whitespace-only conditional condition is visibly invalid and blocks free
 
   await expect(app.getByRole('alert')).toContainText('Every supplied conditional condition must be readable.');
   await expect(app.locator('[aria-label="Conditional edge, route enough evidence, invalid"]')).toHaveCount(1);
-  await expect(app.getByRole('button', { name: 'Confirm & freeze' })).toBeDisabled();
+  await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
 });
 
 test('a derived loop can be selected, removed by keyboard, and restored with undo', async ({ app }) => {
@@ -64,7 +64,7 @@ test('fallback help explains its contract and duplicate fallbacks surface valida
   await expect(
     app.locator('header[aria-label="GraphContract workspace controls"] .workspace-contract-state'),
   ).toHaveText('2 issues');
-  await expect(app.getByRole('button', { name: 'Confirm & freeze' })).toBeDisabled();
+  await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
   expect(
     (await readGraph(app)).edges.filter(
       (edge) => edge.source === 'research-supervisor' && edge.mode === 'fallback',

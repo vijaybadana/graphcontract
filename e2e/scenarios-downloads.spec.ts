@@ -1,28 +1,10 @@
-import { expect, freezeResearchIntake, callWebMcpTool, test } from './fixtures';
+import { expect, freezeResearchIntake, test } from './fixtures';
 import { downloadText } from './helpers/downloads';
 
 type Scenario = {
   id: string;
   traversedEdges: Array<{ id: string; mode: string; isLoop?: boolean }>;
 };
-
-test('frozen scenarios are exhaustive and every derived loop is bounded to one traversal', async ({ app }) => {
-  await freezeResearchIntake(app);
-  const result = await callWebMcpTool<{ ok: boolean; scenarios: Scenario[] }>(
-    app,
-    'get_branch_scenarios',
-    {},
-  );
-
-  expect(result.ok).toBe(true);
-  expect(result.scenarios).toHaveLength(5);
-  for (const scenario of result.scenarios) {
-    expect(
-      scenario.traversedEdges.filter((edge) => edge.id === 'researcher-continue'),
-      `${scenario.id} must traverse the derived loop at most once`,
-    ).toHaveLength(scenario.traversedEdges.some((edge) => edge.isLoop) ? 1 : 0);
-  }
-});
 
 test('all native downloads preserve graph, route, loop, and scenario truth', async ({ app }) => {
   await freezeResearchIntake(app);

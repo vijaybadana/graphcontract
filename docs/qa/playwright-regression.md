@@ -28,13 +28,31 @@ The WebMCP browser fixture supplies only the browser registration surface
 tool implementations and does not import application stores or bypass the
 human approval UI.
 
-Known baseline follow-ups from manual QA at commit `834f7a1`:
+## Integration certification
 
-- the Research Supervisor demo emits React Flow error 008 warnings for its
-  projected entry/exit edges and must join the zero-console suite after repair;
-- the compact freeze/unfreeze icon loses its accessible name when its visible
-  text is hidden and requires an explicit `aria-label` before adding a compact
-  semantic locator assertion.
+The combined library contains 43 meaningful cases in 9 spec files after
+removing cross-branch copies of the compact smoke, authority journey, and
+bounded-scenario checks. Distinct mouse, keyboard, persistence, schema,
+responsive, routing, subgraph, download, and human-authority invariants remain
+separate.
+
+At base `101ed74`, 42 cases pass against the production server with no
+unexpected console warnings, console errors, or page errors. One acceptance
+case is intentionally retained as a truthful product regression:
+
+- `canvas-authoring.spec.ts › dragging a palette item onto the canvas creates
+  it near the drop point` fails because the palette emits preset keys such as
+  `tool`, while `readDroppedPaletteKind()` accepts only normalized node kinds
+  (`start`, `step`, `end`) plus `subgraph`. The drop is discarded and the graph
+  remains unchanged. Click-add still creates the normalized Step preset.
+
+Do not weaken or skip that case. Re-run the complete cold suite after the
+palette drop boundary accepts creation presets and verify all 43 cases pass.
+
+The same base's full Vitest run is independently red at 105/108: three
+`lib/graph.test.ts` proposal/scenario fixtures still submit legacy work-node
+kinds to the normalized `start | step | end` schema. The Playwright integration
+does not modify those unit tests or their production paths.
 
 Install the browser once on a new machine with `npx playwright install chromium`.
 Use `npm run test:e2e:headed` for interactive diagnosis and

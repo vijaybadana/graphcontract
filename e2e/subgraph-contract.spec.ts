@@ -77,7 +77,7 @@ test('reset restores the example graph and undo returns the prior demo', async (
 
 test('freezing a subgraph contract locks collapse, resize, membership, and node editing', async ({ app }) => {
   await loadResearchSupervisor(app);
-  await app.getByRole('button', { name: 'Confirm & freeze' }).click();
+  await app.getByRole('button', { name: /confirm (?:and|&) freeze/i }).click();
   await expect(
     app
       .locator('header[aria-label="GraphContract workspace controls"]')

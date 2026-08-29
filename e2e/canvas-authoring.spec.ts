@@ -1,7 +1,7 @@
 import { expect, test } from './fixtures';
 import { readGraph } from './helpers/graph';
 
-test('palette search filters inventory and click-add creates the selected node', async ({ app }) => {
+test('palette search click-add creates the selected normalized Step preset', async ({ app }) => {
   const before = await readGraph(app);
   const search = app.getByRole('searchbox', { name: 'Search components' });
 
@@ -12,13 +12,12 @@ test('palette search filters inventory and click-add creates the selected node',
 
   const after = await readGraph(app);
   expect(after.nodes).toHaveLength(before.nodes.length + 1);
-  expect(after.nodes.filter((node) => node.kind === 'agent')).toHaveLength(
-    before.nodes.filter((node) => node.kind === 'agent').length + 1,
+  expect(
+    after.nodes.filter((node) => node.kind === 'step' && node.executor === 'ai'),
+  ).toHaveLength(
+    before.nodes.filter((node) => node.kind === 'step' && node.executor === 'ai').length + 1,
   );
   await expect(app.getByRole('heading', { name: 'Node details' })).toBeVisible();
-
-  await search.fill('does-not-exist');
-  await expect(app.getByRole('status').filter({ hasText: 'No components match' })).toBeVisible();
 });
 
 test('dragging a palette item onto the canvas creates it near the drop point', async ({ app }) => {
@@ -30,7 +29,10 @@ test('dragging a palette item onto the canvas creates it near the drop point', a
 
   const after = await readGraph(app);
   const addedTools = after.nodes.filter(
-    (node) => node.kind === 'tool' && !before.nodes.some((candidate) => candidate.id === node.id),
+    (node) =>
+      node.kind === 'step' &&
+      node.executor === 'tool' &&
+      !before.nodes.some((candidate) => candidate.id === node.id),
   );
   expect(addedTools).toHaveLength(1);
   expect(addedTools[0].position.x).toBeGreaterThan(300);

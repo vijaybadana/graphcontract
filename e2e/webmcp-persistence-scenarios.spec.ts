@@ -5,6 +5,7 @@ import {
   loadResearchIntake,
   test,
   webMcpToolMetadata,
+  webMcpToolNames,
 } from './fixtures';
 
 type GraphRead = {
@@ -49,6 +50,11 @@ const classifierLabel = (read: GraphRead) =>
   read.graph.nodes.find((node) => node.id === 'classifier')?.label;
 
 test('registered WebMCP tools publish constrained schemas and truthful annotations', async ({ app }) => {
+  expect(await webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
   const read = await webMcpToolMetadata(app, 'get_graph');
   const propose = await webMcpToolMetadata(app, 'propose_graph_changes');
   const scenarios = await webMcpToolMetadata(app, 'get_branch_scenarios');
@@ -101,7 +107,7 @@ test('pending proposal locks palette authoring and freeze without changing accep
   for (const name of ['Agent', 'Action / function', 'Tool', 'Human Input', 'Subgraph']) {
     await expect(app.getByRole('button', { name, exact: true })).toBeDisabled();
   }
-  await expect(app.getByRole('button', { name: 'Confirm & freeze' })).toBeDisabled();
+  await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
   expect(classifierLabel(await callWebMcpTool<GraphRead>(app, 'get_graph', {}))).toBe(
     'Classifier Agent',
   );

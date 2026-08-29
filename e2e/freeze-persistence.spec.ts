@@ -19,5 +19,5 @@ test('freeze locks editing, survives reload, and unfreeze restores authoring', a
   await app.getByRole('button', { name: 'Unfreeze' }).click();
   await expect(app.getByText('Valid draft', { exact: true })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Agent' })).toBeEnabled();
-  await expect(app.getByRole('button', { name: 'Confirm & freeze' })).toBeEnabled();
+  await expect(app.locator('.workspace-freeze-button')).toBeEnabled();
 });

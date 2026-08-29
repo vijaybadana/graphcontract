@@ -13,11 +13,11 @@ test('edge edits surface validation immediately and undo restores the accepted r
   await routeLabel.blur();
   await expect(app.getByText('Every command edge from “Clarify Request” needs a label.')).toBeVisible();
   await expect(app.getByText('1 issue', { exact: true }).first()).toBeVisible();
-  await expect(app.getByRole('button', { name: 'Confirm & freeze' })).toBeDisabled();
+  await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
   await expect(app.locator('[aria-label="Command edge, invalid"]')).toHaveCount(1);
 
   await app.getByRole('button', { name: 'Undo' }).click();
   await expect(app.getByText('Valid draft', { exact: true })).toBeVisible();
   await expect(app.locator('[aria-label="Command edge, route ready"]')).toHaveCount(1);
-  await expect(app.getByRole('button', { name: 'Confirm & freeze' })).toBeEnabled();
+  await expect(app.locator('.workspace-freeze-button')).toBeEnabled();
 });

@@ -153,17 +153,35 @@ export async function loadResearchIntake(page: Page) {
     await dialog.accept();
   });
   await page.getByRole('button', { name: 'Load Research Intake Routing' }).click();
-  await expect(page.getByText('Research Intake Routing', { exact: true })).toBeVisible();
-  await expect(page.getByText('9 nodes · 9 branches', { exact: true })).toBeVisible();
+  await expect.poll(async () => {
+    const result = await callWebMcpTool<{
+      ok: true;
+      graph: { id: string; name: string; nodes: unknown[]; edges: unknown[] };
+    }>(page, 'get_graph', {});
+    return {
+      id: result.graph.id,
+      name: result.graph.name,
+      nodes: result.graph.nodes.length,
+      edges: result.graph.edges.length,
+    };
+  }).toEqual({
+    id: 'research-intake-routing-demo',
+    name: 'Research Intake Routing',
+    nodes: 9,
+    edges: 9,
+  });
 }
 
 export async function freezeResearchIntake(page: Page) {
   await loadResearchIntake(page);
-  await page.getByRole('button', { name: 'Confirm & freeze' }).click();
-  await expect(
-    page
-      .locator('header[aria-label="GraphContract workspace controls"]')
-      .getByText('Frozen contract', { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Scenarios (5)' })).toBeVisible();
+  await page
+    .getByRole('button', { name: /confirm (?:and|&) freeze/i })
+    .click();
+  await expect.poll(async () => {
+    const result = await callWebMcpTool<{
+      ok: true;
+      graph: { status: 'draft' | 'frozen' };
+    }>(page, 'get_graph', {});
+    return result.graph.status;
+  }).toBe('frozen');
 }
