@@ -58,7 +58,7 @@ export function PanelExpandButton({
       onClick={onExpand}
       aria-label={`Open ${label}`}
       title={`Open ${label}`}
-      className={`workspace-panel collapsed-panel-trigger absolute top-3 z-30 ${
+      className={`workspace-panel collapsed-panel-trigger panel-trigger-${side} absolute top-3 z-30 ${
         side === 'left' ? 'left-3' : 'right-3'
       }`}
     >

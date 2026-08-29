@@ -1,0 +1,187 @@
+.contract-node-shell {
+  --node-accent: #64748b;
+  --node-accent-soft: #f8fafc;
+  --node-accent-ink: #1e293b;
+  width: 11.5rem;
+  min-height: 7.125rem;
+  border: 1px solid color-mix(in srgb, var(--node-accent) 38%, white);
+  border-radius: 0.875rem;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 10%);
+  color: var(--node-accent-ink);
+  overflow: visible;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease,
+    opacity 160ms ease;
+}
+
+.contract-node-shell[data-kind='start'] {
+  --node-accent: #059669;
+  --node-accent-soft: #ecfdf5;
+  --node-accent-ink: #064e3b;
+}
+
+.contract-node-shell[data-kind='agent'] {
+  --node-accent: #c8752d;
+  --node-accent-soft: #fff7ed;
+  --node-accent-ink: #3d2816;
+}
+
+.contract-node-shell[data-kind='action'] {
+  --node-accent: #7c3aed;
+  --node-accent-soft: #f5f3ff;
+  --node-accent-ink: #2e1065;
+}
+
+.contract-node-shell[data-kind='tool'] {
+  --node-accent: #0284c7;
+  --node-accent-soft: #f0f9ff;
+  --node-accent-ink: #0c4a6e;
+}
+
+.contract-node-shell[data-kind='human_input'] {
+  --node-accent: #e11d48;
+  --node-accent-soft: #fff1f2;
+  --node-accent-ink: #881337;
+}
+
+.contract-node-shell[data-kind='end'] {
+  --node-accent: #475569;
+  --node-accent-soft: #f8fafc;
+  --node-accent-ink: #0f172a;
+}
+
+.contract-node-shell.is-selected {
+  border-color: var(--node-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-accent) 28%, transparent),
+    0 8px 18px rgb(15 23 42 / 16%);
+  transform: translateY(-1px);
+}
+
+.contract-node-shell.is-proposed-added {
+  box-shadow: 0 0 0 3px rgb(110 231 183 / 54%), 0 3px 12px rgb(15 23 42 / 10%);
+}
+
+.contract-node-shell.is-proposed-updated {
+  box-shadow: 0 0 0 3px rgb(252 211 77 / 54%), 0 3px 12px rgb(15 23 42 / 10%);
+}
+
+.contract-node-shell.is-proposed-removed {
+  opacity: 0.58;
+  text-decoration: line-through;
+  box-shadow: 0 0 0 3px rgb(253 164 175 / 58%), 0 3px 12px rgb(15 23 42 / 10%);
+}
+
+.contract-node-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.75rem 0.75rem 0.625rem;
+}
+
+.contract-node-icon-slot {
+  display: grid;
+  flex: 0 0 auto;
+  width: 1.875rem;
+  height: 1.875rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  background: var(--node-accent-soft);
+  color: var(--node-accent);
+}
+
+.contract-node-title-group { min-width: 0; }
+
+.contract-node-kind,
+.contract-node-title { margin: 0; }
+
+.contract-node-kind {
+  color: color-mix(in srgb, var(--node-accent-ink) 64%, white);
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.contract-node-title {
+  display: -webkit-box;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.contract-node-divider {
+  height: 1px;
+  margin: 0 0.75rem;
+  background: color-mix(in srgb, var(--node-accent) 16%, white);
+}
+
+.contract-node-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.contract-node-kind-badge,
+.contract-node-proposal-status,
+.contract-node-hitl-status {
+  white-space: nowrap;
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.075em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.contract-node-kind-badge {
+  color: var(--node-accent);
+}
+
+.contract-node-statuses {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3125rem;
+  min-width: 0;
+}
+
+.contract-node-proposal-status {
+  overflow: hidden;
+  max-width: 5.5rem;
+  color: #475569;
+  text-overflow: ellipsis;
+}
+
+.contract-node-hitl-status {
+  border: 1px solid color-mix(in srgb, var(--node-accent) 28%, white);
+  border-radius: 999px;
+  padding: 0.25rem 0.3125rem;
+  background: var(--node-accent-soft);
+  color: var(--node-accent-ink);
+}
+
+.contract-node-handle {
+  width: 0.6875rem !important;
+  height: 0.6875rem !important;
+  border: 2px solid #fff !important;
+  background: var(--node-accent) !important;
+}
+
+@media (max-width: 480px) {
+  .contract-node-shell { width: 10.25rem; }
+  .contract-node-heading { gap: 0.5rem; padding-inline: 0.625rem; }
+  .contract-node-meta { padding-inline: 0.625rem; }
+  .contract-node-divider { margin-inline: 0.625rem; }
+  .contract-node-proposal-status { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contract-node-shell { transition: none; }
+}

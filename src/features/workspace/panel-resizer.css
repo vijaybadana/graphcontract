@@ -1,0 +1,6 @@
+.panel-resizer { position: absolute; z-index: 40; width: 12px; cursor: col-resize; touch-action: none; user-select: none; }
+.panel-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; border-radius: 999px; background: transparent; transition: background-color 120ms ease; }
+.panel-resizer:hover::after, .panel-resizer:focus-visible::after { background: #3e9d78; }
+.panel-resizer:focus-visible { outline: none; }
+.panel-resizer--left { right: -6px; top: 0; bottom: 0; }
+.panel-resizer--right { left: -6px; top: 0; bottom: 0; }

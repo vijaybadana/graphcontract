@@ -1,0 +1,337 @@
+.workspace-header {
+  position: absolute;
+  inset: 16px 16px auto;
+  z-index: 45;
+  display: grid;
+  grid-template-columns: auto minmax(360px, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.workspace-island {
+  min-height: 52px;
+  border: 1px solid rgb(17 24 39 / 11%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 2px 4px rgb(35 43 39 / 4%), 0 12px 30px rgb(35 43 39 / 8%);
+  pointer-events: auto;
+}
+
+.workspace-brand-island,
+.workspace-action-island,
+.workspace-command-island,
+.workspace-command-group,
+.workspace-history-controls {
+  display: flex;
+  align-items: center;
+}
+
+.workspace-brand-island {
+  gap: 10px;
+  padding: 7px 8px 7px 9px;
+}
+
+.workspace-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: #17211c;
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.workspace-brand-copy {
+  display: grid;
+  min-width: 112px;
+  line-height: 1.15;
+}
+
+.workspace-brand-copy strong {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.workspace-brand-copy span {
+  margin-top: 3px;
+  color: rgb(17 24 39 / 48%);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.workspace-history-controls {
+  gap: 3px;
+  padding-left: 6px;
+  border-left: 1px solid rgb(17 24 39 / 9%);
+}
+
+.workspace-command-island {
+  justify-self: stretch;
+  min-width: 0;
+  max-width: 820px;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+}
+
+.workspace-contract-summary {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 260px;
+  grid-template-columns: auto minmax(100px, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.workspace-contract-label {
+  grid-row: 1 / 3;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  padding-right: 8px;
+  border-right: 1px solid rgb(17 24 39 / 8%);
+  color: rgb(17 24 39 / 42%);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace-contract-summary strong {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-contract-state,
+.workspace-contract-counts {
+  font-size: 8px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.workspace-contract-state {
+  justify-self: end;
+  font-weight: 700;
+}
+
+.workspace-contract-state.is-valid {
+  color: #087a55;
+}
+
+.workspace-contract-state.is-warning {
+  color: #a15c12;
+}
+
+.workspace-contract-counts {
+  grid-column: 2 / 4;
+  color: rgb(17 24 39 / 43%);
+}
+
+.workspace-command-divider {
+  width: 1px;
+  height: 26px;
+  flex: 0 0 auto;
+  background: rgb(17 24 39 / 9%);
+}
+
+.workspace-command-group {
+  gap: 3px;
+}
+
+.workspace-icon-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: rgb(17 24 39 / 55%);
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.workspace-icon-button:hover:not(:disabled) {
+  border-color: rgb(17 24 39 / 9%);
+  background: #f6f7f5;
+  color: #17211c;
+  transform: translateY(-1px);
+}
+
+.workspace-icon-button.is-active {
+  border-color: #17211c;
+  background: #17211c;
+  color: white;
+}
+
+.workspace-icon-button.is-danger:hover:not(:disabled) {
+  border-color: rgb(225 29 72 / 14%);
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.workspace-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.28;
+}
+
+.workspace-action-island {
+  gap: 7px;
+  padding: 7px;
+}
+
+.workspace-webmcp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  color: rgb(17 24 39 / 55%);
+  font-size: 9px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.workspace-webmcp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #d97706;
+}
+
+.workspace-webmcp.is-connected .workspace-webmcp-dot { background: #10b981; }
+.workspace-webmcp.is-progress .workspace-webmcp-dot { background: #0ea5e9; }
+.workspace-webmcp.is-error .workspace-webmcp-dot { background: #f43f5e; }
+
+.workspace-status-badge {
+  border-radius: 999px;
+  padding: 5px 7px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-status-badge.is-draft {
+  background: #fff7d6;
+  color: #92530c;
+}
+
+.workspace-status-badge.is-frozen {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.workspace-freeze-button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #17211c;
+  border-radius: 9px;
+  background: #17211c;
+  padding: 0 11px;
+  color: white;
+  font-size: 10px;
+  font-weight: 720;
+  white-space: nowrap;
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+
+.workspace-freeze-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px rgb(23 33 28 / 18%);
+}
+
+.workspace-freeze-button.is-secondary {
+  border-color: rgb(17 24 39 / 12%);
+  background: white;
+  color: #17211c;
+}
+
+.workspace-freeze-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.34;
+}
+
+@media (max-width: 1180px) {
+  .workspace-header {
+    grid-template-columns: auto minmax(300px, 1fr) auto;
+  }
+
+  .workspace-brand-copy span,
+  .workspace-contract-counts,
+  .workspace-webmcp span,
+  .workspace-status-badge {
+    display: none;
+  }
+
+  .workspace-contract-summary {
+    grid-template-columns: auto minmax(90px, 1fr);
+  }
+
+  .workspace-contract-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 880px) {
+  .workspace-header {
+    inset: 10px 10px auto;
+    grid-template-columns: auto 1fr auto;
+    gap: 7px;
+  }
+
+  .workspace-brand-copy,
+  .workspace-contract-summary,
+  .workspace-panel-command-divider,
+  .workspace-panel-command-group,
+  .workspace-webmcp {
+    display: none;
+  }
+
+  .workspace-command-island {
+    min-width: 0;
+  }
+
+  .workspace-action-island {
+    padding: 7px;
+  }
+
+  .workspace-freeze-button span {
+    display: none;
+  }
+
+  .workspace-freeze-button {
+    width: 36px;
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .workspace-history-controls,
+  .workspace-edit-command-divider,
+  .workspace-edit-command-group {
+    display: none;
+  }
+
+  .workspace-brand-island {
+    padding-right: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-icon-button,
+  .workspace-freeze-button {
+    transition: none;
+  }
+}

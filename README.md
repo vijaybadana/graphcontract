@@ -39,3 +39,6 @@ npm run build
 ## License
 
 Released under the [MIT License](LICENSE).
+
+Third-party acknowledgements and retained license notices are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

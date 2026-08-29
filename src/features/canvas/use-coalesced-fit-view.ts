@@ -1,6 +1,6 @@
 'use client';
 
-import { Edge, Node, useNodesInitialized, useReactFlow } from '@xyflow/react';
+import { Edge, FitViewOptions, Node, useNodesInitialized, useReactFlow } from '@xyflow/react';
 import { useCallback, useEffect, useRef } from 'react';
 
 const BASE_FIT_VIEW_OPTIONS = {
@@ -12,6 +12,7 @@ const BASE_FIT_VIEW_OPTIONS = {
 type CoalescedFitViewOptions = {
   enabled: boolean;
   revision: number;
+  padding?: FitViewOptions['padding'];
 };
 
 /**
@@ -24,7 +25,7 @@ type CoalescedFitViewOptions = {
 export function useCoalescedFitView<
   NodeType extends Node = Node,
   EdgeType extends Edge = Edge,
->({ enabled, revision }: CoalescedFitViewOptions) {
+>({ enabled, revision, padding = BASE_FIT_VIEW_OPTIONS.padding }: CoalescedFitViewOptions) {
   const { fitView } = useReactFlow<NodeType, EdgeType>();
   const nodesInitialized = useNodesInitialized();
   const timeoutRef = useRef<number | null>(null);
@@ -50,12 +51,13 @@ export function useCoalescedFitView<
           frameRef.current = null;
           void fitView({
             ...BASE_FIT_VIEW_OPTIONS,
+            padding,
             duration: animated ? 180 : 0,
           });
         });
       }, 48);
     },
-    [cancelScheduledFit, fitView],
+    [cancelScheduledFit, fitView, padding],
   );
 
   useEffect(() => cancelScheduledFit, [cancelScheduledFit]);

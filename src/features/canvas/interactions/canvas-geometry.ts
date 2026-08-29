@@ -21,8 +21,8 @@ export type AlignmentSnapResult = {
   collidingNodeIds: string[];
 };
 
-const DEFAULT_NODE_WIDTH = 176;
-const DEFAULT_NODE_HEIGHT = 104;
+const DEFAULT_NODE_WIDTH = 184;
+const DEFAULT_NODE_HEIGHT = 114;
 
 const dimensionsOf = (node: CanvasNodeBox) => ({
   width: node.measured?.width ?? node.width ?? node.initialWidth ?? DEFAULT_NODE_WIDTH,

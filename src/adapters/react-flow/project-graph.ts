@@ -41,8 +41,8 @@ export function projectGraphToCanvas(
       id: patched.id,
       type: 'contractNode',
       position: patched.position,
-      initialWidth: 176,
-      initialHeight: 104,
+      initialWidth: 184,
+      initialHeight: 114,
       data: { ...patched, proposalState },
     };
   });
@@ -70,6 +70,7 @@ export function projectGraphToCanvas(
     return {
       id: patched.id,
       type: 'smoothstep',
+      className: `contract-edge contract-edge--${patched.mode}`,
       source: patched.source,
       target: patched.target,
       label: patched.label || (patched.mode === 'fallback' ? 'fallback' : undefined),
@@ -87,6 +88,7 @@ export function projectGraphToCanvas(
       labelStyle: { fill: '#494c49', fontSize: 11, fontWeight: 700 },
       labelBgStyle: { fill: '#fbfaf7', fillOpacity: 0.92 },
       labelBgPadding: [5, 3] as [number, number],
+      labelBgBorderRadius: 6,
       data: patched,
     };
   });

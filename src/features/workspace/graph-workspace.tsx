@@ -2,6 +2,7 @@
 
 import {
   Background,
+  BackgroundVariant,
   Connection,
   ConnectionLineType,
   Controls,
@@ -16,7 +17,7 @@ import {
   EdgeMouseHandler,
   useReactFlow,
 } from '@xyflow/react';
-import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { projectGraphToCanvas } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
@@ -34,9 +35,14 @@ import {
   PanelExpandButton,
   PanelCollapseButton,
 } from '@/src/features/workspace/panel-collapse-control';
+import { PanelResizer } from '@/src/features/workspace/panel-resizer';
+import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
+import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
+import { WebMcpStatus, WorkspaceHeader } from '@/src/features/workspace/workspace-header';
 import { useGraphStore } from '@/src/state/workspace-store';
 
-type WebMcpStatus = 'unavailable' | 'registering' | 'connected' | 'error';
+import './graph-workspace.css';
+
 const nodeTypes = { contractNode: ContractNode };
 const snapGrid: [number, number] = [12, 12];
 const panOnDrag = [1];
@@ -81,8 +87,11 @@ export function GraphWorkspace() {
   const [hasHydrated, setHasHydrated] = useState(false);
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
   const [showPalette, setShowPalette] = useState(true);
-  const [showInspector, setShowInspector] = useState(true);
+  const [showInspector, setShowInspector] = useState(false);
+  const [paletteWidth, setPaletteWidth] = useState(232);
+  const [inspectorWidth, setInspectorWidth] = useState(344);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
+  const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
   const { screenToFlowPosition } = useReactFlow<ContractFlowNode, Edge>();
 
@@ -97,9 +106,19 @@ export function GraphWorkspace() {
     editable,
     onCommitPositions: moveNodes,
   });
+  const fitPadding = useMemo(
+    () => ({
+      top: '110px' as const,
+      right: `${showInspector ? inspectorWidth + 32 : 32}px` as const,
+      bottom: '94px' as const,
+      left: `${showPalette ? paletteWidth + 32 : 32}px` as const,
+    }),
+    [inspectorWidth, paletteWidth, showInspector, showPalette],
+  );
   const { fitGraph } = useCoalescedFitView<ContractFlowNode, Edge>({
     enabled: hasHydrated,
     revision: fitViewRevision,
+    padding: fitPadding,
   });
 
   useEffect(() => {
@@ -137,6 +156,25 @@ export function GraphWorkspace() {
     const timeout = window.setTimeout(clearNotice, 4000);
     return () => window.clearTimeout(timeout);
   }, [notice, clearNotice]);
+
+  useEffect(() => {
+    if (selection.primary || proposal || (rightTab === 'scenarios' && scenarios.length > 0)) {
+      setShowInspector(true);
+      if (window.matchMedia('(max-width: 880px)').matches) setShowPalette(false);
+    }
+  }, [proposal, rightTab, scenarios.length, selection.primary]);
+
+  const togglePalette = () => {
+    const next = !showPalette;
+    if (next && window.matchMedia('(max-width: 880px)').matches) setShowInspector(false);
+    setShowPalette(next);
+  };
+
+  const toggleInspector = () => {
+    const next = !showInspector;
+    if (next && window.matchMedia('(max-width: 880px)').matches) setShowPalette(false);
+    setShowInspector(next);
+  };
 
   useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
@@ -278,7 +316,7 @@ export function GraphWorkspace() {
 
   if (!hasHydrated) {
     return (
-      <main className="grid h-dvh place-items-center bg-[#f3f2ee] text-[#171918]">
+      <main className="grid h-dvh place-items-center bg-[#f7f8f6] text-[#171918]">
         <div className="text-center">
           <div className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-[#18211d] text-sm font-bold text-white">GC</div>
           <p className="mt-3 text-xs font-semibold text-black/50">Opening your workflow workspace…</p>
@@ -287,53 +325,85 @@ export function GraphWorkspace() {
     );
   }
 
+  const selectionCount = selection.nodeIds.length + selection.edgeIds.length;
+  const stageStyle = {
+    '--palette-width': `${paletteWidth}px`,
+    '--inspector-width': `${inspectorWidth}px`,
+  } as CSSProperties;
+
   return (
-    <main className="h-dvh overflow-hidden bg-[#f3f2ee] text-[#171918]">
-      <header className="relative z-30 flex h-14 items-center justify-between border-b border-black/10 bg-[#fbfaf7]/95 px-4 backdrop-blur">
-        <div className="flex items-center gap-3">
-          <div className="grid h-8 w-8 place-items-center rounded-xl bg-[#18211d] text-xs font-bold text-white">GC</div>
-          <div>
-            <p className="text-sm font-semibold tracking-tight">GraphContract</p>
-            <p className="hidden text-[10px] text-black/45 sm:block">Human-approved agent workflow contracts</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusPill status={webMcpStatus} />
-          <span className={`status-badge ${graph.status === 'frozen' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{graph.status}</span>
-          {graph.status === 'frozen' ? (
-            <button onClick={unfreezeGraph} className="secondary-button">Unfreeze</button>
-          ) : (
-            <button onClick={handleFreeze} disabled={validationIssues.length > 0 || Boolean(proposal)} className="primary-button">Confirm &amp; freeze</button>
-          )}
-        </div>
-      </header>
+    <main className="workspace-root">
+      <section
+        ref={stageRef}
+        className="workspace-stage"
+        style={stageStyle}
+        data-palette-open={showPalette}
+        data-inspector-open={showInspector}
+      >
+        <WorkspaceHeader
+          graphName={graph.name}
+          graphStatus={graph.status}
+          webMcpStatus={webMcpStatus}
+          nodeCount={graph.nodes.length}
+          edgeCount={graph.edges.length}
+          issueCount={validationIssues.length}
+          proposalPending={Boolean(proposal)}
+          paletteOpen={showPalette}
+          inspectorOpen={showInspector}
+          canUndo={editable && past.length > 0}
+          canRedo={editable && future.length > 0}
+          canDuplicate={editable && selection.nodeIds.length > 0}
+          canDelete={editable && selectionCount > 0}
+          canFreeze={validationIssues.length === 0 && !proposal}
+          onTogglePalette={togglePalette}
+          onToggleInspector={toggleInspector}
+          onUndo={undo}
+          onRedo={redo}
+          onDuplicate={duplicateSelection}
+          onDelete={deleteSelection}
+          onFit={fitGraph}
+          onReset={resetGraph}
+          onFreeze={handleFreeze}
+          onUnfreeze={unfreezeGraph}
+        />
 
-      {notice && <div className="fixed left-1/2 top-[4.25rem] z-50 -translate-x-1/2 rounded-full bg-[#18211d] px-4 py-2 text-xs font-semibold text-white shadow-xl">{notice}</div>}
+        {notice && <div className="workspace-notice">{notice}</div>}
 
-      <section className="relative h-[calc(100dvh-3.5rem)] min-w-0">
         {showPalette && (
-          <NodePalette
-            graph={graph}
-            proposal={proposal}
-            disabled={!editable}
-            validationIssueCount={validationIssues.length}
-            onAdd={addAtCenter}
-            onCollapse={() => setShowPalette(false)}
-          />
+          <div className="workspace-palette-slot">
+            <NodePalette
+              graph={graph}
+              proposal={proposal}
+              disabled={!editable}
+              validationIssueCount={validationIssues.length}
+              onAdd={addAtCenter}
+              onCollapse={() => setShowPalette(false)}
+            />
+            <PanelResizer
+              side="left"
+              cssVariable="--palette-width"
+              min={196}
+              max={320}
+              defaultValue={232}
+              onCommit={setPaletteWidth}
+              targetRef={stageRef}
+              ariaLabel="Resize node inventory"
+            />
+          </div>
         )}
-        <section className="absolute inset-0 min-w-0">
+        <section className="workspace-canvas">
           {!showPalette && (
             <PanelExpandButton
               side="left"
               label="Palette"
-              onExpand={() => setShowPalette(true)}
+              onExpand={togglePalette}
             />
           )}
           {!showInspector && (
             <PanelExpandButton
               side="right"
               label="Inspector"
-              onExpand={() => setShowInspector(true)}
+              onExpand={toggleInspector}
             />
           )}
           <ReactFlow<ContractFlowNode, Edge>
@@ -375,7 +445,7 @@ export function GraphWorkspace() {
             defaultEdgeOptions={defaultEdgeOptions}
             zoomOnDoubleClick={false}
             selectionKeyCode="Shift"
-            multiSelectionKeyCode={['Meta', 'Control']}
+            multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
             snapToGrid
             snapGrid={snapGrid}
             minZoom={0.18}
@@ -383,7 +453,7 @@ export function GraphWorkspace() {
             deleteKeyCode={null}
           >
             <AlignmentGuides guides={canvasInteractions.guides} />
-            <Background gap={24} size={1} color="#d8d6d0" />
+            <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="#e2e6e1" />
             <MiniMap
               pannable
               zoomable
@@ -392,64 +462,64 @@ export function GraphWorkspace() {
               nodeStrokeColor="#ffffff"
               nodeStrokeWidth={2}
               nodeBorderRadius={10}
-              maskColor="rgb(24 33 29 / 10%)"
-              className="!h-28 !w-44 !rounded-xl !border !border-black/10 !bg-white"
+              maskColor="rgb(24 33 29 / 7%)"
+              className="canvas-minimap"
             />
             <Controls
               showInteractive={false}
-              position="bottom-center"
-              className="horizontal-flow-controls !overflow-hidden !rounded-xl !border-black/10 !shadow-sm"
+              position="bottom-right"
+              className="canvas-flow-controls"
             />
           </ReactFlow>
 
-        <div className="workspace-toolbar absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1 p-1">
-          <ToolButton label="Palette" active={showPalette} onClick={() => setShowPalette((value) => !value)} />
-          <ToolButton label="Inspector" active={showInspector} onClick={() => setShowInspector((value) => !value)} />
-          <span className="mx-1 h-5 w-px bg-black/10" />
-          <ToolButton label="Undo" disabled={!editable || past.length === 0} onClick={undo} />
-          <ToolButton label="Redo" disabled={!editable || future.length === 0} onClick={redo} />
-          <ToolButton label="Duplicate" disabled={!editable || selection.nodeIds.length === 0} onClick={duplicateSelection} />
-          <ToolButton label="Delete" disabled={!editable || selection.nodeIds.length + selection.edgeIds.length === 0} onClick={deleteSelection} />
-          <span className="mx-1 h-5 w-px bg-black/10" />
-          <ToolButton label="Fit" onClick={fitGraph} />
-          <ToolButton label="Reset" onClick={resetGraph} />
-        </div>
+          <CanvasInstructionStrip editable={editable} />
+          <CanvasStatusStrip
+            graph={graph}
+            issueCount={validationIssues.length}
+            selectionCount={selectionCount}
+            proposalPending={Boolean(proposal)}
+            scenarioCount={scenarios.length}
+          />
 
-        {proposal && <div className="absolute bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-[11px] font-semibold text-amber-900 shadow-lg">Proposal preview · accepted graph locked and unchanged</div>}
-        {graph.status === 'frozen' && <div className="absolute bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[#18211d] px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg">Frozen contract · {scenarios.length} paths</div>}
+          {proposal && <div className="workspace-proposal-banner">Proposal preview · accepted graph locked and unchanged</div>}
+          {graph.status === 'frozen' && <div className="workspace-frozen-banner">Frozen contract · {scenarios.length} paths</div>}
         </section>
 
         {showInspector && (
-          <aside className="workspace-panel absolute bottom-3 right-3 top-3 z-30 w-[340px] overflow-y-auto p-3">
-            <div className="mb-3 flex items-center gap-2">
-              <div className="grid min-w-0 flex-1 grid-cols-2 rounded-xl bg-black/5 p-1">
-                <button onClick={() => setRightTab('review')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${rightTab === 'review' ? 'bg-white shadow-sm' : 'text-black/50'}`}>Edit &amp; review</button>
-                <button onClick={() => setRightTab('scenarios')} className={`rounded-lg px-3 py-2 text-xs font-semibold ${rightTab === 'scenarios' ? 'bg-white shadow-sm' : 'text-black/50'}`}>Scenarios {scenarios.length ? `(${scenarios.length})` : ''}</button>
-              </div>
+          <aside className="workspace-panel workspace-inspector-panel">
+            <div className="flex items-center gap-2">
+              <InspectorTabs
+                active={rightTab}
+                scenarioCount={scenarios.length}
+                onChange={setRightTab}
+              />
               <PanelCollapseButton
                 side="right"
                 onCollapse={() => setShowInspector(false)}
                 label="Collapse inspector"
               />
             </div>
-            {rightTab === 'review' ? <div className="space-y-3"><ContextInspector /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+            <div
+              id="graph-inspector-tabpanel"
+              role="tabpanel"
+              aria-labelledby={activeInspectorTabId(rightTab)}
+              className="workspace-inspector-content"
+            >
+              {rightTab === 'review' ? <div className="space-y-3"><ContextInspector /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+            </div>
+            <PanelResizer
+              side="right"
+              cssVariable="--inspector-width"
+              min={300}
+              max={460}
+              defaultValue={344}
+              onCommit={setInspectorWidth}
+              targetRef={stageRef}
+              ariaLabel="Resize inspector"
+            />
           </aside>
         )}
       </section>
     </main>
   );
-}
-
-function StatusPill({ status }: { status: WebMcpStatus }) {
-  const presentation = {
-    unavailable: ['Browser preview', 'bg-amber-400'],
-    registering: ['Connecting WebMCP', 'bg-sky-400'],
-    connected: ['WebMCP · 3 tools', 'bg-emerald-500'],
-    error: ['WebMCP error', 'bg-rose-500'],
-  }[status];
-  return <div className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-2 text-[10px] font-semibold md:flex"><span className={`h-2 w-2 rounded-full ${presentation[1]}`} />{presentation[0]}</div>;
-}
-
-function ToolButton({ label, active, disabled, onClick }: { label: string; active?: boolean; disabled?: boolean; onClick: () => void }) {
-  return <button disabled={disabled} onClick={onClick} className={`rounded-lg px-2.5 py-1.5 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-30 ${active ? 'bg-[#18211d] text-white' : 'hover:bg-black/5'}`}>{label}</button>;
 }
