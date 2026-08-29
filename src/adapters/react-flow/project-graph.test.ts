@@ -9,7 +9,13 @@ import {
   projectGraphToCanvas,
   topologyDerivedLoopEdgeIds,
 } from '@/src/adapters/react-flow/project-graph';
-import { createProposal, researchIntakeRoutingGraph, sampleGraph, WorkflowGraph } from '@/src/domain';
+import {
+  createProposal,
+  researchIntakeRoutingGraph,
+  researchSupervisorGraph,
+  sampleGraph,
+  WorkflowGraph,
+} from '@/src/domain';
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
@@ -311,6 +317,38 @@ describe('projectGraphToCanvas', () => {
       ['leave-approve', 'approve', 'end'],
     ]);
     expect(canvas.edges.every((edge) => !isSubgraphProxyEdge(edge))).toBe(true);
+  });
+
+  it('keeps Research Supervisor boundary endpoints canonical when expanded and proxied when collapsed', () => {
+    const expanded = projectGraphToCanvas(researchSupervisorGraph, null);
+
+    expect(expanded.nodes.find((node) => node.id === 'research-subgraph-start')).toMatchObject({
+      parentId: 'research-supervisor',
+      hidden: false,
+    });
+    expect(expanded.nodes.find((node) => node.id === 'research-subgraph-end')).toMatchObject({
+      parentId: 'research-supervisor',
+      hidden: false,
+    });
+    expect(expanded.edges.map((edge) => [edge.id, edge.source, edge.target])).toEqual([
+      ['research-enter-subgraph', 'research-outer-start', 'research-subgraph-start'],
+      ['research-start-supervisor', 'research-subgraph-start', 'research-supervisor-agent'],
+      ['research-supervisor-tools', 'research-supervisor-agent', 'research-supervisor-tools'],
+      ['research-tools-end', 'research-supervisor-tools', 'research-subgraph-end'],
+      ['research-exit-subgraph', 'research-subgraph-end', 'research-outer-end'],
+    ]);
+
+    const collapsedGraph = structuredClone(researchSupervisorGraph);
+    collapsedGraph.subgraphs[0].collapsed = true;
+    const collapsed = projectGraphToCanvas(collapsedGraph, null);
+    const proxies = collapsed.edges.filter(isSubgraphProxyEdge);
+
+    expect(proxies.map((edge) => [edge.id, edge.source, edge.target])).toEqual([
+      ['subgraph-proxy:research-outer-start:research-supervisor', 'research-outer-start', 'research-supervisor'],
+      ['subgraph-proxy:research-supervisor:research-outer-end', 'research-supervisor', 'research-outer-end'],
+    ]);
+    expect(domainEdgeIdsForCanvasEdge(proxies[0])).toEqual(['research-enter-subgraph']);
+    expect(domainEdgeIdsForCanvasEdge(proxies[1])).toEqual(['research-exit-subgraph']);
   });
 
   it('marks visual containment without changing canonical membership', () => {

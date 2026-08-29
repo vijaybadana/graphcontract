@@ -5,7 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useMemo, useState } from 'react';
 
-import { sampleGraph } from '@/src/domain';
+import { researchSupervisorGraph, sampleGraph } from '@/src/domain';
+import { projectGraphToCanvas } from '@/src/adapters/react-flow/project-graph';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
 import { ContractNode } from './contract-node';
@@ -135,7 +136,31 @@ function InteractiveSubgraphCanvas({ onNodeClick }: { onNodeClick: (id: string) 
   );
 }
 
+function ResearchSupervisorCanvas() {
+  const canvas = useMemo(() => projectGraphToCanvas(researchSupervisorGraph, null), []);
+
+  return (
+    <div style={{ width: 1280, height: 720 }}>
+      <ReactFlowProvider>
+        <ReactFlow nodes={canvas.nodes} edges={canvas.edges} nodeTypes={nodeTypes} />
+      </ReactFlowProvider>
+    </div>
+  );
+}
+
 describe('SubgraphNode in React Flow', () => {
+  it('renders parented Research Supervisor Start and End handles for canonical boundary edges', async () => {
+    render(<ResearchSupervisorCanvas />);
+
+    const entryNode = (await screen.findByText('Research Start')).closest('.react-flow__node');
+    const exitNode = screen.getByText('Research Complete').closest('.react-flow__node');
+
+    expect(entryNode?.getAttribute('data-id')).toBe('research-subgraph-start');
+    expect(exitNode?.getAttribute('data-id')).toBe('research-subgraph-end');
+    expect(entryNode?.querySelector('.react-flow__handle.target')).not.toBeNull();
+    expect(exitNode?.querySelector('.react-flow__handle.source')).not.toBeNull();
+  });
+
   it('owns Enter and Space activation without selecting or moving the canvas', async () => {
     const onToggle = vi.fn();
     const onSelectionChange = vi.fn();

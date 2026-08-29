@@ -59,13 +59,19 @@ function NodeKindIcon({ kind }: { kind: GraphNode['kind'] }) {
 
 export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
   const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
+  // Outer Start/End nodes remain terminal at the canvas boundary. Their
+  // parented counterparts are subgraph ingress/egress endpoints, so React
+  // Flow needs the otherwise-suppressed handle for their canonical boundary
+  // edges to attach.
+  const rendersTargetHandle = data.kind !== 'start' || Boolean(data.parentId);
+  const rendersSourceHandle = data.kind !== 'end' || Boolean(data.parentId);
 
   return (
     <div
       data-kind={data.kind}
       className={`contract-node-shell ${selected ? 'is-selected' : ''} ${proposalClass}`}
     >
-        {data.kind !== 'start' && (
+        {rendersTargetHandle && (
           <Handle
             type="target"
             position={Position.Left}
@@ -103,7 +109,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
             )}
           </div>
         </div>
-        {data.kind !== 'end' && (
+        {rendersSourceHandle && (
           <Handle
             type="source"
             position={Position.Right}
