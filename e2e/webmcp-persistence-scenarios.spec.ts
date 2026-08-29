@@ -108,9 +108,14 @@ test('pending proposal locks palette authoring and freeze without changing accep
     await expect(app.getByRole('button', { name, exact: true })).toBeDisabled();
   }
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
-  expect(classifierLabel(await callWebMcpTool<GraphRead>(app, 'get_graph', {}))).toBe(
-    'Classifier Agent',
-  );
+  await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeDisabled();
+  const locked = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(classifierLabel(locked)).toBe('Classifier Agent');
+  expect(locked.graph.id).toBe(accepted.graph.id);
+  expect(locked.pendingProposal).toMatchObject({
+    status: 'pending',
+    rationale: 'E2E proposal: Locked Preview',
+  });
   await expect(app.getByText('E2E proposal: Locked Preview', { exact: true })).toBeVisible();
 });
 
