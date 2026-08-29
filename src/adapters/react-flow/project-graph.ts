@@ -3,7 +3,6 @@ import { Edge, MarkerType } from '@xyflow/react';
 import {
   applyGraphOperations,
   GraphEdge,
-  GraphOperation,
   GraphProposal,
   GraphSubgraph,
   WorkflowGraph,
@@ -167,75 +166,61 @@ export function projectGraphToCanvas(
     ? applyGraphOperations(graph, visibleProposal.operations).graph
     : graph;
 
-  const baseNodeIds = new Set(graph.nodes.map((node) => node.id));
-  const sourceNodes = [...graph.nodes];
-  for (const node of preview.nodes) {
-    if (!baseNodeIds.has(node.id)) sourceNodes.push(node);
-  }
-  const nodeUpdates = new Map(
-    (visibleProposal?.operations ?? [])
-      .filter(
-        (operation): operation is Extract<GraphOperation, { type: 'update_node' }> =>
-          operation.type === 'update_node',
-      )
-      .map((operation) => [operation.nodeId, operation.patch]),
-  );
+  // The candidate graph is the authoritative preview. Keep deleted accepted
+  // elements as ghosts so the existing review UI can show removals, but never
+  // reconstruct active candidate nodes from individual operation patches.
+  const previewNodeIds = new Set(preview.nodes.map((node) => node.id));
+  const sourceNodes = [
+    ...preview.nodes,
+    ...graph.nodes.filter((node) => !previewNodeIds.has(node.id)),
+  ];
 
   const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const nodes: CanvasFlowNode[] = [
     ...preview.subgraphs.map(subgraphFlowNode),
     ...sourceNodes.map((node) => {
-    const patched = nodeUpdates.has(node.id) ? { ...node, ...nodeUpdates.get(node.id) } : node;
-    const parent = patched.parentId ? subgraphsById.get(patched.parentId) : undefined;
+    const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
     const diff = visibleProposal?.diff;
+    const membershipChangedNodeIds = diff?.membershipChangedNodeIds ?? [];
     const proposalState = diff?.addedNodeIds.includes(node.id)
       ? 'added'
       : diff?.removedNodeIds.includes(node.id)
         ? 'removed'
-        : diff?.updatedNodeIds.includes(node.id)
+        : diff?.updatedNodeIds.includes(node.id) || membershipChangedNodeIds.includes(node.id)
           ? 'updated'
           : undefined;
     return {
-      id: patched.id,
+      id: node.id,
       type: 'contractNode',
-      position: patched.position,
+      position: node.position,
       initialWidth: CONTRACT_NODE_WIDTH,
       initialHeight: CONTRACT_NODE_HEIGHT,
-      ...(patched.parentId
-        ? { parentId: patched.parentId, extent: 'parent' as const, expandParent: false }
+      ...(node.parentId
+        ? { parentId: node.parentId, extent: 'parent' as const, expandParent: false }
         : {}),
       hidden: Boolean(parent?.collapsed),
-      data: { ...patched, proposalState },
+      data: { ...node, proposalState },
     };
     }),
   ];
 
-  const baseEdgeIds = new Set(graph.edges.map((edge) => edge.id));
-  const sourceEdges = [...graph.edges];
-  for (const edge of preview.edges) {
-    if (!baseEdgeIds.has(edge.id)) sourceEdges.push(edge);
-  }
-  const edgeUpdates = new Map(
-    (visibleProposal?.operations ?? [])
-      .filter(
-        (operation): operation is Extract<GraphOperation, { type: 'update_edge' }> =>
-          operation.type === 'update_edge',
-      )
-      .map((operation) => [operation.edgeId, operation.patch]),
-  );
+  const previewEdgeIds = new Set(preview.edges.map((edge) => edge.id));
+  const sourceEdges = [
+    ...preview.edges,
+    ...graph.edges.filter((edge) => !previewEdgeIds.has(edge.id)),
+  ];
 
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
-    const patched = edgeUpdates.has(edge.id) ? { ...edge, ...edgeUpdates.get(edge.id) } : edge;
     const sourceParent = subgraphsById.get(
-      preview.nodes.find((node) => node.id === patched.source)?.parentId ?? '',
+      preview.nodes.find((node) => node.id === edge.source)?.parentId ?? '',
     );
     const targetParent = subgraphsById.get(
-      preview.nodes.find((node) => node.id === patched.target)?.parentId ?? '',
+      preview.nodes.find((node) => node.id === edge.target)?.parentId ?? '',
     );
     return {
-      edge: patched,
-      source: sourceParent?.collapsed ? sourceParent.id : patched.source,
-      target: targetParent?.collapsed ? targetParent.id : patched.target,
+      edge,
+      source: sourceParent?.collapsed ? sourceParent.id : edge.source,
+      target: targetParent?.collapsed ? targetParent.id : edge.target,
     };
   });
 

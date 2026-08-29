@@ -24,6 +24,10 @@ export function ProposalPanel() {
             {proposal.diff.addedNodeIds.map((id) => <DiffPill key={`an-${id}`} label={`+ node ${id}`} tone="green" />)}
             {proposal.diff.updatedNodeIds.map((id) => <DiffPill key={`un-${id}`} label={`~ node ${id}`} tone="amber" />)}
             {proposal.diff.removedNodeIds.map((id) => <DiffPill key={`rn-${id}`} label={`− node ${id}`} tone="red" />)}
+            {(proposal.diff.addedSubgraphIds ?? []).map((id) => <DiffPill key={`as-${id}`} label={`+ subgraph ${id}`} tone="green" />)}
+            {(proposal.diff.updatedSubgraphIds ?? []).map((id) => <DiffPill key={`us-${id}`} label={`~ subgraph ${id}`} tone="amber" />)}
+            {(proposal.diff.removedSubgraphIds ?? []).map((id) => <DiffPill key={`rs-${id}`} label={`− subgraph ${id}`} tone="red" />)}
+            {(proposal.diff.membershipChangedNodeIds ?? []).map((id) => <DiffPill key={`mn-${id}`} label={`~ membership ${id}`} tone="amber" />)}
             {proposal.diff.addedEdgeIds.map((id) => <DiffPill key={`ae-${id}`} label={`+ edge ${id}`} tone="green" />)}
             {proposal.diff.updatedEdgeIds.map((id) => <DiffPill key={`ue-${id}`} label={`~ edge ${id}`} tone="amber" />)}
             {proposal.diff.removedEdgeIds.map((id) => <DiffPill key={`re-${id}`} label={`− edge ${id}`} tone="red" />)}

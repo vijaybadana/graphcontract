@@ -28,6 +28,94 @@ describe('workspace application service', () => {
     expect(approved.state.proposal).toBeNull();
   });
 
+  it('approves a valid subgraph proposal through the human path and keeps child coordinates relative', () => {
+    let timestamp = '2026-08-28T12:00:00.000Z';
+    const timestampedService = createWorkspaceService({
+      now: () => timestamp,
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    const initial = timestampedService.loadResearchSupervisorDemo(timestampedService.createInitial());
+    const proposed = timestampedService.submitProposal(initial.state, {
+      rationale: 'Move the research container without changing its internal layout.',
+      operations: [
+        {
+          type: 'update_subgraph',
+          subgraphId: 'research-supervisor',
+          patch: { position: { x: 340, y: 180 } },
+        },
+      ],
+    });
+
+    expect(proposed.result?.proposal.status).toBe('pending');
+    expect(proposed.state.graph.updatedAt).toBe('2026-08-28T12:00:00.000Z');
+    timestamp = '2026-08-28T12:01:00.000Z';
+    const approved = timestampedService.approveProposal(proposed.state);
+
+    expect(approved.result?.ok).toBe(true);
+    expect(approved.state.graph.updatedAt).toBe('2026-08-28T12:01:00.000Z');
+    expect(approved.state.graph.subgraphs[0]?.position).toEqual({ x: 340, y: 180 });
+    expect(approved.state.graph.nodes.find((node) => node.id === 'research-supervisor-agent')?.position).toEqual({
+      x: 220,
+      y: 130,
+    });
+  });
+
+  it('rejects a subgraph proposal without changing accepted timestamps or graph data', () => {
+    const initial = service.loadResearchSupervisorDemo(service.createInitial());
+    const before = structuredClone(initial.state.graph);
+    const proposed = service.submitProposal(initial.state, {
+      rationale: 'Rename the research container.',
+      operations: [
+        {
+          type: 'update_subgraph',
+          subgraphId: 'research-supervisor',
+          patch: { label: 'Research review' },
+        },
+      ],
+    });
+    const rejected = service.rejectProposal(proposed.state);
+
+    expect(rejected.changed).toBe(true);
+    expect(rejected.state.proposal).toBeNull();
+    expect(rejected.state.graph).toEqual(before);
+    expect(rejected.state.graph.updatedAt).toBe(before.updatedAt);
+  });
+
+  it('keeps expectedGraphUpdatedAt optional but rejects supplied stale values and human stale approval', () => {
+    const initial = service.createInitial();
+    const compatible = service.submitProposal(initial, {
+      rationale: 'Existing clients may omit the timestamp.',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } }],
+    });
+    const mismatched = service.submitProposal(initial, {
+      rationale: 'This read is stale.',
+      expectedGraphUpdatedAt: '2026-01-01T00:00:00.000Z',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } }],
+    });
+    const stale = service.approveProposal({
+      ...compatible.state,
+      graph: { ...compatible.state.graph, updatedAt: '2026-08-29T00:00:00.000Z' },
+    });
+
+    expect(compatible.result?.ok).toBe(true);
+    expect(mismatched.result).toEqual({
+      ok: false,
+      error: {
+        code: 'PROPOSAL_STALE',
+        message: 'The accepted graph changed. Read it again before proposing changes.',
+      },
+    });
+    expect(stale.result).toEqual({
+      ok: false,
+      error: {
+        code: 'PROPOSAL_STALE',
+        message: 'The graph changed after this proposal was created.',
+      },
+    });
+    expect(stale.state.graph.nodes.find((node) => node.id === 'billing')?.label).toBe('Billing Agent');
+    expect(stale.state.proposal?.status).toBe('stale');
+  });
+
   it('freezes a valid graph and enumerates its reachable paths', () => {
     const frozen = service.freezeGraph(service.createInitial());
 

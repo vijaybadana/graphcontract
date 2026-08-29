@@ -31,6 +31,65 @@ export type WebMcpWorkspacePort = {
   submitProposal: (input: unknown) => ProposalResult;
 };
 
+const positionSchema = {
+  type: 'object',
+  required: ['x', 'y'],
+  properties: { x: { type: 'number' }, y: { type: 'number' } },
+  additionalProperties: false,
+};
+
+const subgraphSchema = {
+  type: 'object',
+  required: ['id', 'label', 'position', 'dimensions', 'collapsed'],
+  properties: {
+    id: { type: 'string' },
+    label: { type: 'string' },
+    position: positionSchema,
+    dimensions: {
+      type: 'object',
+      required: ['width', 'height'],
+      properties: { width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 } },
+      additionalProperties: false,
+    },
+    collapsed: { type: 'boolean' },
+  },
+  additionalProperties: false,
+};
+
+const nodePatchSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: nodeKinds },
+    label: { type: 'string' },
+    description: { type: 'string' },
+    position: positionSchema,
+    config: { type: 'object' },
+    hitl: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean' },
+        timing: { enum: ['before', 'after', 'conditional'] },
+        inputType: { enum: ['approval', 'text', 'selection'] },
+        condition: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+  },
+  // Parent membership is intentionally a dedicated proposal operation.
+  additionalProperties: false,
+};
+
+const subgraphPatchSchema = {
+  type: 'object',
+  properties: {
+    label: { type: 'string' },
+    position: positionSchema,
+    dimensions: subgraphSchema.properties.dimensions,
+    collapsed: { type: 'boolean' },
+  },
+  additionalProperties: false,
+};
+
 const operationSchema = {
   oneOf: [
     {
@@ -46,32 +105,69 @@ const operationSchema = {
             kind: { type: 'string', enum: nodeKinds },
             label: { type: 'string' },
             description: { type: 'string' },
-            position: {
-              type: 'object',
-              required: ['x', 'y'],
-              properties: { x: { type: 'number' }, y: { type: 'number' } },
-            },
+            position: positionSchema,
+            parentId: { type: 'string' },
+            config: { type: 'object' },
             hitl: {
               type: 'object',
               properties: {
                 enabled: { type: 'boolean' },
                 timing: { enum: ['before', 'after', 'conditional'] },
                 inputType: { enum: ['approval', 'text', 'selection'] },
+                condition: { type: 'string' },
               },
+              additionalProperties: false,
             },
           },
+          additionalProperties: false,
         },
       },
     },
     {
       type: 'object',
       required: ['type', 'nodeId', 'patch'],
-      properties: { type: { const: 'update_node' }, nodeId: { type: 'string' }, patch: { type: 'object' } },
+      properties: { type: { const: 'update_node' }, nodeId: { type: 'string' }, patch: nodePatchSchema },
     },
     {
       type: 'object',
       required: ['type', 'nodeId'],
       properties: { type: { const: 'remove_node' }, nodeId: { type: 'string' } },
+    },
+    {
+      type: 'object',
+      required: ['type', 'subgraph'],
+      properties: { type: { const: 'add_subgraph' }, subgraph: subgraphSchema },
+    },
+    {
+      type: 'object',
+      required: ['type', 'subgraphId', 'patch'],
+      properties: {
+        type: { const: 'update_subgraph' },
+        subgraphId: { type: 'string' },
+        patch: subgraphPatchSchema,
+      },
+    },
+    {
+      type: 'object',
+      required: ['type', 'subgraphId', 'nodeIds'],
+      properties: {
+        type: { const: 'assign_nodes_to_subgraph' },
+        subgraphId: { type: 'string' },
+        nodeIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+      },
+    },
+    {
+      type: 'object',
+      required: ['type', 'nodeIds'],
+      properties: {
+        type: { const: 'remove_nodes_from_subgraph' },
+        nodeIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+      },
+    },
+    {
+      type: 'object',
+      required: ['type', 'subgraphId'],
+      properties: { type: { const: 'dissolve_subgraph' }, subgraphId: { type: 'string' } },
     },
     {
       type: 'object',
@@ -89,13 +185,28 @@ const operationSchema = {
             label: { type: 'string' },
             condition: { type: 'string' },
           },
+          additionalProperties: false,
         },
       },
     },
     {
       type: 'object',
       required: ['type', 'edgeId', 'patch'],
-      properties: { type: { const: 'update_edge' }, edgeId: { type: 'string' }, patch: { type: 'object' } },
+      properties: {
+        type: { const: 'update_edge' },
+        edgeId: { type: 'string' },
+        patch: {
+          type: 'object',
+          properties: {
+            source: { type: 'string' },
+            target: { type: 'string' },
+            mode: { enum: ['normal', 'conditional', 'fallback'] },
+            label: { type: 'string' },
+            condition: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+      },
     },
     {
       type: 'object',

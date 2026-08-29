@@ -78,6 +78,44 @@ describe('projectGraphToCanvas', () => {
     expect(proposedNode.initialHeight).toBe(acceptedNode.initialHeight);
   });
 
+  it('projects the fully applied candidate when a proposal reparents a node into a new subgraph', () => {
+    const graph = structuredClone(sampleGraph);
+    const proposal = createProposal(graph, {
+      rationale: 'Preview a review container around billing.',
+      operations: [
+        {
+          type: 'add_subgraph',
+          subgraph: {
+            id: 'billing-review',
+            label: 'Billing review',
+            position: { x: 300, y: 100 },
+            dimensions: { width: 640, height: 360 },
+            collapsed: false,
+          },
+        },
+        {
+          type: 'assign_nodes_to_subgraph',
+          subgraphId: 'billing-review',
+          nodeIds: ['billing'],
+        },
+      ],
+    }).proposal!;
+
+    const canvas = projectGraphToCanvas(graph, proposal);
+    const billing = canvas.nodes.find((node) => node.id === 'billing');
+
+    expect(canvas.nodes.find((node) => node.id === 'billing-review')).toMatchObject({
+      position: { x: 300, y: 100 },
+      type: 'subgraph',
+    });
+    expect(billing).toMatchObject({
+      parentId: 'billing-review',
+      position: { x: 180, y: -40 },
+      extent: 'parent',
+    });
+    expect(graph.nodes.find((node) => node.id === 'billing')?.parentId).toBeUndefined();
+  });
+
   it('emits a subgraph parent before relative children in expanded projection', () => {
     const canvas = projectGraphToCanvas(graphWithSubgraph(), null);
     const parentIndex = canvas.nodes.findIndex((node) => node.id === 'review-group');

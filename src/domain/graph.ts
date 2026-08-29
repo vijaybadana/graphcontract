@@ -73,9 +73,18 @@ export type GraphOperation =
   | {
       type: 'update_node';
       nodeId: string;
-      patch: Partial<Omit<GraphNode, 'id'>>;
+      patch: Partial<Omit<GraphNode, 'id' | 'parentId'>>;
     }
   | { type: 'remove_node'; nodeId: string }
+  | { type: 'add_subgraph'; subgraph: GraphSubgraph }
+  | {
+      type: 'update_subgraph';
+      subgraphId: string;
+      patch: Partial<Omit<GraphSubgraph, 'id'>>;
+    }
+  | { type: 'assign_nodes_to_subgraph'; subgraphId: string; nodeIds: string[] }
+  | { type: 'remove_nodes_from_subgraph'; nodeIds: string[] }
+  | { type: 'dissolve_subgraph'; subgraphId: string }
   | { type: 'add_edge'; edge: GraphEdge }
   | {
       type: 'update_edge';
@@ -88,6 +97,10 @@ export type ProposalDiff = {
   addedNodeIds: string[];
   updatedNodeIds: string[];
   removedNodeIds: string[];
+  addedSubgraphIds: string[];
+  updatedSubgraphIds: string[];
+  removedSubgraphIds: string[];
+  membershipChangedNodeIds: string[];
   addedEdgeIds: string[];
   updatedEdgeIds: string[];
   removedEdgeIds: string[];
@@ -179,9 +192,25 @@ export const graphOperationSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('update_node'),
     nodeId: z.string().min(1),
-    patch: graphNodeSchema.omit({ id: true }).partial(),
+    patch: graphNodeSchema.omit({ id: true, parentId: true }).partial().strict(),
   }),
   z.object({ type: z.literal('remove_node'), nodeId: z.string().min(1) }),
+  z.object({ type: z.literal('add_subgraph'), subgraph: graphSubgraphSchema }),
+  z.object({
+    type: z.literal('update_subgraph'),
+    subgraphId: z.string().min(1),
+    patch: graphSubgraphSchema.omit({ id: true }).partial().strict(),
+  }),
+  z.object({
+    type: z.literal('assign_nodes_to_subgraph'),
+    subgraphId: z.string().min(1),
+    nodeIds: z.array(z.string().min(1)).min(1),
+  }),
+  z.object({
+    type: z.literal('remove_nodes_from_subgraph'),
+    nodeIds: z.array(z.string().min(1)).min(1),
+  }),
+  z.object({ type: z.literal('dissolve_subgraph'), subgraphId: z.string().min(1) }),
   z.object({ type: z.literal('add_edge'), edge: graphEdgeSchema }),
   z.object({
     type: z.literal('update_edge'),
@@ -662,10 +691,32 @@ export function applyGraphOperations(
   next.subgraphs ??= [];
   const errors: ValidationIssue[] = [];
 
+  const hasSubgraph = (subgraphId: string) =>
+    next.subgraphs.some((subgraph) => subgraph.id === subgraphId);
+  const findNode = (nodeId: string) => next.nodes.find((node) => node.id === nodeId);
+  const absoluteNodePosition = (node: GraphNode): GraphPosition => {
+    const parent = node.parentId
+      ? next.subgraphs.find((subgraph) => subgraph.id === node.parentId)
+      : undefined;
+    return parent
+      ? { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y }
+      : structuredClone(node.position);
+  };
+  const uniqueNodeIds = (nodeIds: string[]) => [...new Set(nodeIds)];
+  const missingNodes = (nodeIds: string[], operationIndex: number) => {
+    const missing = uniqueNodeIds(nodeIds).filter((nodeId) => !findNode(nodeId));
+    for (const nodeId of missing) {
+      errors.push(issue('OPERATION_NOT_FOUND', `Node “${nodeId}” was not found.`, `operations.${operationIndex}`));
+    }
+    return missing.length > 0;
+  };
+
   for (const [index, operation] of operations.entries()) {
     if (operation.type === 'add_node') {
-      if (next.nodes.some((node) => node.id === operation.node.id)) {
+      if (findNode(operation.node.id) || hasSubgraph(operation.node.id)) {
         errors.push(issue('OPERATION_CONFLICT', `Node “${operation.node.id}” already exists.`, `operations.${index}`));
+      } else if (operation.node.parentId && !hasSubgraph(operation.node.parentId)) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.node.parentId}” was not found.`, `operations.${index}`));
       } else {
         next.nodes.push(structuredClone(operation.node));
       }
@@ -677,7 +728,7 @@ export function applyGraphOperations(
         next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...structuredClone(operation.patch) };
       }
     } else if (operation.type === 'remove_node') {
-      if (!next.nodes.some((node) => node.id === operation.nodeId)) {
+      if (!findNode(operation.nodeId)) {
         errors.push(issue('OPERATION_NOT_FOUND', `Node “${operation.nodeId}” was not found.`, `operations.${index}`));
       } else {
         next.nodes = next.nodes.filter((node) => node.id !== operation.nodeId);
@@ -685,9 +736,72 @@ export function applyGraphOperations(
           (edge) => edge.source !== operation.nodeId && edge.target !== operation.nodeId,
         );
       }
+    } else if (operation.type === 'add_subgraph') {
+      if (hasSubgraph(operation.subgraph.id) || findNode(operation.subgraph.id)) {
+        errors.push(issue('OPERATION_CONFLICT', `Subgraph “${operation.subgraph.id}” already exists.`, `operations.${index}`));
+      } else {
+        next.subgraphs.push(structuredClone(operation.subgraph));
+      }
+    } else if (operation.type === 'update_subgraph') {
+      const subgraphIndex = next.subgraphs.findIndex((subgraph) => subgraph.id === operation.subgraphId);
+      if (subgraphIndex < 0) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}`));
+      } else {
+        // Child coordinates are already relative; a container position update
+        // deliberately moves only the container.
+        next.subgraphs[subgraphIndex] = {
+          ...next.subgraphs[subgraphIndex],
+          ...structuredClone(operation.patch),
+        };
+      }
+    } else if (operation.type === 'assign_nodes_to_subgraph') {
+      if (!hasSubgraph(operation.subgraphId)) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}`));
+      } else if (!missingNodes(operation.nodeIds, index)) {
+        const target = next.subgraphs.find((subgraph) => subgraph.id === operation.subgraphId)!;
+        const requested = new Set(uniqueNodeIds(operation.nodeIds));
+        next.nodes = next.nodes.map((node) => {
+          if (!requested.has(node.id)) return node;
+          const absolute = absoluteNodePosition(node);
+          return {
+            ...node,
+            parentId: operation.subgraphId,
+            position: {
+              x: absolute.x - target.position.x,
+              y: absolute.y - target.position.y,
+            },
+          };
+        });
+      }
+    } else if (operation.type === 'remove_nodes_from_subgraph') {
+      if (!missingNodes(operation.nodeIds, index)) {
+        const requested = new Set(uniqueNodeIds(operation.nodeIds));
+        next.nodes = next.nodes.map((node) => {
+          if (!requested.has(node.id) || !node.parentId) return node;
+          const position = absoluteNodePosition(node);
+          const { parentId: _parentId, ...unparented } = node;
+          return { ...unparented, position };
+        });
+      }
+    } else if (operation.type === 'dissolve_subgraph') {
+      if (!hasSubgraph(operation.subgraphId)) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}`));
+      } else {
+        next.nodes = next.nodes.map((node) => {
+          if (node.parentId !== operation.subgraphId) return node;
+          const position = absoluteNodePosition(node);
+          const { parentId: _parentId, ...unparented } = node;
+          return { ...unparented, position };
+        });
+        // Edges remain canonical node-to-node edges. Only the container is
+        // removed, after direct children have been converted to screen space.
+        next.subgraphs = next.subgraphs.filter((subgraph) => subgraph.id !== operation.subgraphId);
+      }
     } else if (operation.type === 'add_edge') {
       if (next.edges.some((edge) => edge.id === operation.edge.id)) {
         errors.push(issue('OPERATION_CONFLICT', `Edge “${operation.edge.id}” already exists.`, `operations.${index}`));
+      } else if (!findNode(operation.edge.source) || !findNode(operation.edge.target)) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edge.id}” references a node that was not found.`, `operations.${index}`));
       } else {
         next.edges.push(structuredClone(operation.edge));
       }
@@ -696,7 +810,12 @@ export function applyGraphOperations(
       if (edgeIndex < 0) {
         errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edgeId}” was not found.`, `operations.${index}`));
       } else {
-        next.edges[edgeIndex] = { ...next.edges[edgeIndex], ...structuredClone(operation.patch) };
+        const updated = { ...next.edges[edgeIndex], ...structuredClone(operation.patch) };
+        if (!findNode(updated.source) || !findNode(updated.target)) {
+          errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edgeId}” references a node that was not found.`, `operations.${index}`));
+        } else {
+          next.edges[edgeIndex] = updated;
+        }
       }
     } else if (operation.type === 'remove_edge') {
       if (!next.edges.some((edge) => edge.id === operation.edgeId)) {
@@ -710,26 +829,50 @@ export function applyGraphOperations(
   return { graph: next, errors };
 }
 
-export function proposalDiff(operations: GraphOperation[]): ProposalDiff {
-  return operations.reduce<ProposalDiff>(
-    (diff, operation) => {
-      if (operation.type === 'add_node') diff.addedNodeIds.push(operation.node.id);
-      if (operation.type === 'update_node') diff.updatedNodeIds.push(operation.nodeId);
-      if (operation.type === 'remove_node') diff.removedNodeIds.push(operation.nodeId);
-      if (operation.type === 'add_edge') diff.addedEdgeIds.push(operation.edge.id);
-      if (operation.type === 'update_edge') diff.updatedEdgeIds.push(operation.edgeId);
-      if (operation.type === 'remove_edge') diff.removedEdgeIds.push(operation.edgeId);
-      return diff;
-    },
-    {
-      addedNodeIds: [],
-      updatedNodeIds: [],
-      removedNodeIds: [],
-      addedEdgeIds: [],
-      updatedEdgeIds: [],
-      removedEdgeIds: [],
-    },
-  );
+export function proposalDiff(operations: GraphOperation[], baseGraph?: WorkflowGraph): ProposalDiff {
+  const diff: ProposalDiff = {
+    addedNodeIds: [],
+    updatedNodeIds: [],
+    removedNodeIds: [],
+    addedSubgraphIds: [],
+    updatedSubgraphIds: [],
+    removedSubgraphIds: [],
+    membershipChangedNodeIds: [],
+    addedEdgeIds: [],
+    updatedEdgeIds: [],
+    removedEdgeIds: [],
+  };
+  const add = (values: string[], value: string) => {
+    if (!values.includes(value)) values.push(value);
+  };
+  let candidate = baseGraph ? structuredClone(baseGraph) : undefined;
+
+  for (const operation of operations) {
+    if (operation.type === 'add_node') {
+      add(diff.addedNodeIds, operation.node.id);
+      if (operation.node.parentId) add(diff.membershipChangedNodeIds, operation.node.id);
+    }
+    if (operation.type === 'update_node') add(diff.updatedNodeIds, operation.nodeId);
+    if (operation.type === 'remove_node') add(diff.removedNodeIds, operation.nodeId);
+    if (operation.type === 'add_subgraph') add(diff.addedSubgraphIds, operation.subgraph.id);
+    if (operation.type === 'update_subgraph') add(diff.updatedSubgraphIds, operation.subgraphId);
+    if (operation.type === 'dissolve_subgraph') {
+      add(diff.removedSubgraphIds, operation.subgraphId);
+      for (const node of candidate?.nodes ?? []) {
+        if (node.parentId === operation.subgraphId) add(diff.membershipChangedNodeIds, node.id);
+      }
+    }
+    if (operation.type === 'assign_nodes_to_subgraph' || operation.type === 'remove_nodes_from_subgraph') {
+      for (const nodeId of operation.nodeIds) add(diff.membershipChangedNodeIds, nodeId);
+    }
+    if (operation.type === 'add_edge') add(diff.addedEdgeIds, operation.edge.id);
+    if (operation.type === 'update_edge') add(diff.updatedEdgeIds, operation.edgeId);
+    if (operation.type === 'remove_edge') add(diff.removedEdgeIds, operation.edgeId);
+
+    if (candidate) candidate = applyGraphOperations(candidate, [operation]).graph;
+  }
+
+  return diff;
 }
 
 export function createProposal(
@@ -772,7 +915,7 @@ export function createProposal(
       status: validationErrors.length === 0 ? 'pending' : 'invalid',
       createdAt: now,
       validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
-      diff: proposalDiff(parsed.data.operations),
+      diff: proposalDiff(parsed.data.operations, graph),
     },
   };
 }

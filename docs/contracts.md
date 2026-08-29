@@ -103,11 +103,33 @@ type GraphOperation =
   | {
       type: "update_node";
       nodeId: string;
-      patch: Partial<Omit<GraphNode, "id">>;
+      patch: Partial<Omit<GraphNode, "id" | "parentId">>;
     }
   | {
       type: "remove_node";
       nodeId: string;
+    }
+  | {
+      type: "add_subgraph";
+      subgraph: GraphSubgraph;
+    }
+  | {
+      type: "update_subgraph";
+      subgraphId: string;
+      patch: Partial<Omit<GraphSubgraph, "id">>;
+    }
+  | {
+      type: "assign_nodes_to_subgraph";
+      subgraphId: string;
+      nodeIds: string[];
+    }
+  | {
+      type: "remove_nodes_from_subgraph";
+      nodeIds: string[];
+    }
+  | {
+      type: "dissolve_subgraph";
+      subgraphId: string;
     }
   | {
       type: "add_edge";
@@ -141,7 +163,7 @@ type ValidationIssue = {
 };
 ```
 
-Proposal operations are evaluated in their supplied order against a copy of the current accepted graph. A proposal is valid only if the resulting graph satisfies final validation. Approval applies all operations atomically; failure leaves the accepted graph unchanged.
+Proposal operations are evaluated in their supplied order against a copy of the current accepted graph, with each referenced node or subgraph required to exist at that point in the sequence. `add_node.parentId` is validated against that progressive graph; membership changes never use `update_node`. Assigning or removing a parent preserves a node's absolute screen position, while dissolving a subgraph removes only the container, preserves canonical edges, and converts its direct children to absolute positions. A proposal is valid only if the resulting graph satisfies final validation. Approval applies all operations atomically; failure leaves the accepted graph unchanged.
 
 A proposal becomes `stale` if the accepted graph changes after the agent read it or after the proposal was created. Stale proposals must not be approved without being regenerated against the current graph.
 
@@ -221,7 +243,7 @@ Submits one structured, reviewable proposal. It does not apply changes.
 type ProposeGraphChangesInput = {
   operations: GraphOperation[];
   rationale: string;
-  expectedGraphUpdatedAt: string;
+  expectedGraphUpdatedAt?: string;
 };
 
 type ProposeGraphChangesOutput = {
@@ -230,6 +252,10 @@ type ProposeGraphChangesOutput = {
     addedNodeIds: string[];
     updatedNodeIds: string[];
     removedNodeIds: string[];
+    addedSubgraphIds: string[];
+    updatedSubgraphIds: string[];
+    removedSubgraphIds: string[];
+    membershipChangedNodeIds: string[];
     addedEdgeIds: string[];
     updatedEdgeIds: string[];
     removedEdgeIds: string[];
@@ -241,7 +267,7 @@ Behavior:
 
 - Rejects empty operations or missing rationale.
 - Rejects if there is already a pending proposal.
-- Rejects when `expectedGraphUpdatedAt` differs from the accepted graph's `updatedAt`.
+- Rejects when supplied `expectedGraphUpdatedAt` differs from the accepted graph's `updatedAt`; it remains optional for compatible existing clients.
 - Validates operations and the resulting proposed graph.
 - Returns an `invalid` proposal with issues when the proposed result violates invariants.
 - Never mutates the accepted graph.
