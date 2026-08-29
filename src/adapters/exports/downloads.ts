@@ -1,4 +1,9 @@
-import { buildPythonTestSkeleton, BranchScenario, WorkflowGraph } from '@/src/domain';
+import {
+  buildPythonTestSkeleton,
+  BranchScenario,
+  normalizeWorkflowGraphRouting,
+  WorkflowGraph,
+} from '@/src/domain';
 
 export type DownloadArtifact = {
   filename: string;
@@ -9,7 +14,7 @@ export type DownloadArtifact = {
 export function buildGraphContractDownload(graph: WorkflowGraph): DownloadArtifact {
   return {
     filename: 'graph-contract.json',
-    content: JSON.stringify(graph, null, 2),
+    content: JSON.stringify(normalizeWorkflowGraphRouting(graph), null, 2),
     type: 'application/json;charset=utf-8',
   };
 }

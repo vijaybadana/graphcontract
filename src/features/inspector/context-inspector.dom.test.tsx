@@ -96,6 +96,29 @@ describe('ContextInspector routing details', () => {
     expect(screen.getByText('Derived loop: this route returns to an earlier reachable node.')).toBeTruthy();
   });
 
+  it('normalizes route data through the canonical store path when modes switch', () => {
+    selectEdge('clarify-write-brief');
+    renderInspector();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Routing mode' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Edge' }));
+    expect(useGraphStore.getState().graph.edges.find((edge) => edge.id === 'clarify-write-brief')).toMatchObject({
+      mode: 'normal',
+      label: 'ready',
+    });
+    expect(useGraphStore.getState().graph.edges.find((edge) => edge.id === 'clarify-write-brief')).not.toHaveProperty('condition');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Routing mode' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Fallback' }));
+    expect(useGraphStore.getState().graph.edges.find((edge) => edge.id === 'clarify-write-brief')).toEqual({
+      id: 'clarify-write-brief',
+      source: 'clarify-request',
+      target: 'write-research-brief',
+      mode: 'fallback',
+      label: 'fallback',
+    });
+  });
+
   it('shows route-specific validation help without disabling a draft inspector', () => {
     const invalid = structuredClone(researchIntakeRoutingGraph);
     invalid.edges.find((edge) => edge.id === 'supervisor-final-report')!.label = '   ';

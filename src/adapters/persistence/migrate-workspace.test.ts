@@ -142,4 +142,45 @@ describe('workspace persistence migration', () => {
       ]),
     });
   });
+
+  it('normalizes stale route fields while preserving the persisted graph', () => {
+    const legacy = structuredClone(researchIntakeRoutingGraph);
+    legacy.edges.find((edge) => edge.id === 'researcher-continue')!.condition =
+      'state.shouldContinue === true';
+    legacy.edges.find((edge) => edge.id === 'supervisor-human-review')!.label = 'otherwise';
+    legacy.edges.find((edge) => edge.id === 'supervisor-human-review')!.condition =
+      'state.unhandled === true';
+    legacy.edges.find((edge) => edge.id === 'clarify-write-brief')!.label = ' ready ';
+    legacy.edges.find((edge) => edge.id === 'clarify-write-brief')!.condition = '   ';
+
+    const migrated = migrateWorkspaceV3(
+      { graph: legacy, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph?.edges.find((edge) => edge.id === 'researcher-continue')).toEqual({
+      id: 'researcher-continue',
+      source: 'researcher',
+      target: 'research-supervisor',
+      mode: 'normal',
+      label: 'continue',
+    });
+    expect(migrated.graph?.edges.find((edge) => edge.id === 'supervisor-human-review')).toEqual({
+      id: 'supervisor-human-review',
+      source: 'research-supervisor',
+      target: 'human-review',
+      mode: 'fallback',
+      label: 'fallback',
+    });
+    expect(migrated.graph?.edges.find((edge) => edge.id === 'clarify-write-brief')).toMatchObject({
+      mode: 'command',
+      label: 'ready',
+    });
+    expect(migrated.graph?.edges.find((edge) => edge.id === 'clarify-write-brief')).toMatchObject({
+      condition: '',
+    });
+    expect(validateGraph(migrated.graph!).map((entry) => entry.code)).toContain(
+      'COMMAND_CONDITION_REQUIRED',
+    );
+  });
 });

@@ -8,6 +8,7 @@ import {
   GraphProposal,
   GraphSubgraph,
   NodeKind,
+  normalizeWorkflowGraphRouting,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   sampleGraph,
@@ -124,7 +125,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     notice?: string,
   ): WorkspaceTransition => {
     if (!editable(state)) return blocked(state);
-    const graph = updater(clone(state.graph));
+    const graph = normalizeWorkflowGraphRouting(updater(clone(state.graph)));
     graph.updatedAt = dependencies.now();
     graph.status = 'draft';
     return { state: { graph, proposal: null, scenarios: [] }, changed: true, notice };

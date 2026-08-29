@@ -51,6 +51,37 @@ export type GraphEdge = {
   condition?: string;
 };
 
+const normalizedRouteText = (value: string | undefined) => value?.trim();
+
+/**
+ * Keeps persisted routing data compatible with the edge's role. This is the
+ * one canonical boundary used by editor writes, proposals, persistence, and
+ * exports; presentation code must not merely hide incompatible fields.
+ */
+export function normalizeRoutingEdge(edge: GraphEdge): GraphEdge {
+  const { mode, label, condition, ...identity } = edge;
+  const normalizedLabel = normalizedRouteText(label);
+
+  if (mode === 'normal') {
+    return { ...identity, mode, ...(normalizedLabel ? { label: normalizedLabel } : {}) };
+  }
+  if (mode === 'fallback') {
+    return { ...identity, mode, label: 'fallback' };
+  }
+
+  return {
+    ...identity,
+    mode,
+    ...(normalizedLabel !== undefined ? { label: normalizedLabel } : {}),
+    ...(condition !== undefined ? { condition: normalizedRouteText(condition) } : {}),
+  };
+}
+
+/** Returns a graph copy whose route semantics are safe to persist or export. */
+export function normalizeWorkflowGraphRouting(graph: WorkflowGraph): WorkflowGraph {
+  return { ...graph, edges: graph.edges.map(normalizeRoutingEdge) };
+}
+
 export type WorkflowGraph = {
   schemaVersion: '1';
   id: string;
@@ -533,7 +564,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     );
   }
 
-  const normalized = parsed.data;
+  const normalized = normalizeWorkflowGraphRouting(parsed.data);
   const issues: ValidationIssue[] = [];
   const nodeIds = new Set<string>();
   const edgeIds = new Set<string>();
@@ -898,7 +929,7 @@ export function applyGraphOperations(
   graph: WorkflowGraph,
   operations: GraphOperation[],
 ): { graph: WorkflowGraph; errors: ValidationIssue[] } {
-  const next: WorkflowGraph = structuredClone(graph);
+  const next: WorkflowGraph = normalizeWorkflowGraphRouting(structuredClone(graph));
   // Proposals may be replayed against data loaded before subgraphs existed.
   // Keep that accepted data canonical even outside the persistence adapter.
   next.subgraphs ??= [];
@@ -1018,14 +1049,17 @@ export function applyGraphOperations(
       } else if (!findNode(operation.edge.source) || !findNode(operation.edge.target)) {
         errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edge.id}” references a node that was not found.`, `operations.${index}`));
       } else {
-        next.edges.push(structuredClone(operation.edge));
+        next.edges.push(normalizeRoutingEdge(structuredClone(operation.edge)));
       }
     } else if (operation.type === 'update_edge') {
       const edgeIndex = next.edges.findIndex((edge) => edge.id === operation.edgeId);
       if (edgeIndex < 0) {
         errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edgeId}” was not found.`, `operations.${index}`));
       } else {
-        const updated = { ...next.edges[edgeIndex], ...structuredClone(operation.patch) };
+        const updated = normalizeRoutingEdge({
+          ...next.edges[edgeIndex],
+          ...structuredClone(operation.patch),
+        });
         if (!findNode(updated.source) || !findNode(updated.target)) {
           errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edgeId}” references a node that was not found.`, `operations.${index}`));
         } else {
@@ -1137,7 +1171,7 @@ export function createProposal(
 
 export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
   if (validateGraph(graph).length > 0) return [];
-  const normalized = workflowGraphSchema.parse(graph);
+  const normalized = normalizeWorkflowGraphRouting(workflowGraphSchema.parse(graph));
   const start = normalized.nodes.find((node) => node.kind === 'start' && !node.parentId);
   if (!start) return [];
 

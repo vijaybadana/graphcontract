@@ -127,12 +127,23 @@ export function WorkspaceHeader({
           {graphStatus}
         </span>
         {graphStatus === 'frozen' ? (
-          <button type="button" className="workspace-freeze-button is-secondary" onClick={onUnfreeze}>
+          <button
+            type="button"
+            className="workspace-freeze-button is-secondary"
+            aria-label="Unfreeze contract; currently frozen"
+            onClick={onUnfreeze}
+          >
             <LockSimpleOpen aria-hidden="true" size={15} weight="bold" />
             <span>Unfreeze</span>
           </button>
         ) : (
-          <button type="button" className="workspace-freeze-button" disabled={!canFreeze} onClick={onFreeze}>
+          <button
+            type="button"
+            className="workspace-freeze-button"
+            aria-label="Confirm and freeze contract; currently draft"
+            disabled={!canFreeze}
+            onClick={onFreeze}
+          >
             <LockSimple aria-hidden="true" size={15} weight="bold" />
             <span>Confirm &amp; freeze</span>
           </button>

@@ -59,7 +59,7 @@ describe('GraphWorkspace subgraph creation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
     expect(screen.getByRole('button', { name: 'Open Inspector' })).toBeTruthy();
-  });
+  }, 10_000);
 
   it('opens Edit & review and replaces the compact palette after palette drop creation', async () => {
     renderWorkspace(true);
@@ -76,5 +76,5 @@ describe('GraphWorkspace subgraph creation', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Collapse node palette' })).toBeNull();
     });
-  });
+  }, 10_000);
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyGraphOperations,
   enumerateScenarios,
   researchIntakeRoutingGraph,
   validateGraph,
@@ -12,6 +13,51 @@ import {
 } from '../adapters/exports/downloads';
 
 describe('routing edge semantics', () => {
+  it('normalizes route fields on canonical add and update operations', () => {
+    const normal = applyGraphOperations(researchIntakeRoutingGraph, [
+      {
+        type: 'update_edge',
+        edgeId: 'researcher-continue',
+        patch: { condition: 'state.shouldContinue === true', label: ' continue ' },
+      },
+    ]).graph.edges.find((edge) => edge.id === 'researcher-continue');
+    expect(normal).toEqual({
+      id: 'researcher-continue',
+      source: 'researcher',
+      target: 'research-supervisor',
+      mode: 'normal',
+      label: 'continue',
+    });
+
+    const fallback = applyGraphOperations(researchIntakeRoutingGraph, [
+      {
+        type: 'update_edge',
+        edgeId: 'supervisor-human-review',
+        patch: { label: 'otherwise', condition: 'state.unhandled === true' },
+      },
+    ]).graph.edges.find((edge) => edge.id === 'supervisor-human-review');
+    expect(fallback).toEqual({
+      id: 'supervisor-human-review',
+      source: 'research-supervisor',
+      target: 'human-review',
+      mode: 'fallback',
+      label: 'fallback',
+    });
+
+    const command = applyGraphOperations(researchIntakeRoutingGraph, [
+      {
+        type: 'update_edge',
+        edgeId: 'clarify-write-brief',
+        patch: { label: ' ready ', condition: ' state.ready === true ' },
+      },
+    ]).graph.edges.find((edge) => edge.id === 'clarify-write-brief');
+    expect(command).toMatchObject({
+      mode: 'command',
+      label: 'ready',
+      condition: 'state.ready === true',
+    });
+  });
+
   it('keeps the Research Intake topology valid with commands and a derived return loop', () => {
     expect(validateGraph(researchIntakeRoutingGraph)).toEqual([]);
 
@@ -190,7 +236,13 @@ describe('routing edge semantics', () => {
       ]),
     );
 
-    expect(JSON.parse(buildGraphContractDownload(researchIntakeRoutingGraph).content).edges).toEqual(
+    const staleExport = structuredClone(researchIntakeRoutingGraph);
+    staleExport.edges.find((edge) => edge.id === 'researcher-continue')!.condition =
+      'state.shouldContinue === true';
+    staleExport.edges.find((edge) => edge.id === 'supervisor-human-review')!.label = 'otherwise';
+    staleExport.edges.find((edge) => edge.id === 'supervisor-human-review')!.condition =
+      'state.unhandled === true';
+    expect(JSON.parse(buildGraphContractDownload(staleExport).content).edges).toEqual(
       researchIntakeRoutingGraph.edges,
     );
     expect(JSON.parse(buildGraphScenariosDownload(researchIntakeRoutingGraph, scenarios).content).scenarios).toEqual(

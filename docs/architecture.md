@@ -39,7 +39,7 @@ Owns the canonical accepted workflow:
 
 - Nodes, edges, positions, labels, optional embedded HITL configuration, and one-level subgraph containers
 - Subgraph membership through a node `parentId`; child positions are relative to their container and collapse never rewrites canonical edges
-- Structural validation: IDs, scope-aware entry/exit routing, reachability, and acyclicity
+- Structural validation: IDs, scope-aware entry/exit routing, reachability, Command routes, and topology-derived return loops
 - Import/export serialization
 - Path enumeration after the graph is frozen
 
@@ -81,7 +81,7 @@ Tools expose structured data only. They do not simulate UI actions, mutate human
 
 After a human freezes a valid graph, this layer:
 
-- Enumerates every reachable start-to-terminal path
+- Enumerates bounded deterministic start-to-terminal paths, traversing each topology-derived loop at most once per path
 - Produces branch conditions, ordered node paths, expected nodes, and terminal node expectations
 - Exports JSON artifacts and a generated Python test skeleton
 
@@ -148,4 +148,4 @@ ChatGPT Sites hosts the public application. The initial deployment should verify
 
 ## Non-goals
 
-The MVP does not include repository parsing, agent-code generation, implementation verification, authentication, loops or retries, parallel branches, deeply nested subgraphs, LangSmith integration, or an embedded chatbot.
+The MVP does not include repository parsing, agent-code generation, implementation verification, authentication, retry-policy execution, parallel branches, deeply nested subgraphs, LangSmith integration, or an embedded chatbot. Return loops are represented only when derived from authored topology.

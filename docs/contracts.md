@@ -46,7 +46,7 @@ type GraphNode = {
   hitl?: HitlConfig;
 };
 
-type EdgeMode = "normal" | "conditional" | "fallback";
+type EdgeMode = "normal" | "conditional" | "command" | "fallback";
 
 type GraphEdge = {
   id: string;
@@ -77,13 +77,15 @@ A valid MVP graph must satisfy all of the following:
 - Every edge source and target references an existing node.
 - The outer graph has exactly one `start` node and at least one `end` node.
 - Each subgraph has exactly one internal `start` and one internal `end` node.
-- The graph is acyclic.
+- Return loops are derived from graph topology; they are never stored as a separate edge mode.
 - Every non-`end` node has either:
   - exactly one outgoing `normal` edge; or
+  - one or more labeled `command` edges; or
   - two to five outgoing `conditional` edges, optionally plus one `fallback` edge.
-- A node cannot mix normal and conditional or fallback outgoing edges.
-- Conditional edge labels are unique per source node and non-empty.
+- A node cannot mix normal and routed (`conditional`, `command`, or `fallback`) outgoing edges.
+- Conditional and Command edge labels are readable; conditional labels are unique per source node.
 - A source node has at most one fallback edge.
+- Normal edges do not retain a condition. A fallback is the conditional-routing role with the normalized label `fallback` and no condition. Conditional and Command edges may retain an optional readable condition.
 - Outer `end` nodes have no outgoing edges. An internal `end` has exactly one normal exit edge outside its subgraph; an internal `start` has exactly one incoming entry edge from outside its subgraph.
 - Edges may enter a subgraph only through its internal `start`, and may leave only through its internal `end`. Stored endpoints remain the underlying node IDs when a subgraph is collapsed.
 - Nodes intended for the final contract must be reachable from `start`.
@@ -197,7 +199,7 @@ type ScenarioBundle = {
 };
 ```
 
-Scenarios are generated only from a frozen, valid graph. Each scenario represents one reachable `start`-to-`end` execution path. A graph with a single unbranched path produces one scenario.
+Scenarios are generated only from a frozen, valid graph. Each scenario represents one bounded deterministic reachable `start`-to-`end` execution path. A topology-derived return loop is traversed at most once per path, so a graph with a single unbranched path produces one scenario.
 
 ## WebMCP tools
 
@@ -275,7 +277,7 @@ Behavior:
 
 ### `get_branch_scenarios`
 
-Returns exhaustive branch scenarios for the accepted frozen graph.
+Returns bounded deterministic branch scenarios for the accepted frozen graph; each topology-derived loop is traversed at most once per path.
 
 ```ts
 type GetBranchScenariosInput = {};

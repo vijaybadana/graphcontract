@@ -1,5 +1,5 @@
 import { WorkspaceCore } from '@/src/application/workspace';
-import { workflowGraphSchema } from '@/src/domain';
+import { normalizeWorkflowGraphRouting, workflowGraphSchema } from '@/src/domain';
 
 type PersistedWorkspace = Partial<WorkspaceCore> & Record<string, unknown>;
 
@@ -24,7 +24,7 @@ export function migrateWorkspaceV3(
 
   return {
     ...persisted,
-    graph: {
+    graph: normalizeWorkflowGraphRouting({
       ...parsed.data,
       nodes: parsed.data.nodes.map((node) =>
         node.label === 'New Action'
@@ -36,7 +36,7 @@ export function migrateWorkspaceV3(
             }
           : node,
       ),
-    },
+    }),
   };
 }
 

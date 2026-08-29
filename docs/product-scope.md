@@ -4,7 +4,7 @@
 
 GraphContract is a browser-based visual editor where a human and an external coding agent collaboratively design a workflow. The human edits the workflow directly; the agent reads it through WebMCP and proposes structured changes. The human alone approves, rejects, and freezes the final workflow.
 
-The final frozen workflow becomes a portable execution contract with exhaustive branch scenarios and downloadable testing artifacts.
+The final frozen workflow becomes a portable execution contract with bounded deterministic branch scenarios and downloadable testing artifacts.
 
 ## Primary judge journey
 
@@ -27,10 +27,10 @@ The entire journey should be understandable and demonstrable in under three minu
 - A predefined support-workflow-style demo graph.
 - Human creation, movement, configuration, and connection of workflow elements.
 - Validated graph routing:
-  - One normal outgoing edge, or conditional outgoing edges with unique labels.
-  - Optional fallback branch where applicable.
-  - No mixing normal and conditional outgoing edges on one node.
-  - No cycles in MVP graphs.
+  - One normal outgoing edge; Command routes; or conditional outgoing edges with unique labels.
+  - Optional fallback branch where applicable, normalized as `fallback` with no condition.
+  - No mixing normal and routed outgoing edges on one node.
+  - Return loops derived from topology; each is traversed at most once per generated path.
 - Support for the intended workflow concepts, provisionally:
   - Start, Agent, Action/function, Tool, Human Input, End.
   - Optional embedded human-in-the-loop metadata on applicable nodes.
@@ -41,7 +41,7 @@ The entire journey should be understandable and demonstrable in under three minu
 - Structured agent proposals that do not alter the accepted graph until a human approves them.
 - Visible proposal diff and human approve/reject controls.
 - Human-only freeze/confirm action.
-- Exhaustive reachable-path generation after freeze.
+- Bounded deterministic reachable-path generation after freeze.
 - Downloadable contract and scenario artifacts; a generated Python test skeleton is desirable for the core demo.
 - Local persistence suitable for the MVP, with no login required.
 - Clear error states for invalid graph edits, invalid proposals, and frozen-graph restrictions.
@@ -59,7 +59,7 @@ The entire journey should be understandable and demonstrable in under three minu
 - Generating or executing production agent code.
 - Verifying an implementation against a repository.
 - Authentication, multi-user collaboration, or a production database.
-- Loops, retries, parallel execution, or subgraphs.
+- Retry execution, parallel execution, or deeply nested subgraphs.
 - Embedded chat UI.
 - LangSmith integration.
 - Claims of LangGraph runtime compatibility beyond the exported, LangGraph-style workflow contract.
@@ -73,7 +73,7 @@ A judge can:
 - Clearly distinguish proposal state from accepted state.
 - Approve or reject the proposal themselves.
 - Freeze a valid workflow.
-- Inspect exhaustive branch scenarios.
+- Inspect bounded deterministic branch scenarios.
 - Download useful, valid artifacts.
 - Understand why WebMCP is central to the experience.
 
@@ -91,4 +91,4 @@ The following may change during implementation if they preserve the objective an
 - Persistence method and deployment implementation.
 - Validation wording and scenario presentation.
 
-Any change that weakens human approval authority, removes real WebMCP interaction, prevents exhaustive path generation, or makes the core journey harder to demonstrate requires an explicit scope decision before implementation.
+Any change that weakens human approval authority, removes real WebMCP interaction, prevents bounded deterministic path generation, or makes the core journey harder to demonstrate requires an explicit scope decision before implementation.

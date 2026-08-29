@@ -32,7 +32,7 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
       <div className="rounded-2xl bg-[#18211d] p-4 text-white">
         <p className="eyebrow !text-white/50">Frozen contract</p>
         <p className="mt-2 text-2xl font-semibold">{scenarios.length} paths</p>
-        <p className="mt-1 text-[11px] leading-5 text-white/60">Exhaustive reachable execution scenarios.</p>
+        <p className="mt-1 text-[11px] leading-5 text-white/60">Bounded deterministic execution scenarios; each loop is traversed at most once per path.</p>
       </div>
       <div className="mt-3 max-h-[300px] space-y-2 overflow-y-auto pr-1">
         {scenarios.map((scenario) => (
