@@ -217,7 +217,7 @@ describe('SubgraphNode in React Flow', () => {
     expect(onLoadResearchSupervisorDemo).toHaveBeenCalledOnce();
   });
 
-  it('builds each frozen-contract download in its click event and releases the object URL afterward', () => {
+  it('prepares native Blob download links and releases their URLs after unmount', () => {
     const createObjectURL = vi
       .spyOn(URL, 'createObjectURL')
       .mockImplementation((() => 'blob:graphcontract-download') as typeof URL.createObjectURL);
@@ -225,15 +225,19 @@ describe('SubgraphNode in React Flow', () => {
     const frozenGraph = { ...sampleGraph, status: 'frozen' as const };
     vi.useFakeTimers();
     try {
-      render(<ScenarioPanel graph={frozenGraph} scenarios={[]} />);
+      const { unmount } = render(<ScenarioPanel graph={frozenGraph} scenarios={[]} />);
       const links = screen.getAllByRole('link', { name: /Download / });
 
       expect(links).toHaveLength(3);
-      links.forEach((link) => link.addEventListener('click', (event) => event.preventDefault()));
-      links.forEach((link) => fireEvent.click(link));
       expect(createObjectURL).toHaveBeenCalledTimes(3);
+      expect(links.map((link) => (link as HTMLAnchorElement).download)).toEqual([
+        'graph-contract.json',
+        'graph-test-scenarios.json',
+        'test_graph_paths.py',
+      ]);
       expect(links.every((link) => link.getAttribute('href') === 'blob:graphcontract-download')).toBe(true);
 
+      unmount();
       vi.runOnlyPendingTimers();
       expect(revokeObjectURL).toHaveBeenCalledTimes(3);
     } finally {

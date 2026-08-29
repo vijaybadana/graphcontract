@@ -1,4 +1,4 @@
-import { MouseEvent, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import {
   buildGraphContractDownload,
@@ -50,19 +50,30 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
 }
 
 function DownloadLink({ artifact }: { artifact: DownloadArtifact }) {
-  const prepareDownload = (event: MouseEvent<HTMLAnchorElement>) => {
-    // Build the Blob at the user gesture. The browser reads this href during
-    // the subsequent native download action, then it is safe to release.
+  const anchorRef = useRef<HTMLAnchorElement>(null);
+
+  useEffect(() => {
     const url = URL.createObjectURL(new Blob([artifact.content], { type: artifact.type }));
-    event.currentTarget.href = url;
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  };
+    const anchor = anchorRef.current;
+    if (!anchor) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    // The visible native anchor owns a ready Blob URL before the click. This
+    // lets Chromium consume the real user gesture instead of relying on a
+    // synthetic nested click or a same-event href mutation.
+    anchor.href = url;
+    return () => {
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    };
+  }, [artifact.content, artifact.type]);
 
   return (
     <a
+      ref={anchorRef}
       href="#download"
       download={artifact.filename}
-      onClick={prepareDownload}
       className="download-button"
     >
       Download {artifact.filename}
