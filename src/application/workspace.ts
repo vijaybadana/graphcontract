@@ -5,6 +5,7 @@ import {
   enumerateScenarios,
   GraphEdge,
   GraphNode,
+  GraphNodePatch,
   GraphProposal,
   GraphSubgraph,
   NodeKind,
@@ -15,6 +16,7 @@ import {
   validateGraph,
   ValidationIssue,
   WorkflowGraph,
+  StepExecutor,
 } from '@/src/domain';
 import { layoutWorkflowGraph } from './layout-workflow';
 import { createDraftEdge } from './connection-policy';
@@ -45,16 +47,53 @@ export type WorkspaceDependencies = {
   makeId: (prefix: string) => string;
 };
 
-const labels: Record<NodeKind, string> = {
+/**
+ * Creation remains a presentation choice. Every work-oriented preset creates
+ * the same active graph kind (`step`) and selects only its executor defaults.
+ */
+export const stepPresetDefinitions = {
+  step: { label: 'New Step', executor: 'deterministic' },
+  agent: { label: 'New Agent', executor: 'ai' },
+  action: { label: 'New Action', executor: 'deterministic' },
+  tool: { label: 'New Tool', executor: 'tool' },
+  humanReview: { label: 'Human review', executor: 'human' },
+} as const satisfies Record<string, { label: string; executor: StepExecutor }>;
+
+export type StepPreset = keyof typeof stepPresetDefinitions;
+export type NodeCreationPreset = Extract<NodeKind, 'start' | 'end'> | StepPreset;
+
+const structuralPresetLabels: Record<Extract<NodeKind, 'start' | 'end'>, string> = {
   start: 'Start',
-  agent: 'New Agent',
-  action: 'New Action',
-  tool: 'New Tool',
-  human_input: 'Human Input',
   end: 'End',
 };
 
+function createNodeFromPreset(
+  dependencies: WorkspaceDependencies,
+  preset: NodeCreationPreset,
+  position: { x: number; y: number },
+): GraphNode {
+  if (preset === 'start' || preset === 'end') {
+    return {
+      id: dependencies.makeId(preset),
+      kind: preset,
+      label: structuralPresetLabels[preset],
+      position,
+    };
+  }
+
+  const definition = stepPresetDefinitions[preset];
+  return {
+    id: dependencies.makeId('step'),
+    kind: 'step',
+    executor: definition.executor,
+    label: definition.label,
+    position,
+  };
+}
+
 const clone = <T,>(value: T): T => structuredClone(value);
+const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
+  ['executor', 'participation', 'modifiers', 'hitl'].some((field) => field in patch);
 const CANVAS_NODE_WIDTH = 184;
 const CANVAS_NODE_HEIGHT = 114;
 const SUBGRAPH_BODY_INSET = 12;
@@ -136,31 +175,20 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
 
     addNode(
       state: WorkspaceCore,
-      kind: NodeKind,
+      preset: NodeCreationPreset,
       position: { x: number; y: number },
     ): WorkspaceTransition<{ nodeId: string }> {
       if (!editable(state)) return { ...blocked(state), result: undefined };
-      const nodeId = dependencies.makeId(kind);
+      const node = createNodeFromPreset(dependencies, preset, position);
       const transition = changeGraph(
         state,
         (graph) => ({
           ...graph,
-          nodes: [
-            ...graph.nodes,
-            {
-              id: nodeId,
-              kind,
-              label: labels[kind],
-              position,
-              ...(['agent', 'action', 'tool'].includes(kind)
-                ? { hitl: { enabled: false } }
-                : {}),
-            },
-          ],
+          nodes: [...graph.nodes, node],
         }),
         'Node added. Configure it in the inspector.',
       );
-      return { ...transition, result: { nodeId } };
+      return { ...transition, result: { nodeId: node.id } };
     },
 
     moveNode(state: WorkspaceCore, nodeId: string, position: GraphNode['position']) {
@@ -230,8 +258,16 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     updateNode(
       state: WorkspaceCore,
       nodeId: string,
-      patch: Partial<Omit<GraphNode, 'id'>>,
+      patch: GraphNodePatch,
     ) {
+      const node = state.graph.nodes.find((candidate) => candidate.id === nodeId);
+      if (node && node.kind !== 'step' && hasStepOnlyPatchFields(patch)) {
+        return {
+          state,
+          changed: false,
+          notice: 'Step-only fields can only update Step nodes.',
+        };
+      }
       return changeGraph(state, (graph) => ({
         ...graph,
         nodes: graph.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
@@ -652,7 +688,8 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       };
     },
 
-    resetGraph(): WorkspaceTransition {
+    resetGraph(state: WorkspaceCore): WorkspaceTransition {
+      if (!editable(state)) return blocked(state);
       return {
         state: createInitial(),
         changed: true,

@@ -42,7 +42,7 @@ describe('evaluateConnection', () => {
 
   it('keeps internal Start and End nodes as the only permitted subgraph boundary routes', () => {
     const graph: WorkflowGraph = {
-      schemaVersion: '1',
+      schemaVersion: '2',
       id: 'subgraph-boundaries',
       name: 'Subgraph boundaries',
       status: 'draft',
@@ -58,9 +58,9 @@ describe('evaluateConnection', () => {
       ],
       nodes: [
         { id: 'start', kind: 'start', label: 'Start', position: { x: 20, y: 200 } },
-        { id: 'outer', kind: 'agent', label: 'Outer', position: { x: 120, y: 200 } },
+        { id: 'outer', kind: 'step', executor: 'ai', label: 'Outer', position: { x: 120, y: 200 } },
         { id: 'inner-start', kind: 'start', label: 'Inner start', parentId: 'review', position: { x: 40, y: 100 } },
-        { id: 'inner', kind: 'agent', label: 'Inner', parentId: 'review', position: { x: 220, y: 100 } },
+        { id: 'inner', kind: 'step', executor: 'ai', label: 'Inner', parentId: 'review', position: { x: 220, y: 100 } },
         { id: 'inner-end', kind: 'end', label: 'Inner end', parentId: 'review', position: { x: 400, y: 100 } },
         { id: 'end', kind: 'end', label: 'End', position: { x: 980, y: 200 } },
       ],

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateGraph } from '@/src/domain';
+import { validateGraph, workflowGraphSchema } from '@/src/domain';
+import { buildGraphContractDownload } from '@/src/adapters/exports/downloads';
 import { createWorkspaceService } from './workspace';
 
 const service = createWorkspaceService({
@@ -9,6 +10,62 @@ const service = createWorkspaceService({
 });
 
 describe('workspace application service', () => {
+  it('creates every work preset as a canonical Step and preserves its independent fields on duplication', () => {
+    let id = 0;
+    const presetService = createWorkspaceService({
+      now: () => '2026-08-30T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-${++id}`,
+    });
+    let state = presetService.createInitial();
+    const expectedExecutors = {
+      step: 'deterministic',
+      agent: 'ai',
+      action: 'deterministic',
+      tool: 'tool',
+      humanReview: 'human',
+    } as const;
+
+    for (const [preset, executor] of Object.entries(expectedExecutors)) {
+      const added = presetService.addNode(
+        state,
+        preset as keyof typeof expectedExecutors,
+        { x: 100 + id * 20, y: 120 },
+      );
+      expect(added.result?.nodeId).toBeTruthy();
+      const node = added.state.graph.nodes.find((candidate) => candidate.id === added.result?.nodeId);
+      expect(node).toMatchObject({ kind: 'step', executor });
+      state = added.state;
+    }
+
+    const originalId = state.graph.nodes.at(-1)!.id;
+    const updated = presetService.updateNode(state, originalId, {
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'after', inputType: 'approval' },
+      modifiers: { guardrail: true, storeRead: true, retryFallback: true },
+    });
+    const duplicated = presetService.duplicateNodes(updated.state, [originalId]);
+    const copy = duplicated.state.graph.nodes.find((node) => node.id === duplicated.result?.nodeIds[0]);
+
+    expect(copy).toMatchObject({
+      kind: 'step',
+      executor: 'human',
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'after', inputType: 'approval' },
+      modifiers: { guardrail: true, storeRead: true, retryFallback: true },
+    });
+    expect(
+      workflowGraphSchema.parse(JSON.parse(buildGraphContractDownload(duplicated.state.graph).content)).nodes.find(
+        (node) => node.id === copy?.id,
+      ),
+    ).toMatchObject({
+      kind: 'step',
+      executor: 'human',
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'after', inputType: 'approval' },
+      modifiers: { guardrail: true, storeRead: true, retryFallback: true },
+    });
+  });
+
   it('keeps agent proposals non-destructive until human approval', () => {
     const initial = service.createInitial();
     const proposed = service.submitProposal(initial, {
@@ -252,6 +309,39 @@ describe('workspace application service', () => {
     expect(edit.state.graph.nodes.find((node) => node.id === 'diagnostic')?.label).toBe('Diagnostic Action');
   });
 
+  it('rejects Step-only direct updates on Start and End without changing accepted state', () => {
+    const initial = service.createInitial();
+    const rejected = service.updateNode(initial, 'start', {
+      executor: 'ai',
+      hitl: { enabled: true, timing: 'before', inputType: 'approval' },
+    });
+
+    expect(rejected.changed).toBe(false);
+    expect(rejected.notice).toBe('Step-only fields can only update Step nodes.');
+    expect(rejected.state).toEqual(initial);
+  });
+
+  it('preserves the accepted graph and every review-state proposal when reset is requested', () => {
+    const initial = service.createInitial();
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Clarify the billing specialist.',
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } },
+      ],
+    });
+    const proposal = proposed.state.proposal!;
+
+    for (const status of ['pending', 'invalid', 'stale'] as const) {
+      const reviewState = { ...proposed.state, proposal: { ...proposal, status } };
+      const before = structuredClone(reviewState);
+      const reset = service.resetGraph(reviewState);
+
+      expect(reset.changed).toBe(false);
+      expect(reset.notice).toBe('Approve or reject the agent proposal before editing the accepted graph.');
+      expect(reset.state).toEqual(before);
+    }
+  });
+
   it('commits a multi-node drag as one graph transition', () => {
     const initial = service.createInitial();
     const moved = service.moveNodes(initial, {
@@ -280,7 +370,8 @@ describe('workspace application service', () => {
           type: 'add_node',
           node: {
             id: 'fraud-check',
-            kind: 'action',
+            kind: 'step',
+            executor: 'deterministic',
             label: 'Fraud Check',
             position: { x: 5000, y: 5000 },
           },

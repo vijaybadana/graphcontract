@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyGraphOperations,
   enumerateScenarios,
+  graphNodePatchSchema,
   researchIntakeRoutingGraph,
   sampleGraph,
   validateGraph,
@@ -99,6 +100,24 @@ describe('routing edge semantics', () => {
       label: 'ready',
       condition: 'state.ready === true',
     });
+  });
+
+  it('rejects kind changes and Step-only patches on structural nodes without mutating them', () => {
+    expect(graphNodePatchSchema.safeParse({ kind: 'step' }).success).toBe(false);
+
+    const original = structuredClone(sampleGraph);
+    const applied = applyGraphOperations(original, [
+      {
+        type: 'update_node',
+        nodeId: 'start',
+        patch: { executor: 'ai', hitl: { enabled: true } },
+      },
+    ]);
+
+    expect(applied.errors).toEqual([
+      expect.objectContaining({ code: 'STEP_FIELDS_REQUIRE_STEP', path: 'operations.0' }),
+    ]);
+    expect(applied.graph).toEqual(original);
   });
 
   it('keeps the Research Intake topology valid with commands and a derived return loop', () => {

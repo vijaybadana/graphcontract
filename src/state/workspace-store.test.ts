@@ -126,13 +126,53 @@ describe('workspace subgraph actions', () => {
 });
 
 describe('workspace persistence reload', () => {
+  it('keeps canonical Step fields through copy/paste, undo/redo, and persisted rehydration', async () => {
+    useGraphStore.getState().addNode('agent', { x: 900, y: 120 });
+    const originalId = useGraphStore.getState().selection.primary!.id;
+    useGraphStore.getState().updateNode(originalId, {
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'before', inputType: 'approval' },
+      modifiers: { guardrail: true, sensitiveSideEffect: true, storeRead: true },
+    });
+    useGraphStore.getState().copySelection();
+    useGraphStore.getState().pasteSelection();
+
+    const copyId = useGraphStore.getState().selection.primary!.id;
+    const expectedStep = {
+      kind: 'step',
+      executor: 'ai',
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'before', inputType: 'approval' },
+      modifiers: { guardrail: true, sensitiveSideEffect: true, storeRead: true },
+    };
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === copyId)).toMatchObject(
+      expectedStep,
+    );
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.nodes.some((node) => node.id === copyId)).toBe(false);
+    useGraphStore.getState().redo();
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === copyId)).toMatchObject(
+      expectedStep,
+    );
+
+    await useGraphStore.persist.rehydrate();
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === copyId)).toMatchObject(
+      expectedStep,
+    );
+  });
+
   it('rehydrates an incomplete, schema-safe draft instead of replacing it with the sample', async () => {
     const draft = structuredClone(sampleGraph);
     draft.nodes.push({
       id: 'unfinished-agent',
-      kind: 'agent',
+      kind: 'step',
+      executor: 'ai',
       label: 'Unfinished agent',
       position: { x: 900, y: 120 },
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'after', inputType: 'text' },
+      modifiers: { retryFallback: true, readiness: 'degraded' },
     });
     draft.edges.push({
       id: 'unfinished-edge',
@@ -165,8 +205,37 @@ describe('workspace persistence reload', () => {
       ]),
       subgraphs: expect.arrayContaining([expect.objectContaining({ id: 'empty-subgraph' })]),
     });
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'unfinished-agent')).toMatchObject({
+      kind: 'step',
+      executor: 'ai',
+      participation: { internalTools: true },
+      hitl: { enabled: true, timing: 'after', inputType: 'text' },
+      modifiers: { retryFallback: true, readiness: 'degraded' },
+    });
     expect(validateGraph(useGraphStore.getState().graph).map((entry) => entry.code)).toEqual(
       expect.arrayContaining(['MISSING_EDGE_NODE', 'OUTGOING_REQUIRED', 'SUBGRAPH_START_COUNT']),
+    );
+  });
+});
+
+describe('workspace reset authority', () => {
+  it('does not reset accepted state or a proposal under review', () => {
+    const accepted = structuredClone(useGraphStore.getState().graph);
+    const submitted = useGraphStore.getState().submitProposal({
+      rationale: 'Clarify the billing specialist.',
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } },
+      ],
+    });
+    expect(submitted.ok).toBe(true);
+    const proposal = structuredClone(useGraphStore.getState().proposal);
+
+    useGraphStore.getState().resetGraph();
+
+    expect(useGraphStore.getState().graph).toEqual(accepted);
+    expect(useGraphStore.getState().proposal).toEqual(proposal);
+    expect(useGraphStore.getState().notice).toBe(
+      'Approve or reject the agent proposal before editing the accepted graph.',
     );
   });
 });

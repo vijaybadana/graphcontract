@@ -7,16 +7,16 @@ import { migrateWorkspaceV3 } from '@/src/adapters/persistence/migrate-workspace
 import {
   createWorkspaceService,
   FreezeResult,
+  NodeCreationPreset,
   ProposalResult,
   WorkspaceCore,
   WorkspaceTransition,
 } from '@/src/application/workspace';
 import {
   GraphEdge,
-  GraphNode,
+  GraphNodePatch,
   GraphPosition,
   GraphSubgraph,
-  NodeKind,
   WorkflowGraph,
 } from '@/src/domain';
 
@@ -34,7 +34,7 @@ type WorkspaceStore = WorkspaceCore & {
   future: WorkspaceCore[];
   notice: string | null;
   fitViewRevision: number;
-  addNode: (kind: NodeKind, position?: { x: number; y: number }) => void;
+  addNode: (preset: NodeCreationPreset, position?: { x: number; y: number }) => void;
   createSubgraph: (input: {
     label?: string;
     position: GraphPosition;
@@ -45,7 +45,7 @@ type WorkspaceStore = WorkspaceCore & {
   moveNodes: (positions: Record<string, { x: number; y: number }>) => void;
   moveSubgraph: (id: string, position: GraphPosition) => void;
   moveCanvasElements: (positions: Record<string, GraphPosition>) => void;
-  updateNode: (id: string, patch: Partial<Omit<GraphNode, 'id'>>) => void;
+  updateNode: (id: string, patch: GraphNodePatch) => void;
   updateSubgraph: (id: string, patch: Partial<Omit<GraphSubgraph, 'id'>>) => void;
   setSubgraphCollapsed: (id: string, collapsed: boolean) => void;
   assignNodesToSubgraph: (subgraphId: string, nodeIds: string[]) => void;
@@ -154,8 +154,8 @@ export const useGraphStore = create<WorkspaceStore>()(
         notice: null,
         fitViewRevision: 0,
 
-        addNode: (kind, position = { x: 360, y: 180 }) => {
-          const transition = workspace.addNode(currentCore(), kind, position);
+        addNode: (preset, position = { x: 360, y: 180 }) => {
+          const transition = workspace.addNode(currentCore(), preset, position);
           const nodeId = transition.result?.nodeId;
           commit(transition, {
             selection: nodeId
@@ -360,8 +360,11 @@ export const useGraphStore = create<WorkspaceStore>()(
           }),
 
         resetGraph: () => {
-          commit(workspace.resetGraph(), { selection: emptySelection() });
-          set((state) => ({ clipboardNodeIds: [], fitViewRevision: state.fitViewRevision + 1 }));
+          const transition = workspace.resetGraph(currentCore());
+          commit(transition, { selection: transition.changed ? emptySelection() : get().selection });
+          if (transition.changed) {
+            set((state) => ({ clipboardNodeIds: [], fitViewRevision: state.fitViewRevision + 1 }));
+          }
         },
 
         loadResearchSupervisorDemo: () => {

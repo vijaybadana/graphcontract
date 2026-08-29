@@ -41,6 +41,9 @@ type GraphNodeBase = {
   position: GraphPosition;
   parentId?: string;
   config?: Record<string, unknown>;
+};
+
+type GraphNodeWithHitl = GraphNodeBase & {
   /**
    * A gate is deliberately independent from who owns execution. The v1
    * timing shape remains intact here; Package 2 owns richer gate timing and
@@ -78,6 +81,8 @@ export type StructuralGraphNode = GraphNodeBase & {
 export type StepGraphNode = GraphNodeBase & {
   kind: 'step';
   executor: StepExecutor;
+  /** A gate is a Step modifier, distinct from human executor ownership. */
+  hitl?: HitlConfig;
   participation?: StepParticipation;
   modifiers?: StepModifierSummary;
 };
@@ -86,7 +91,7 @@ export type StepGraphNode = GraphNodeBase & {
 export type GraphNode = StructuralGraphNode | StepGraphNode;
 
 /** The v1 persistence-only node shape. Never use this for new writes. */
-export type LegacyGraphNodeV1 = GraphNodeBase & {
+export type LegacyGraphNodeV1 = GraphNodeWithHitl & {
   kind: V1NodeKind;
 };
 
@@ -147,8 +152,10 @@ export type WorkflowGraphV1 = Omit<WorkflowGraph, 'schemaVersion' | 'nodes'> & {
   nodes: LegacyGraphNodeV1[];
 };
 
+/** Deliberately excludes `kind`; active node identity never changes in-place. */
 export type GraphNodePatch = Partial<
   Omit<GraphNodeBase, 'id' | 'parentId'> & {
+    hitl: HitlConfig;
     executor: StepExecutor;
     participation: StepParticipation;
     modifiers: StepModifierSummary;
@@ -302,7 +309,6 @@ const graphNodeBaseSchema = z.object({
   position: positionSchema,
   parentId: z.string().min(1).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
-  hitl: hitlSchema.optional(),
 });
 
 export const stepModifierSummarySchema = z
@@ -328,6 +334,7 @@ export const graphNodeSchema = z.discriminatedUnion('kind', [
   graphNodeBaseSchema.extend({
     kind: z.literal('step'),
     executor: stepExecutorSchema,
+    hitl: hitlSchema.optional(),
     participation: stepParticipationSchema.optional(),
     modifiers: stepModifierSummarySchema.optional(),
   }),
@@ -337,6 +344,7 @@ export const graphNodeSchema = z.discriminatedUnion('kind', [
 /** v1 compatibility input only; successful parsing must be followed by migration. */
 export const legacyGraphNodeV1Schema = graphNodeBaseSchema.extend({
   kind: z.enum(v1NodeKinds),
+  hitl: hitlSchema.optional(),
 });
 
 export const graphSubgraphSchema = z.object({
@@ -779,7 +787,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
         ),
       );
     }
-    if (node.hitl?.enabled && node.kind !== 'step') {
+    if (node.kind !== 'step' && (node as GraphNodeWithHitl).hitl?.enabled) {
       issues.push(
         issue(
           'INVALID_HITL_NODE',
@@ -1121,6 +1129,8 @@ export function applyGraphOperations(
       : structuredClone(node.position);
   };
   const uniqueNodeIds = (nodeIds: string[]) => [...new Set(nodeIds)];
+  const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
+    ['executor', 'participation', 'modifiers', 'hitl'].some((field) => field in patch);
   const missingNodes = (nodeIds: string[], operationIndex: number) => {
     const missing = uniqueNodeIds(nodeIds).filter((nodeId) => !findNode(nodeId));
     for (const nodeId of missing) {
@@ -1142,6 +1152,17 @@ export function applyGraphOperations(
       const nodeIndex = next.nodes.findIndex((node) => node.id === operation.nodeId);
       if (nodeIndex < 0) {
         errors.push(issue('OPERATION_NOT_FOUND', `Node “${operation.nodeId}” was not found.`, `operations.${index}`));
+      } else if (
+        next.nodes[nodeIndex].kind !== 'step' &&
+        hasStepOnlyPatchFields(operation.patch)
+      ) {
+        errors.push(
+          issue(
+            'STEP_FIELDS_REQUIRE_STEP',
+            `Step-only fields can only update Step node “${operation.nodeId}”.`,
+            `operations.${index}`,
+          ),
+        );
       } else {
         next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...structuredClone(operation.patch) };
       }
