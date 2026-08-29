@@ -328,6 +328,15 @@ export function GraphWorkspace() {
     [canvas.nodes, editable, updateEdge],
   );
 
+  const openInspectorForSelection = useCallback(() => {
+    setRightTab('review');
+    setShowInspector(true);
+    if (isCompactWorkspace) {
+      setShowPalette(false);
+      setCompactPanelPreference('inspector');
+    }
+  }, [isCompactWorkspace]);
+
   const handleSelectionChange = useCallback(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
       const nextSelection = workspaceSelectionFromCanvas(
@@ -336,16 +345,11 @@ export function GraphWorkspace() {
         useGraphStore.getState().selection.primary,
       );
       if (nextSelection.primary) {
-        setRightTab('review');
-        setShowInspector(true);
-        if (isCompactWorkspace) {
-          setShowPalette(false);
-          setCompactPanelPreference('inspector');
-        }
+        openInspectorForSelection();
       }
       setSelection(nextSelection);
     },
-    [isCompactWorkspace, setSelection],
+    [openInspectorForSelection, setSelection],
   );
 
   const makePrimary = useCallback((primary: { type: 'node' | 'edge' | 'subgraph'; id: string }) => {
@@ -381,11 +385,12 @@ export function GraphWorkspace() {
       const position = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
       if (kind === 'subgraph') {
         createSubgraph({ position });
+        openInspectorForSelection();
         return;
       }
       addNode(kind, position);
     },
-    [addNode, createSubgraph, screenToFlowPosition],
+    [addNode, createSubgraph, openInspectorForSelection, screenToFlowPosition],
   );
 
   const onDrop = useCallback(
@@ -396,11 +401,12 @@ export function GraphWorkspace() {
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
       if (kind === 'subgraph') {
         createSubgraph({ position });
+        openInspectorForSelection();
         return;
       }
       addNode(kind, position);
     },
-    [addNode, createSubgraph, editable, screenToFlowPosition],
+    [addNode, createSubgraph, editable, openInspectorForSelection, screenToFlowPosition],
   );
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
