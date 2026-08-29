@@ -138,6 +138,11 @@ function subgraphFlowNode(subgraph: GraphSubgraph): CanvasFlowNode {
     id: subgraph.id,
     type: 'subgraph',
     position: subgraph.position,
+    // Expanded containers are quiet canvas boundaries behind their members.
+    // A collapsed container is an interactive card and must stay above any
+    // unrelated node occupying the same coordinates so its expand control
+    // cannot redirect the click to the obscuring node.
+    zIndex: subgraph.collapsed ? 10 : -1,
     width,
     height,
     initialWidth: width,

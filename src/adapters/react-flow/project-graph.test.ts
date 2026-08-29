@@ -127,6 +127,7 @@ describe('projectGraphToCanvas', () => {
 
     expect(canvas.nodes.find((node) => node.id === 'review')?.hidden).toBe(true);
     expect(canvas.nodes.find((node) => node.id === 'approve')?.hidden).toBe(true);
+    expect(canvas.nodes.find((node) => node.id === 'review-group')?.zIndex).toBe(10);
     expect(canvas.edges.some((edge) => edge.id === 'review-approve')).toBe(false);
     expect(proxies.map((edge) => [edge.id, edge.source, edge.target])).toEqual([
       ['subgraph-proxy:start:review-group', 'start', 'review-group'],
