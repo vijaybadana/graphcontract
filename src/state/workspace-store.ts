@@ -17,14 +17,13 @@ import {
   GraphPosition,
   GraphSubgraph,
   NodeKind,
+  WorkflowGraph,
 } from '@/src/domain';
 
 export type WorkspaceSelection = {
   nodeIds: string[];
   subgraphIds: string[];
   edgeIds: string[];
-  /** Domain edges represented by a collapsed proxy cannot be deleted. */
-  protectedEdgeIds: string[];
   primary: { type: 'node' | 'edge' | 'subgraph'; id: string } | null;
 };
 
@@ -78,7 +77,6 @@ const emptySelection = (): WorkspaceSelection => ({
   nodeIds: [],
   subgraphIds: [],
   edgeIds: [],
-  protectedEdgeIds: [],
   primary: null,
 });
 const sameIds = (left: string[], right: string[]) =>
@@ -87,9 +85,33 @@ const sameSelection = (left: WorkspaceSelection, right: WorkspaceSelection) =>
   sameIds(left.nodeIds, right.nodeIds) &&
   sameIds(left.subgraphIds, right.subgraphIds) &&
   sameIds(left.edgeIds, right.edgeIds) &&
-  sameIds(left.protectedEdgeIds, right.protectedEdgeIds) &&
   left.primary?.type === right.primary?.type &&
   left.primary?.id === right.primary?.id;
+
+/** Returns true only for a boundary edge currently rendered as a collapsed
+ * subgraph proxy. Selection is intentionally not consulted, so a graph edit
+ * between selection and Delete cannot make a proxy edge deletable. */
+export function isDomainEdgeProjectedAsCollapsedProxy(
+  graph: WorkflowGraph,
+  edgeId: string,
+): boolean {
+  const edge = graph.edges.find((candidate) => candidate.id === edgeId);
+  if (!edge) return false;
+  const nodeParents = new Map(graph.nodes.map((node) => [node.id, node.parentId]));
+  const collapsedSubgraphIds = new Set(
+    graph.subgraphs.filter((subgraph) => subgraph.collapsed).map((subgraph) => subgraph.id),
+  );
+  const sourceParentId = nodeParents.get(edge.source);
+  const targetParentId = nodeParents.get(edge.target);
+  const source = sourceParentId && collapsedSubgraphIds.has(sourceParentId)
+    ? sourceParentId
+    : edge.source;
+  const target = targetParentId && collapsedSubgraphIds.has(targetParentId)
+    ? targetParentId
+    : edge.target;
+  const hiddenInternalEdge = source === target && source !== edge.source;
+  return !hiddenInternalEdge && (source !== edge.source || target !== edge.target);
+}
 const coreOf = (state: WorkspaceCore): WorkspaceCore => ({
   graph: structuredClone(state.graph),
   proposal: structuredClone(state.proposal),
@@ -140,7 +162,6 @@ export const useGraphStore = create<WorkspaceStore>()(
                   nodeIds: [nodeId],
                   subgraphIds: [],
                   edgeIds: [],
-                  protectedEdgeIds: [],
                   primary: { type: 'node', id: nodeId },
                 }
               : get().selection,
@@ -156,7 +177,6 @@ export const useGraphStore = create<WorkspaceStore>()(
                   nodeIds: [],
                   subgraphIds: [subgraphId],
                   edgeIds: [],
-                  protectedEdgeIds: [],
                   primary: { type: 'subgraph', id: subgraphId },
                 }
               : get().selection,
@@ -218,7 +238,6 @@ export const useGraphStore = create<WorkspaceStore>()(
                   nodeIds: [],
                   subgraphIds: [],
                   edgeIds: [edgeId],
-                  protectedEdgeIds: [],
                   primary: { type: 'edge', id: edgeId },
                 }
               : get().selection,
@@ -236,7 +255,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         deleteSelection: () => {
           const { selection } = get();
           const deletableEdgeIds = selection.edgeIds.filter(
-            (edgeId) => !selection.protectedEdgeIds.includes(edgeId),
+            (edgeId) => !isDomainEdgeProjectedAsCollapsedProxy(get().graph, edgeId),
           );
           if (
             selection.nodeIds.length === 0 &&
@@ -286,7 +305,6 @@ export const useGraphStore = create<WorkspaceStore>()(
                   nodeIds,
                   subgraphIds: [],
                   edgeIds: [],
-                  protectedEdgeIds: [],
                   primary: { type: 'node', id: nodeIds[nodeIds.length - 1] },
                 }
               : get().selection,
@@ -302,7 +320,6 @@ export const useGraphStore = create<WorkspaceStore>()(
                   nodeIds,
                   subgraphIds: [],
                   edgeIds: [],
-                  protectedEdgeIds: [],
                   primary: { type: 'node', id: nodeIds[nodeIds.length - 1] },
                 }
               : get().selection,

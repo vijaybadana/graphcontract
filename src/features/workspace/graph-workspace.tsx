@@ -23,7 +23,6 @@ import {
   canReconnectCanvasEdge,
   CanvasFlowEdge,
   domainEdgeIdsForCanvasEdge,
-  isSubgraphProxyEdge,
   projectGraphToCanvas,
 } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
@@ -52,7 +51,10 @@ import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/worksp
 import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
 import { WebMcpStatus, WorkspaceHeader } from '@/src/features/workspace/workspace-header';
 import { useMediaQuery } from '@/src/features/workspace/use-media-query';
-import { useGraphStore } from '@/src/state/workspace-store';
+import {
+  isDomainEdgeProjectedAsCollapsedProxy,
+  useGraphStore,
+} from '@/src/state/workspace-store';
 
 import './graph-workspace.css';
 
@@ -320,11 +322,6 @@ export function GraphWorkspace() {
         .map((node) => node.id)
         .sort();
       const edgeIds = [...new Set(edges.flatMap(domainEdgeIdsForCanvasEdge))].sort();
-      const protectedEdgeIds = [
-        ...new Set(
-          edges.filter(isSubgraphProxyEdge).flatMap(domainEdgeIdsForCanvasEdge),
-        ),
-      ].sort();
       const currentPrimary = useGraphStore.getState().selection.primary;
       const currentPrimaryStillSelected = currentPrimary
         ? currentPrimary.type === 'node'
@@ -342,7 +339,7 @@ export function GraphWorkspace() {
           : edgeIds.length
             ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
             : null;
-      setSelection({ nodeIds, subgraphIds, edgeIds, protectedEdgeIds, primary });
+      setSelection({ nodeIds, subgraphIds, edgeIds, primary });
     },
     [setSelection],
   );
@@ -441,7 +438,7 @@ export function GraphWorkspace() {
   const hasDeletableSelection =
     selection.nodeIds.length > 0 ||
     selection.subgraphIds.length > 0 ||
-    selection.edgeIds.some((edgeId) => !selection.protectedEdgeIds.includes(edgeId));
+    selection.edgeIds.some((edgeId) => !isDomainEdgeProjectedAsCollapsedProxy(graph, edgeId));
   const stageStyle = {
     '--palette-width': `${paletteWidth}px`,
     '--inspector-width': `${inspectorWidth}px`,

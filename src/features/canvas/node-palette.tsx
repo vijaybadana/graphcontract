@@ -40,6 +40,19 @@ export function filterPaletteItems(query: string): PaletteItem[] {
   return paletteItems.filter((item) => item.label.toLowerCase().includes(normalizedQuery));
 }
 
+/** The outer workflow keeps its singleton Start/End rule. Once a container is
+ * present, additional endpoints can be created and assigned into that group. */
+export function isPaletteItemSingletonDisabled(
+  graph: WorkflowGraph,
+  item: PaletteItem,
+): boolean {
+  return (
+    graph.subgraphs.length === 0 &&
+    (item.kind === 'start' || item.kind === 'end') &&
+    graph.nodes.some((node) => node.kind === item.kind)
+  );
+}
+
 function PaletteIcon({ kind }: { kind: PaletteKind }) {
   const props = { 'aria-hidden': true, size: 16, weight: 'duotone' as const };
   switch (kind) {
@@ -133,9 +146,7 @@ export function NodePalette({
               <p className="node-palette__group-label">{group}</p>
               <div className="node-palette__rows">
                 {items.map((item) => {
-                  const singletonExists =
-                    (item.kind === 'start' || item.kind === 'end') &&
-                    graph.nodes.some((node) => node.kind === item.kind);
+                  const singletonExists = isPaletteItemSingletonDisabled(graph, item);
                   return (
                     <button key={item.kind} type="button" draggable={!disabled && !singletonExists} disabled={disabled || singletonExists} onDragStart={(event) => onDragStart(event, item.kind)} onClick={() => onAdd(item.kind)} className="node-palette__row">
                       <span className={`node-palette__icon node-palette__icon--${item.kind}`}><PaletteIcon kind={item.kind} /></span>

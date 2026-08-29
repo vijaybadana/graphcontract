@@ -15,7 +15,6 @@ const emptySelection = (): WorkspaceSelection => ({
   nodeIds: [],
   subgraphIds: [],
   edgeIds: [],
-  protectedEdgeIds: [],
   primary: null,
 });
 
@@ -65,19 +64,28 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().selection).toEqual(emptySelection());
   });
 
-  it('does not delete canonical edges selected through a collapsed proxy and loads the separate demo explicitly', () => {
+  it('protects a selected edge after collapse and makes it deletable again after expansion', () => {
     const initial = useGraphStore.getState();
     const originalEdges = structuredClone(initial.graph.edges);
+    useGraphStore.getState().createSubgraph({ position: { x: 300, y: 80 } });
+    const subgraphId = useGraphStore.getState().selection.primary!.id;
+    useGraphStore.getState().assignNodesToSubgraph(subgraphId, ['billing']);
     useGraphStore.getState().setSelection({
       nodeIds: [],
       subgraphIds: [],
       edgeIds: ['billing-refund'],
-      protectedEdgeIds: ['billing-refund'],
       primary: { type: 'edge', id: 'billing-refund' },
     });
+    useGraphStore.getState().setSubgraphCollapsed(subgraphId, true);
     useGraphStore.getState().deleteSelection();
     expect(useGraphStore.getState().graph.edges).toEqual(originalEdges);
 
+    useGraphStore.getState().setSubgraphCollapsed(subgraphId, false);
+    useGraphStore.getState().deleteSelection();
+    expect(useGraphStore.getState().graph.edges.some((edge) => edge.id === 'billing-refund')).toBe(false);
+  });
+
+  it('loads the separate demo explicitly', () => {
     useGraphStore.getState().loadResearchSupervisorDemo();
     expect(useGraphStore.getState().graph.id).toBe('research-supervisor-demo');
     expect(useGraphStore.getState().selection).toEqual(emptySelection());
