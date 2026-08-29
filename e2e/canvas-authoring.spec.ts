@@ -20,23 +20,29 @@ test('palette search click-add creates the selected normalized Step preset', asy
   await expect(app.getByRole('heading', { name: 'Node details' })).toBeVisible();
 });
 
-test('dragging a palette item onto the canvas creates it near the drop point', async ({ app }) => {
-  const before = await readGraph(app);
-  const tool = app.getByRole('button', { name: 'Tool', exact: true });
+test('dragging every work palette preset onto the canvas creates canonical Steps near the drop point', async ({ app }) => {
   const canvas = app.getByRole('application');
 
-  await tool.dragTo(canvas, { targetPosition: { x: 720, y: 520 } });
+  for (const [index, preset] of (
+    [
+      { name: 'Agent', executor: 'ai' },
+      { name: 'Action', executor: 'deterministic' },
+      { name: 'Tool', executor: 'tool' },
+      { name: 'Human review', executor: 'human' },
+    ] as const
+  ).entries()) {
+    const before = await readGraph(app);
+    await app.getByRole('button', { name: preset.name, exact: true }).dragTo(canvas, {
+      targetPosition: { x: 560 + index * 40, y: 360 + index * 40 },
+    });
 
-  const after = await readGraph(app);
-  const addedTools = after.nodes.filter(
-    (node) =>
-      node.kind === 'step' &&
-      node.executor === 'tool' &&
-      !before.nodes.some((candidate) => candidate.id === node.id),
-  );
-  expect(addedTools).toHaveLength(1);
-  expect(addedTools[0].position.x).toBeGreaterThan(300);
-  expect(addedTools[0].position.y).toBeGreaterThan(150);
+    const after = await readGraph(app);
+    const added = after.nodes.filter((node) => !before.nodes.some((candidate) => candidate.id === node.id));
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({ kind: 'step', executor: preset.executor });
+    expect(added[0].position.x).toBeGreaterThan(300);
+    expect(added[0].position.y).toBeGreaterThan(150);
+  }
 });
 
 test('shift-click creates a multi-selection and exposes its aggregate state', async ({ app }) => {
