@@ -41,4 +41,19 @@ describe('snapNodeToAlignment', () => {
 
     expect(result.collidingNodeIds).toEqual(['target']);
   });
+
+  it('excludes hidden nodes from alignment and collision candidates', () => {
+    const result = snapNodeToAlignment(
+      node('moving', 96, 20),
+      [
+        node('moving', 96, 20),
+        { ...node('hidden-child', 100, 0), hidden: true },
+      ],
+      6,
+    );
+
+    expect(result.position).toEqual({ x: 96, y: 20 });
+    expect(result.guides).toEqual({});
+    expect(result.collidingNodeIds).toEqual([]);
+  });
 });

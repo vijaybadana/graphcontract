@@ -1,14 +1,15 @@
 'use client';
 
-import { Edge, OnNodeDrag, useEdgesState, useNodesState } from '@xyflow/react';
+import { OnNodeDrag, useEdgesState, useNodesState } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ContractFlowNode } from '@/src/features/canvas/contract-node';
+import { CanvasFlowEdge } from '@/src/adapters/react-flow/project-graph';
+import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import { AlignmentGuides, CanvasPosition, snapNodeToAlignment } from './canvas-geometry';
 
 type CanvasNodeInteractionsOptions = {
-  projectedNodes: ContractFlowNode[];
-  projectedEdges: Edge[];
+  projectedNodes: CanvasFlowNode[];
+  projectedEdges: CanvasFlowEdge[];
   selectedNodeIds: string[];
   selectedEdgeIds: string[];
   editable: boolean;
@@ -20,14 +21,14 @@ type DragSnapshot = {
 };
 
 const transientNodeFields = new Set(['selected', 'measured', 'dragging']);
-const nodeProjectionKey = (node: ContractFlowNode) =>
+const nodeProjectionKey = (node: CanvasFlowNode) =>
   JSON.stringify(node, (key, value) => (transientNodeFields.has(key) ? undefined : value));
-const edgeProjectionKey = (edge: Edge) =>
+const edgeProjectionKey = (edge: CanvasFlowEdge) =>
   JSON.stringify(edge, (key, value) => (key === 'selected' ? undefined : value));
 
 function reconcileProjectedNodes(
-  currentNodes: ContractFlowNode[],
-  projectedNodes: ContractFlowNode[],
+  currentNodes: CanvasFlowNode[],
+  projectedNodes: CanvasFlowNode[],
   selectedNodeIds: string[],
 ) {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
@@ -54,8 +55,8 @@ function reconcileProjectedNodes(
 // transient selection and measurement. Feeding mirrored selection back through
 // controlled props creates a StoreUpdater loop during rectangle selection.
 function reconcileProjectedEdges(
-  currentEdges: Edge[],
-  projectedEdges: Edge[],
+  currentEdges: CanvasFlowEdge[],
+  projectedEdges: CanvasFlowEdge[],
   selectedEdgeIds: string[],
 ) {
   const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
@@ -82,8 +83,8 @@ export function useCanvasInteractions({
   editable,
   onCommitPositions,
 }: CanvasNodeInteractionsOptions) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<ContractFlowNode>(projectedNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(projectedEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>(projectedNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<CanvasFlowEdge>(projectedEdges);
   const [guides, setGuides] = useState<AlignmentGuides>({});
   const [collisionNodeIds, setCollisionNodeIds] = useState<string[]>([]);
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
@@ -128,7 +129,7 @@ export function useCanvasInteractions({
     if (!editable) clearRenderedSelection();
   }, [clearRenderedSelection, editable]);
 
-  const onNodeDragStart = useCallback<OnNodeDrag<ContractFlowNode>>((_, node, draggedNodes) => {
+  const onNodeDragStart = useCallback<OnNodeDrag<CanvasFlowNode>>((_, node, draggedNodes) => {
     draggingRef.current = true;
     lastDragRef.current = {
       positions: Object.fromEntries(
@@ -141,7 +142,7 @@ export function useCanvasInteractions({
     setDraggedNodeId(node.id);
   }, []);
 
-  const onNodeDrag = useCallback<OnNodeDrag<ContractFlowNode>>(
+  const onNodeDrag = useCallback<OnNodeDrag<CanvasFlowNode>>(
     (_, node, draggedNodes) => {
       if (!editable) return;
       const group = draggedNodes.length > 0 ? draggedNodes : [node];
@@ -174,7 +175,7 @@ export function useCanvasInteractions({
     [editable, nodes, setNodes],
   );
 
-  const onNodeDragStop = useCallback<OnNodeDrag<ContractFlowNode>>(
+  const onNodeDragStop = useCallback<OnNodeDrag<CanvasFlowNode>>(
     (_, node, draggedNodes) => {
       const positions =
         lastDragRef.current?.positions ??

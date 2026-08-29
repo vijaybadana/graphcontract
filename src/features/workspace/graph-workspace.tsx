@@ -19,14 +19,22 @@ import {
 } from '@xyflow/react';
 import { CSSProperties, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { projectGraphToCanvas } from '@/src/adapters/react-flow/project-graph';
+import {
+  canConnectCanvasEndpoints,
+  canReconnectCanvasEdge,
+  CanvasFlowEdge,
+  domainEdgeIdsForCanvasEdge,
+  projectGraphToCanvas,
+} from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
 import { evaluateConnection } from '@/src/application/connection-policy';
 import { NodeKind, validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
-import { ContractFlowNode, ContractNode } from '@/src/features/canvas/contract-node';
+import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
+import { ContractNode } from '@/src/features/canvas/contract-node';
 import { NodePalette, readDroppedNodeKind } from '@/src/features/canvas/node-palette';
+import { SubgraphNode } from '@/src/features/canvas/subgraph-node';
 import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
 import { ContextInspector } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
@@ -44,7 +52,7 @@ import { useGraphStore } from '@/src/state/workspace-store';
 
 import './graph-workspace.css';
 
-const nodeTypes = { contractNode: ContractNode };
+const nodeTypes = { contractNode: ContractNode, subgraph: SubgraphNode };
 const snapGrid: [number, number] = [12, 12];
 const panOnDrag = [1];
 const defaultEdgeOptions: DefaultEdgeOptions = {
@@ -95,7 +103,7 @@ export function GraphWorkspace() {
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
-  const { screenToFlowPosition } = useReactFlow<ContractFlowNode, Edge>();
+  const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
 
   const validationIssues = useMemo(() => validateGraph(graph), [graph]);
   const canvas = useMemo(() => projectGraphToCanvas(graph, proposal), [graph, proposal]);
@@ -117,7 +125,7 @@ export function GraphWorkspace() {
     }),
     [inspectorWidth, isCompactWorkspace, paletteWidth, showInspector, showPalette],
   );
-  const { fitGraph } = useCoalescedFitView<ContractFlowNode, Edge>({
+  const { fitGraph } = useCoalescedFitView<CanvasFlowNode, CanvasFlowEdge>({
     enabled: hasHydrated,
     revision: fitViewRevision,
     padding: fitPadding,
@@ -231,32 +239,50 @@ export function GraphWorkspace() {
 
   const onConnect = useCallback(
     (connection: Connection) => {
-      if (connection.source && connection.target) addEdge(connection.source, connection.target);
+      if (
+        connection.source &&
+        connection.target &&
+        canConnectCanvasEndpoints(canvas.nodes, connection.source, connection.target)
+      ) {
+        addEdge(connection.source, connection.target);
+      }
     },
-    [addEdge],
+    [addEdge, canvas.nodes],
   );
 
   const isValidConnection = useCallback(
     (connection: Connection) =>
       editable &&
+      canConnectCanvasEndpoints(canvas.nodes, connection.source, connection.target) &&
       evaluateConnection(graph, connection, {
         reconnectingEdgeId: reconnectingEdgeIdRef.current,
       }).valid,
-    [editable, graph],
+    [canvas.nodes, editable, graph],
   );
 
-  const onReconnect = useCallback<OnReconnect<Edge>>(
+  const onReconnect = useCallback<OnReconnect<CanvasFlowEdge>>(
     (edge, connection) => {
-      if (!editable || !connection.source || !connection.target) return;
-      updateEdge(edge.id, { source: connection.source, target: connection.target });
+      if (
+        !editable ||
+        !canReconnectCanvasEdge(edge) ||
+        !connection.source ||
+        !connection.target ||
+        !canConnectCanvasEndpoints(canvas.nodes, connection.source, connection.target)
+      ) {
+        return;
+      }
+      const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
+      if (domainEdgeId) {
+        updateEdge(domainEdgeId, { source: connection.source, target: connection.target });
+      }
     },
-    [editable, updateEdge],
+    [canvas.nodes, editable, updateEdge],
   );
 
   const handleSelectionChange = useCallback(
-    ({ nodes, edges }: OnSelectionChangeParams<ContractFlowNode, Edge>) => {
+    ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
       const nodeIds = nodes.map((node) => node.id).sort();
-      const edgeIds = edges.map((edge) => edge.id).sort();
+      const edgeIds = [...new Set(edges.flatMap(domainEdgeIdsForCanvasEdge))].sort();
       const currentPrimary = useGraphStore.getState().selection.primary;
       const currentPrimaryStillSelected = currentPrimary
         ? currentPrimary.type === 'node'
@@ -287,13 +313,16 @@ export function GraphWorkspace() {
     });
   }, []);
 
-  const handleNodeClick = useCallback<NodeMouseHandler<ContractFlowNode>>(
+  const handleNodeClick = useCallback<NodeMouseHandler<CanvasFlowNode>>(
     (_, node) => makePrimary({ type: 'node', id: node.id }),
     [makePrimary],
   );
 
-  const handleEdgeClick = useCallback<EdgeMouseHandler<Edge>>(
-    (_, edge) => makePrimary({ type: 'edge', id: edge.id }),
+  const handleEdgeClick = useCallback<EdgeMouseHandler<CanvasFlowEdge>>(
+    (_, edge) => {
+      const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
+      if (domainEdgeId) makePrimary({ type: 'edge', id: domainEdgeId });
+    },
     [makePrimary],
   );
 
@@ -432,7 +461,7 @@ export function GraphWorkspace() {
               onExpand={toggleInspector}
             />
           )}
-          <ReactFlow<ContractFlowNode, Edge>
+          <ReactFlow<CanvasFlowNode, CanvasFlowEdge>
             nodes={canvasInteractions.nodes}
             edges={canvasInteractions.edges}
             nodeTypes={nodeTypes}
@@ -484,7 +513,11 @@ export function GraphWorkspace() {
               pannable
               zoomable
               position="bottom-left"
-              nodeColor={(node) => minimapColors[node.data.kind] ?? '#94a3b8'}
+              nodeColor={(node) =>
+                node.type === 'contractNode'
+                  ? minimapColors[node.data.kind] ?? '#94a3b8'
+                  : '#5c8f7d'
+              }
               nodeStrokeColor="#ffffff"
               nodeStrokeWidth={2}
               nodeBorderRadius={10}

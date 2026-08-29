@@ -3,6 +3,7 @@ export type CanvasPosition = { x: number; y: number };
 export type CanvasNodeBox = {
   id: string;
   position: CanvasPosition;
+  hidden?: boolean;
   width?: number;
   height?: number;
   initialWidth?: number;
@@ -74,7 +75,7 @@ export function snapNodeToAlignment(
   ignoredNodeIds: ReadonlySet<string> = new Set(),
 ): AlignmentSnapResult {
   const others = nodes.filter(
-    (node) => node.id !== movingNode.id && !ignoredNodeIds.has(node.id),
+    (node) => !node.hidden && node.id !== movingNode.id && !ignoredNodeIds.has(node.id),
   );
   const movingSize = dimensionsOf(movingNode);
   const xAlignment = closestAlignment(
