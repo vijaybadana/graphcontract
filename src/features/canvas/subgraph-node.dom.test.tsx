@@ -8,10 +8,11 @@ import { useMemo, useState } from 'react';
 import { sampleGraph } from '@/src/domain';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
+import { ContractNode } from './contract-node';
 import { NodePalette } from './node-palette';
 import { SubgraphNode } from './subgraph-node';
 
-const nodeTypes = { subgraph: SubgraphNode };
+const nodeTypes = { contractNode: ContractNode, subgraph: SubgraphNode };
 
 afterEach(() => {
   cleanup();
@@ -70,6 +71,70 @@ function MountedSubgraphCanvas({
   );
 }
 
+function InteractiveSubgraphCanvas({ onNodeClick }: { onNodeClick: (id: string) => void }) {
+  const nodes = useMemo<CanvasFlowNode[]>(
+    () => [
+      {
+        id: 'review-group',
+        type: 'subgraph',
+        position: { x: 120, y: 90 },
+        width: 640,
+        height: 360,
+        data: {
+          id: 'review-group',
+          label: 'Review process',
+          position: { x: 120, y: 90 },
+          dimensions: { width: 640, height: 360 },
+          collapsed: false,
+          collapseEditable: true,
+        },
+      },
+      {
+        id: 'child-node',
+        type: 'contractNode',
+        parentId: 'review-group',
+        position: { x: 60, y: 120 },
+        zIndex: 1,
+        data: {
+          id: 'child-node',
+          kind: 'agent',
+          label: 'Child node',
+          parentId: 'review-group',
+          position: { x: 60, y: 120 },
+        },
+      },
+      {
+        id: 'outside-member',
+        type: 'contractNode',
+        position: { x: 430, y: 240 },
+        data: {
+          id: 'outside-member',
+          kind: 'tool',
+          label: 'Outside member',
+          position: { x: 430, y: 240 },
+          outsideSubgraph: true,
+        },
+      },
+    ],
+    [],
+  );
+
+  return (
+    <div style={{ width: 1280, height: 720 }}>
+      <ReactFlowProvider>
+        <ReactFlow
+          nodes={nodes}
+          edges={[]}
+          nodeTypes={nodeTypes}
+          onNodeClick={(_, node) => onNodeClick(node.id)}
+          nodesDraggable
+          panOnDrag={[1]}
+        />
+      </ReactFlowProvider>
+    </div>
+  );
+}
+
 describe('SubgraphNode in React Flow', () => {
   it('owns Enter and Space activation without selecting or moving the canvas', async () => {
     const onToggle = vi.fn();
@@ -101,6 +166,29 @@ describe('SubgraphNode in React Flow', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true');
     expect(onSelectionChange).toHaveBeenCalledTimes(selectionBeforeKeys);
     expect(onMove).toHaveBeenCalledTimes(movesBeforeKeys);
+  });
+
+  it('keeps child clicks above explicit parent drag surfaces and renders visual-containment status', async () => {
+    const onNodeClick = vi.fn();
+    render(<InteractiveSubgraphCanvas onNodeClick={onNodeClick} />);
+
+    await screen.findByText('Child node');
+    const header = screen.getByText('Review process');
+    const boundary = document.querySelector('.subgraph-node-boundary-drag-surface--bottom');
+
+    expect(document.querySelector('.subgraph-node-drag-surface')).not.toBeNull();
+    expect(boundary).not.toBeNull();
+    expect(screen.getByText('Outside subgraph')).toBeTruthy();
+
+    fireEvent.click(header);
+    fireEvent.click(boundary!);
+    fireEvent.click(screen.getByText('Child node'));
+
+    expect(onNodeClick.mock.calls.map(([nodeId]) => nodeId)).toEqual([
+      'review-group',
+      'review-group',
+      'child-node',
+    ]);
   });
 
   it('requires a clear confirmation before loading the replacement demo', () => {

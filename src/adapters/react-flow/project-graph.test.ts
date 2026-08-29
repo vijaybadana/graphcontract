@@ -254,6 +254,36 @@ describe('projectGraphToCanvas', () => {
     expect(canvas.edges.every((edge) => !isSubgraphProxyEdge(edge))).toBe(true);
   });
 
+  it('marks visual containment without changing canonical membership', () => {
+    const graph = graphWithSubgraph();
+    graph.nodes.push({
+      id: 'outside-member',
+      kind: 'tool',
+      label: 'Outside member',
+      position: { x: 420, y: 220 },
+    });
+
+    const visuallyContained = projectGraphToCanvas(graph, null)
+      .nodes.find((node) => node.id === 'outside-member');
+    const assignedGraph = structuredClone(graph);
+    const assignedNode = assignedGraph.nodes.find((node) => node.id === 'outside-member')!;
+    assignedNode.parentId = 'review-group';
+    assignedNode.position = { x: 160, y: 100 };
+    const canonicallyContained = projectGraphToCanvas(assignedGraph, null)
+      .nodes.find((node) => node.id === 'outside-member');
+
+    expect(visuallyContained).toMatchObject({
+      type: 'contractNode',
+      data: { outsideSubgraph: true },
+    });
+    expect(visuallyContained).not.toHaveProperty('parentId');
+    expect(canonicallyContained).toMatchObject({
+      parentId: 'review-group',
+      data: { outsideSubgraph: false },
+    });
+    expect(graph.nodes.find((node) => node.id === 'outside-member')?.parentId).toBeUndefined();
+  });
+
   it('hides collapsed members and internal edges while projecting deterministic proxies', () => {
     const graph = graphWithSubgraph(true);
     const beforeProjection = structuredClone(graph);

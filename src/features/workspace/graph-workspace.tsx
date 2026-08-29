@@ -47,8 +47,13 @@ import {
   PanelCollapseButton,
 } from '@/src/features/workspace/panel-collapse-control';
 import { PanelResizer } from '@/src/features/workspace/panel-resizer';
+import { workspaceSelectionFromCanvas } from '@/src/features/workspace/canvas-selection';
 import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
 import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
+import {
+  resolveWorkspacePanelVisibility,
+} from '@/src/features/workspace/panel-visibility';
+import type { CompactPanelPreference } from '@/src/features/workspace/panel-visibility';
 import { WebMcpStatus, WorkspaceHeader } from '@/src/features/workspace/workspace-header';
 import { useMediaQuery } from '@/src/features/workspace/use-media-query';
 import {
@@ -106,7 +111,7 @@ export function GraphWorkspace() {
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
   const [showPalette, setShowPalette] = useState(true);
   const [showInspector, setShowInspector] = useState(false);
-  const [compactPanelPreference, setCompactPanelPreference] = useState<'palette' | 'inspector' | null>(null);
+  const [compactPanelPreference, setCompactPanelPreference] = useState<CompactPanelPreference>(null);
   const [paletteWidth, setPaletteWidth] = useState(232);
   const [inspectorWidth, setInspectorWidth] = useState(344);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
@@ -116,14 +121,14 @@ export function GraphWorkspace() {
   const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
 
   const editable = graph.status === 'draft' && !proposal;
-  const autoInspectorOpen = Boolean(selection.primary) || Boolean(proposal) ||
-    (rightTab === 'scenarios' && scenarios.length > 0);
-  const paletteWinsCompactOverlay =
-    isCompactWorkspace && showPalette && compactPanelPreference === 'palette';
-  const inspectorVisible = paletteWinsCompactOverlay
-    ? false
-    : showInspector || autoInspectorOpen;
-  const paletteVisible = showPalette && (!isCompactWorkspace || !inspectorVisible);
+  const { inspectorVisible, paletteVisible } = resolveWorkspacePanelVisibility({
+    compact: isCompactWorkspace,
+    paletteRequested: showPalette,
+    inspectorRequested: showInspector,
+    compactPreference: compactPanelPreference,
+    proposalPending: Boolean(proposal),
+    scenariosActive: rightTab === 'scenarios' && scenarios.length > 0,
+  });
   const inspectorTab = proposal || selection.primary ? 'review' : rightTab;
   const toggleSubgraphCollapse = useCallback(
     (subgraphId: string, collapsed: boolean) => {
@@ -326,36 +331,22 @@ export function GraphWorkspace() {
 
   const handleSelectionChange = useCallback(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
-      const nodeIds = nodes
-        .filter((node) => node.type === 'contractNode')
-        .map((node) => node.id)
-        .sort();
-      const subgraphIds = nodes
-        .filter((node) => node.type === 'subgraph')
-        .map((node) => node.id)
-        .sort();
-      const edgeIds = [...new Set(edges.flatMap(domainEdgeIdsForCanvasEdge))].sort();
-      const currentPrimary = useGraphStore.getState().selection.primary;
-      const currentPrimaryStillSelected = currentPrimary
-        ? currentPrimary.type === 'node'
-          ? nodeIds.includes(currentPrimary.id)
-          : currentPrimary.type === 'subgraph'
-            ? subgraphIds.includes(currentPrimary.id)
-          : edgeIds.includes(currentPrimary.id)
-        : false;
-      const primary = currentPrimaryStillSelected
-        ? currentPrimary
-        : nodeIds.length
-          ? { type: 'node' as const, id: nodeIds[nodeIds.length - 1] }
-          : subgraphIds.length
-            ? { type: 'subgraph' as const, id: subgraphIds[subgraphIds.length - 1] }
-          : edgeIds.length
-            ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
-            : null;
-      if (primary) setRightTab('review');
-      setSelection({ nodeIds, subgraphIds, edgeIds, primary });
+      const nextSelection = workspaceSelectionFromCanvas(
+        nodes,
+        edges,
+        useGraphStore.getState().selection.primary,
+      );
+      if (nextSelection.primary) {
+        setRightTab('review');
+        setShowInspector(true);
+        if (isCompactWorkspace) {
+          setShowPalette(false);
+          setCompactPanelPreference('inspector');
+        }
+      }
+      setSelection(nextSelection);
     },
-    [setSelection],
+    [isCompactWorkspace, setSelection],
   );
 
   const makePrimary = useCallback((primary: { type: 'node' | 'edge' | 'subgraph'; id: string }) => {

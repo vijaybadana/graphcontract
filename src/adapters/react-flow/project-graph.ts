@@ -11,6 +11,8 @@ import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 
 const CONTRACT_NODE_WIDTH = 184;
 const CONTRACT_NODE_HEIGHT = 114;
+const SUBGRAPH_BODY_INSET = 12;
+const SUBGRAPH_HEADER_HEIGHT = 56;
 
 export type CanvasEdgeData = {
   edge: GraphEdge;
@@ -162,6 +164,28 @@ function subgraphFlowNode(
   };
 }
 
+/** Projection only: a container can visually surround an unparented node
+ * without acquiring membership. Make that discrepancy explicit rather than
+ * silently changing canonical parentId. */
+function isUnparentedNodeInsideExpandedSubgraph(
+  node: WorkflowGraph['nodes'][number],
+  subgraphs: readonly GraphSubgraph[],
+): boolean {
+  if (node.parentId) return false;
+  const centre = {
+    x: node.position.x + CONTRACT_NODE_WIDTH / 2,
+    y: node.position.y + CONTRACT_NODE_HEIGHT / 2,
+  };
+  return subgraphs.some(
+    (subgraph) =>
+      !subgraph.collapsed &&
+      centre.x > subgraph.position.x + SUBGRAPH_BODY_INSET &&
+      centre.x < subgraph.position.x + subgraph.dimensions.width - SUBGRAPH_BODY_INSET &&
+      centre.y > subgraph.position.y + SUBGRAPH_HEADER_HEIGHT &&
+      centre.y < subgraph.position.y + subgraph.dimensions.height - SUBGRAPH_BODY_INSET,
+  );
+}
+
 function membershipAffectedSubgraphIds(
   graph: WorkflowGraph,
   operations: GraphProposal['operations'],
@@ -235,32 +259,34 @@ export function projectGraphToCanvas(
   const nodes: CanvasFlowNode[] = [
     ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(subgraph, subgraphProposalState(subgraph.id))),
     ...sourceNodes.map((node) => {
-    const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
-    const membershipChangedNodeIds = diff?.membershipChangedNodeIds ?? [];
-    const proposalState = diff?.addedNodeIds.includes(node.id)
-      ? 'added'
-      : diff?.removedNodeIds.includes(node.id)
-        ? 'removed'
-        : diff?.updatedNodeIds.includes(node.id) || membershipChangedNodeIds.includes(node.id)
-          ? 'updated'
-          : undefined;
-    return {
-      id: node.id,
-      type: 'contractNode',
-      position: node.position,
-      initialWidth: CONTRACT_NODE_WIDTH,
-      initialHeight: CONTRACT_NODE_HEIGHT,
-      ...(node.parentId
-        ? {
-            parentId: node.parentId,
-            extent: 'parent' as const,
-            expandParent: false,
-            zIndex: 1,
-          }
-        : {}),
-      hidden: Boolean(parent?.collapsed),
-      data: { ...node, proposalState },
-    };
+      const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
+      const membershipChangedNodeIds = diff?.membershipChangedNodeIds ?? [];
+      const proposalState = diff?.addedNodeIds.includes(node.id)
+        ? 'added'
+        : diff?.removedNodeIds.includes(node.id)
+          ? 'removed'
+          : diff?.updatedNodeIds.includes(node.id) || membershipChangedNodeIds.includes(node.id)
+            ? 'updated'
+            : undefined;
+      const outsideSubgraph =
+        proposalState !== 'removed' && isUnparentedNodeInsideExpandedSubgraph(node, preview.subgraphs);
+      return {
+        id: node.id,
+        type: 'contractNode',
+        position: node.position,
+        initialWidth: CONTRACT_NODE_WIDTH,
+        initialHeight: CONTRACT_NODE_HEIGHT,
+        ...(node.parentId
+          ? {
+              parentId: node.parentId,
+              extent: 'parent' as const,
+              expandParent: false,
+              zIndex: 1,
+            }
+          : {}),
+        hidden: Boolean(parent?.collapsed),
+        data: { ...node, proposalState, outsideSubgraph },
+      };
     }),
   ];
 

@@ -131,7 +131,8 @@
 
 .contract-node-kind-badge,
 .contract-node-proposal-status,
-.contract-node-hitl-status {
+.contract-node-hitl-status,
+.contract-node-membership-status {
   white-space: nowrap;
   font-size: 0.5625rem;
   font-weight: 800;
@@ -165,6 +166,14 @@
   padding: 0.25rem 0.3125rem;
   background: var(--node-accent-soft);
   color: var(--node-accent-ink);
+}
+
+.contract-node-membership-status {
+  border: 1px solid #f2c45f;
+  border-radius: 999px;
+  padding: 0.25rem 0.3125rem;
+  background: #fff7df;
+  color: #8b5b08;
 }
 
 .contract-node-handle {

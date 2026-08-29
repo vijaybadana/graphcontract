@@ -16,6 +16,8 @@ import './contract-node.css';
 export type ContractNodeData = GraphNode & {
   [key: string]: unknown;
   proposalState?: 'added' | 'updated' | 'removed';
+  /** Projection-only warning for a node visually inside, but not assigned to, a subgraph. */
+  outsideSubgraph?: boolean;
 };
 
 export type ContractFlowNode = Node<ContractNodeData, 'contractNode'>;
@@ -95,6 +97,9 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
               >
                 HITL
               </span>
+            )}
+            {data.outsideSubgraph && (
+              <span className="contract-node-membership-status">Outside subgraph</span>
             )}
           </div>
         </div>
