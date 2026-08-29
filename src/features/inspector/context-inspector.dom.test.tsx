@@ -60,65 +60,128 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ContextInspector routing details', () => {
-  it('edits normalized Step executor, participation, HITL, and modifier summaries independently', () => {
+  it('edits the v3 HITL response contract and sensitive policy independently', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     selectNode('classifier');
     renderInspector();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Step executor' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Tool' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Internal tools' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'HITL enabled' }));
     fireEvent.click(screen.getByRole('button', { name: 'HITL timing' }));
-    fireEvent.click(screen.getByRole('option', { name: 'After' }));
-    fireEvent.click(screen.getByRole('button', { name: 'HITL input type' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Text' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Human input condition' }), {
-      target: { value: 'risk.requiresReview === true' },
+    fireEvent.click(screen.getByRole('option', { name: 'Inside' }));
+    fireEvent.click(screen.getByRole('button', { name: 'HITL response type' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Selection' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Human input gate reason' }), {
+      target: { value: 'A support owner must review the request.' },
     });
-    for (const label of [
-      'Guardrail',
-      'Sensitive side effect',
-      'Store read',
-      'Store write',
-      'Retry or fallback',
-      'Opaque or prebuilt',
-    ]) {
-      fireEvent.click(screen.getByRole('checkbox', { name: label }));
-    }
-    fireEvent.change(screen.getByRole('combobox', { name: 'Readiness' }), {
-      target: { value: 'degraded' },
+    fireEvent.change(screen.getByRole('textbox', { name: 'Outcome 1 label' }), {
+      target: { value: 'Route approved support work' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Sensitive effect policy enabled' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Sensitive mutation target' }), {
+      target: { value: 'Customer billing record' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Sensitive authorization' }), {
+      target: { value: 'Billing administrator' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Approval required' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Sensitive idempotency' }), {
+      target: { value: 'Ticket ID' },
     });
 
     expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier')).toMatchObject({
       kind: 'step',
-      executor: 'tool',
-      participation: { internalTools: true },
       hitl: {
         enabled: true,
-        timing: 'after',
-        inputType: 'text',
-        condition: 'risk.requiresReview === true',
+        timing: 'inside',
+        activation: { reason: 'A support owner must review the request.' },
+        response: {
+          type: 'selection',
+          selectionChoices: expect.any(Array),
+          allowedOutcomes: expect.any(Array),
+        },
       },
-      modifiers: {
-        guardrail: true,
-        sensitiveSideEffect: true,
-        storeRead: true,
-        storeWrite: true,
-        retryFallback: true,
-        opaque: true,
-        readiness: 'degraded',
+      sensitive: {
+        target: 'Customer billing record',
+        authorization: 'Billing administrator',
+        approvalRequired: true,
+        idempotency: 'Ticket ID',
       },
     });
-
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Store read' }));
     const classifier = useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier');
     expect(classifier).toMatchObject({
-      executor: 'tool',
-      hitl: { enabled: true, timing: 'after', inputType: 'text' },
-      modifiers: { sensitiveSideEffect: true, storeWrite: true, readiness: 'degraded' },
+      hitl: { enabled: true, timing: 'inside', response: { type: 'selection' } },
+      sensitive: { target: 'Customer billing record' },
     });
-    expect(classifier?.kind === 'step' && classifier.modifiers?.storeRead).toBeUndefined();
+    expect(classifier?.kind === 'step' && classifier.hitl?.response?.allowedOutcomes[0]?.label).toBe(
+      'Route approved support work',
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: 'HITL enabled' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'HITL enabled' }));
+    expect(
+      useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier'),
+    ).toMatchObject({ hitl: { enabled: true, response: { type: 'selection' } } });
+  }, 15_000);
+
+  it('previews configured human outcomes locally without changing the accepted graph', () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected Step fixture.');
+    classifier.hitl = {
+      enabled: true,
+      timing: 'before',
+      activation: { reason: 'A person must approve billing work.' },
+      response: {
+        type: 'approval',
+        allowedOutcomes: [
+          { id: 'approve', label: 'Approve', resumeNodeId: 'billing' },
+          { id: 'request-changes', label: 'Request changes', resumeNodeId: 'diagnostic' },
+        ],
+      },
+    };
+    useGraphStore.setState({ graph });
+    const beforePreview = structuredClone(useGraphStore.getState().graph);
+    selectNode('classifier');
+    renderInspector();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview input request' }));
+    expect(screen.getByRole('dialog', { name: 'Preview input request' })).toBeTruthy();
+    expect(screen.getByText(/Preview only — no runtime execution/)).toBeTruthy();
+    expect(screen.getByText(/Only a human can choose this preview response/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /Approve\s*Would resume at Billing Agent/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview selected response' }));
+    expect(screen.getByText(/would resume at Billing Agent · billing/)).toBeTruthy();
+    expect(useGraphStore.getState().graph).toEqual(beforePreview);
+  });
+
+  it('keeps HITL and sensitive policy fields read-only for frozen and proposal review graphs', () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected Step fixture.');
+    classifier.hitl = {
+      enabled: true,
+      timing: 'before',
+      response: { type: 'approval', allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'billing' }] },
+    };
+    classifier.sensitive = {
+      target: 'Billing', authorization: 'Admin', approvalRequired: true, idempotency: 'Ticket',
+    };
+    useGraphStore.setState({ graph: { ...graph, status: 'frozen' } });
+    selectNode('classifier');
+    renderInspector();
+    expect((screen.getByRole('checkbox', { name: 'HITL enabled' }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('textbox', { name: 'Outcome 1 label' }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('checkbox', { name: 'Sensitive effect policy enabled' }) as HTMLInputElement).disabled).toBe(true);
+
+    cleanup();
+    const proposal = createProposal(graph, {
+      rationale: 'Rename classifier for review.',
+      operations: [{ type: 'update_node', nodeId: 'classifier', patch: { label: 'Classifier proposal' } }],
+    }).proposal!;
+    useGraphStore.setState({ graph, proposal });
+    selectNode('classifier');
+    renderInspector();
+    expect((screen.getByRole('button', { name: 'HITL timing' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('textbox', { name: 'Sensitive authorization' }) as HTMLInputElement).disabled).toBe(true);
   });
 
   it('keeps Start and End structural so no Step-only fields are exposed', () => {

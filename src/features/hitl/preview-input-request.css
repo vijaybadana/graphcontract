@@ -1,0 +1,28 @@
+.preview-input-request { position: fixed; z-index: 40; inset: 0; display: flex; justify-content: flex-end; background: rgb(15 23 42 / 24%); }
+.preview-input-request__sheet { width: min(27rem, 100vw); min-height: 100%; overflow-y: auto; background: #fff; box-shadow: -12px 0 32px rgb(15 23 42 / 18%); color: #17201c; padding: 1rem; }
+.preview-input-request__header { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; border-bottom: 1px solid rgb(20 31 27 / 10%); padding-bottom: .75rem; }
+.preview-input-request__header p, .preview-input-request__header h2, .preview-input-request__sheet h3, .preview-input-request__sheet section > p { margin: 0; }
+.preview-input-request__header p { color: #718078; font-size: .62rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.preview-input-request__header h2 { margin-top: .18rem; font-size: 1rem; }
+.preview-input-request__header button { display: grid; width: 2rem; height: 2rem; place-items: center; border: 1px solid #d7dfda; border-radius: .5rem; background: #fff; color: #45534a; }
+.preview-input-request__header button:focus-visible, .preview-input-request__resume:focus-visible, .preview-input-request__outcomes input:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.preview-input-request__notice { margin: .85rem 0; border: 1px solid #c7d4ea; border-radius: .5rem; background: #f3f7ff; color: #315792; padding: .62rem .7rem; font-size: .72rem; font-weight: 700; line-height: 1.45; }
+.preview-input-request__sheet section { display: grid; gap: .45rem; border-top: 1px solid rgb(20 31 27 / 9%); margin-top: .9rem; padding-top: .9rem; }
+.preview-input-request__sheet h3 { color: #35453c; font-size: .8rem; }
+.preview-input-request__sheet section > p, .preview-input-request__sheet label { color: #536158; font-size: .75rem; line-height: 1.45; }
+.preview-input-request__reason { display: grid; gap: .12rem; border-left: 2px solid #f43f5e; padding-left: .55rem; }
+.preview-input-request__human-only { display: flex; align-items: center; gap: .35rem; color: #334b92 !important; font-weight: 700; }
+.preview-input-request__sheet label > span { display: block; margin-bottom: .28rem; color: #536158; font-size: .69rem; font-weight: 700; }
+.preview-input-request__sheet textarea, .preview-input-request__sheet select { width: 100%; border: 1px solid rgb(20 31 27 / 16%); border-radius: .5rem; background: #fff; padding: .5rem .58rem; color: #17201c; font: inherit; }
+.preview-input-request__sheet textarea { min-height: 4.75rem; resize: vertical; }
+.preview-input-request__outcomes { display: grid; gap: .5rem; }
+.preview-input-request__outcomes label { display: flex; align-items: flex-start; gap: .55rem; border: 1px solid #d7dfda; border-radius: .55rem; background: #fff; padding: .62rem; cursor: pointer; }
+.preview-input-request__outcomes label.is-selected { border-color: #fb7185; box-shadow: 0 0 0 2px rgb(251 113 133 / 14%); }
+.preview-input-request__outcomes input { accent-color: #e11d48; margin-top: .16rem; }
+.preview-input-request__outcomes strong, .preview-input-request__outcomes small { display: block; }
+.preview-input-request__outcomes strong { color: #29362f; font-size: .77rem; }
+.preview-input-request__outcomes small { margin-top: .12rem; color: #66736b; font-size: .68rem; }
+.preview-input-request__resume { display: flex; width: 100%; align-items: center; justify-content: center; gap: .38rem; border: 1px solid #e11d48; border-radius: .55rem; background: #e11d48; color: #fff; margin-top: 1rem; padding: .64rem .75rem; font-size: .77rem; font-weight: 750; }
+.preview-input-request__resume:disabled { cursor: not-allowed; border-color: #d7dfda; background: #e7ece9; color: #718078; }
+.preview-input-request__result { display: flex; align-items: flex-start; gap: .38rem; margin: .7rem 0 0; border: 1px solid #cbe6dc; border-radius: .5rem; background: #f0faf5; color: #16604b; padding: .62rem .7rem; font-size: .72rem; font-weight: 650; line-height: 1.45; }
+@media (prefers-reduced-motion: reduce) { .preview-input-request__sheet { scroll-behavior: auto; } }

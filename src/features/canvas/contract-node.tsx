@@ -25,6 +25,7 @@ export type StepModifierInspectorSection =
   | 'executor'
   | 'participation'
   | 'hitl'
+  | 'sensitive'
   | 'modifiers';
 
 /** Stable presentation metadata for the Package 1 inspector seam. */
@@ -34,7 +35,7 @@ export type StepModifierPresentation = {
     | 'internalTools'
     | 'hitl'
     | 'guardrail'
-    | 'sensitiveSideEffect'
+    | 'sensitive'
     | 'storeRead'
     | 'storeWrite'
     | 'retryFallback'
@@ -154,13 +155,13 @@ export function stepModifierPresentations(
       inspectorSection: 'modifiers',
     });
   }
-  if (node.modifiers?.sensitiveSideEffect) {
+  if (node.sensitive) {
     modifiers.push({
-      id: 'sensitiveSideEffect',
+      id: 'sensitive',
       label: 'Sensitive',
-      accessibleLabel: 'Sensitive side effect',
+      accessibleLabel: 'Sensitive effect policy',
       tone: 'sensitive',
-      inspectorSection: 'modifiers',
+      inspectorSection: 'sensitive',
     });
   }
   if (node.modifiers?.storeRead) {
@@ -236,13 +237,38 @@ function ModifierIcon({ modifier }: { modifier: StepModifierPresentation }) {
     case 'internalTools': return <WrenchIcon {...iconProps} />;
     case 'hitl': return <PauseCircleIcon {...iconProps} />;
     case 'guardrail': return <ShieldCheckIcon {...iconProps} />;
-    case 'sensitiveSideEffect': return <LockSimpleIcon {...iconProps} />;
+    case 'sensitive': return <LockSimpleIcon {...iconProps} />;
     case 'storeRead':
     case 'storeWrite': return <DatabaseIcon {...iconProps} />;
     case 'retryFallback': return <ArrowsClockwiseIcon {...iconProps} />;
     case 'opaque': return <CubeIcon {...iconProps} />;
     case 'readiness': return <WarningCircleIcon {...iconProps} />;
   }
+}
+
+function HitlTimingMarker({ data }: { data: Extract<ContractNodeData, { kind: 'step' }> }) {
+  if (!data.hitl?.enabled) return null;
+  const timing = data.hitl.timing ?? 'before';
+  const modifier: StepModifierPresentation = {
+    id: 'hitl',
+    label: 'HITL',
+    accessibleLabel: `Human-in-the-loop gate, ${timing} execution`,
+    tone: 'human',
+    inspectorSection: 'hitl',
+  };
+
+  return (
+    <button
+      type="button"
+      className={`contract-node-hitl-marker contract-node-hitl-marker--${timing} nodrag nopan`}
+      data-hitl-timing={timing}
+      aria-label={`${modifier.accessibleLabel}. Focus human input in the inspector.`}
+      title={`${timing === 'before' ? 'Pause before execution' : timing === 'inside' ? 'Pause inside this step' : 'Pause after result production'} · configure in inspector`}
+      onClick={() => data.onModifierActivate?.(data.id, modifier)}
+    >
+      <PauseCircleIcon aria-hidden="true" size={17} weight="fill" />
+    </button>
+  );
 }
 
 function ModifierChip({
@@ -354,6 +380,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
       data-frozen={frozen || undefined}
       className={`contract-node-shell ${selected ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${frozen ? 'is-frozen' : ''} ${proposalClass}`}
     >
+      {modifierData && <HitlTimingMarker data={modifierData} />}
       {rendersTargetHandle && (
         <Handle type="target" position={Position.Left} className="contract-node-handle" />
       )}

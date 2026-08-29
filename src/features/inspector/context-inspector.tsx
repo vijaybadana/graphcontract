@@ -7,7 +7,7 @@ import {
   Shield,
   WarningCircle,
 } from '@phosphor-icons/react';
-import { ReactNode, useEffect, useRef } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 
 import './context-inspector.css';
 
@@ -17,6 +17,10 @@ import {
   GraphNode,
   GraphProposal,
   GraphSubgraph,
+  HumanOutcome,
+  HitlResponseContract,
+  HumanSelectionChoice,
+  SensitiveEffectPolicy,
   StepExecutor,
   StepModifierSummary,
   ValidationIssue,
@@ -31,10 +35,12 @@ import {
   InspectorSelectOption,
 } from '@/src/features/inspector/inspector-select';
 import { useGraphStore } from '@/src/state/workspace-store';
+import { PreviewInputRequestSheet } from '@/src/features/hitl/preview-input-request';
 
 type StepNode = Extract<GraphNode, { kind: 'step' }>;
 type StepHitlConfig = NonNullable<StepNode['hitl']>;
 type StepReadiness = NonNullable<StepNode['modifiers']>['readiness'];
+type StepHitlResponse = NonNullable<StepHitlConfig['response']>;
 
 const executorOptions: readonly InspectorSelectOption<StepExecutor>[] = [
   { value: 'deterministic', label: 'Deterministic' },
@@ -46,11 +52,11 @@ const hitlTimingOptions: readonly InspectorSelectOption<
   NonNullable<StepHitlConfig['timing']>
 >[] = [
   { value: 'before', label: 'Before' },
+  { value: 'inside', label: 'Inside' },
   { value: 'after', label: 'After' },
-  { value: 'conditional', label: 'Conditional' },
 ];
 const hitlInputOptions: readonly InspectorSelectOption<
-  NonNullable<StepHitlConfig['inputType']>
+  StepHitlResponse['type']
 >[] = [
   { value: 'approval', label: 'Approval' },
   { value: 'text', label: 'Text' },
@@ -64,6 +70,45 @@ const edgeModeOptions: readonly InspectorSelectOption<GraphEdge['mode']>[] = [
 ];
 
 const noParentSubgraphValue = '__no_subgraph__';
+
+const defaultSensitiveEffectPolicy = (): SensitiveEffectPolicy => ({
+  target: 'Describe the sensitive effect target',
+  authorization: 'Specify required authorization',
+  approvalRequired: false,
+  idempotency: 'Describe the idempotency strategy',
+});
+
+const stableOutcomeId = (edge: GraphEdge) => `outcome:${edge.id}`;
+
+function defaultHitlResponse(graph: WorkflowGraph, nodeId: string): HitlResponseContract {
+  return {
+    type: 'approval',
+    allowedOutcomes: graph.edges
+      .filter((edge) => edge.source === nodeId)
+      .map((edge) => ({
+        id: stableOutcomeId(edge),
+        label: edge.label?.trim() || graph.nodes.find((candidate) => candidate.id === edge.target)?.label || edge.target,
+        resumeNodeId: edge.target,
+      })),
+  };
+}
+
+function responseForType(response: StepHitlResponse, type: StepHitlResponse['type']): StepHitlResponse {
+  if (type === 'selection') {
+    return {
+      ...response,
+      type,
+      selectionChoices: response.selectionChoices?.length
+        ? response.selectionChoices
+        : response.allowedOutcomes.map(({ id, label }) => ({ id, label })),
+    };
+  }
+  const { selectionChoices: _selectionChoices, ...withoutChoices } = response;
+  return { ...withoutChoices, type };
+}
+
+const localId = (prefix: string) =>
+  `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
 
 export type InspectorFocusRequest = {
   section: StepModifierInspectorSection;
@@ -159,6 +204,7 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
   const duplicateSelection = useGraphStore((state) => state.duplicateSelection);
   const updateEdge = useGraphStore((state) => state.updateEdge);
   const removeEdge = useGraphStore((state) => state.removeEdge);
+  const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
   const editable = graph.status === 'draft' && !proposal;
   const { fitView } = useReactFlow();
   const primary = selection.primary;
@@ -215,6 +261,31 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
     if (readiness === 'ready') delete modifiers.readiness;
     else modifiers.readiness = readiness;
     updateNode(node.id, { modifiers });
+  };
+
+  const updateHitlResponse = (response: StepHitlResponse) => {
+    if (node?.kind !== 'step' || !node.hitl) return;
+    updateNode(node.id, { hitl: { ...node.hitl, response } });
+  };
+
+  const updateOutcome = (outcomeId: string, patch: Partial<HumanOutcome>) => {
+    if (node?.kind !== 'step' || !node.hitl?.response) return;
+    updateHitlResponse({
+      ...node.hitl.response,
+      allowedOutcomes: node.hitl.response.allowedOutcomes.map((outcome) =>
+        outcome.id === outcomeId ? { ...outcome, ...patch } : outcome,
+      ),
+    });
+  };
+
+  const updateSelectionChoice = (choiceId: string, patch: Partial<HumanSelectionChoice>) => {
+    if (node?.kind !== 'step' || !node.hitl?.response) return;
+    updateHitlResponse({
+      ...node.hitl.response,
+      selectionChoices: (node.hitl.response.selectionChoices ?? []).map((choice) =>
+        choice.id === choiceId ? { ...choice, ...patch } : choice,
+      ),
+    });
   };
 
   return (
@@ -450,60 +521,169 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
               aria-labelledby="human-input-heading"
             >
               <div className="context-inspector__toggle-row">
-                <h3 id="human-input-heading">Human input</h3>
+                <h3 id="human-input-heading">Human input gate</h3>
                 <label className="context-inspector__toggle-label">
                   <span>Enabled</span>
-                <input
-                  type="checkbox"
-                  checked={Boolean(node.hitl?.enabled)}
-                  disabled={!editable}
-                  onChange={(event) => updateNode(node.id, {
-                    hitl: {
-                      ...node.hitl,
-                      enabled: event.target.checked,
-                      timing: node.hitl?.timing ?? 'before',
-                      inputType: node.hitl?.inputType ?? 'approval',
-                    },
-                  })}
-                />
+                  <input
+                    type="checkbox"
+                    aria-label="HITL enabled"
+                    checked={Boolean(node.hitl?.enabled)}
+                    disabled={!editable}
+                    onChange={(event) => updateNode(node.id, {
+                      hitl: event.target.checked
+                        ? {
+                            enabled: true,
+                            timing: node.hitl?.timing ?? 'before',
+                            response: node.hitl?.response ?? defaultHitlResponse(graph, node.id),
+                            ...(node.hitl?.activation ? { activation: node.hitl.activation } : {}),
+                          }
+                        : { ...node.hitl, enabled: false },
+                    })}
+                  />
                 </label>
               </div>
+              <p className="context-inspector__help">HITL pauses this Step; it does not change whether the Step is AI, Tool, deterministic, or human-owned.</p>
               {node.hitl?.enabled && (
-                <div className="context-inspector__two-column-fields">
-                  <Field label="Timing">
-                    <InspectorSelect
-                      disabled={!editable}
-                      value={node.hitl.timing ?? 'before'}
-                      options={hitlTimingOptions}
-                      ariaLabel="HITL timing"
-                      onChange={(timing) =>
-                        updateNode(node.id, { hitl: { ...node.hitl!, timing } })
-                      }
-                    />
-                  </Field>
-                  <Field label="Input">
-                    <InspectorSelect
-                      disabled={!editable}
-                      value={node.hitl.inputType ?? 'approval'}
-                      options={hitlInputOptions}
-                      ariaLabel="HITL input type"
-                      onChange={(inputType) =>
-                        updateNode(node.id, { hitl: { ...node.hitl!, inputType } })
-                      }
-                    />
-                  </Field>
-                  <Field label="Condition">
+                <div className="context-inspector__fields">
+                  <div className="context-inspector__two-column-fields">
+                    <Field label="Timing">
+                      <InspectorSelect
+                        disabled={!editable}
+                        value={node.hitl.timing ?? 'before'}
+                        options={hitlTimingOptions}
+                        ariaLabel="HITL timing"
+                        onChange={(timing) =>
+                          updateNode(node.id, { hitl: { ...node.hitl!, timing } })
+                        }
+                      />
+                    </Field>
+                    <Field label="Response type">
+                      <InspectorSelect
+                        disabled={!editable}
+                        value={node.hitl.response?.type ?? 'approval'}
+                        options={hitlInputOptions}
+                        ariaLabel="HITL response type"
+                        onChange={(type) => updateHitlResponse(responseForType(node.hitl!.response!, type))}
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Gate reason">
                     <input
-                      aria-label="Human input condition"
-                      value={node.hitl.condition ?? ''}
+                      aria-label="Human input gate reason"
+                      value={node.hitl.activation?.reason ?? ''}
                       disabled={!editable}
-                      onChange={(event) =>
-                        updateNode(node.id, { hitl: { ...node.hitl!, condition: event.target.value } })
-                      }
+                      onChange={(event) => {
+                        const reason = event.target.value;
+                        const { activation: _activation, ...withoutActivation } = node.hitl!;
+                        updateNode(node.id, {
+                          hitl: {
+                            ...withoutActivation,
+                            ...(reason.trim() ? { activation: { reason } } : {}),
+                          },
+                        });
+                      }}
                       className="input"
-                      placeholder="Optional condition"
+                      placeholder="Why does a person need to respond?"
                     />
                   </Field>
+                  <div className="context-inspector__contract-list">
+                    <div className="context-inspector__toggle-row">
+                      <strong>Allowed outcomes</strong>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={!editable || !graph.edges.some((edge) => edge.source === node.id)}
+                        onClick={() => {
+                          const edge = graph.edges.find((candidate) => candidate.source === node.id);
+                          if (!edge) return;
+                          updateHitlResponse({
+                            ...node.hitl!.response!,
+                            allowedOutcomes: [
+                              ...node.hitl!.response!.allowedOutcomes,
+                              {
+                                id: localId('outcome'),
+                                label: graph.nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target,
+                                resumeNodeId: edge.target,
+                              },
+                            ],
+                          });
+                        }}
+                      >
+                        Add outcome
+                      </button>
+                    </div>
+                    {node.hitl.response?.allowedOutcomes.map((outcome, index) => {
+                      const destinations = graph.edges
+                        .filter((edge) => edge.source === node.id)
+                        .map((edge) => ({
+                          value: edge.target,
+                          label: `${graph.nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target} · ${edge.target}`,
+                        }));
+                      return (
+                        <div key={`${outcome.id}-${index}`} className="context-inspector__contract-item">
+                          <Field label={`Outcome ${index + 1} label`}>
+                            <input aria-label={`Outcome ${index + 1} label`} value={outcome.label} disabled={!editable} onChange={(event) => updateOutcome(outcome.id, { label: event.target.value })} className="input" />
+                          </Field>
+                          <Field label={`Outcome ${index + 1} ID`}>
+                            <input aria-label={`Outcome ${index + 1} ID`} value={outcome.id} disabled={!editable} onChange={(event) => updateOutcome(outcome.id, { id: event.target.value })} className="input" />
+                          </Field>
+                          <Field label={`Outcome ${index + 1} resume destination`}>
+                            <InspectorSelect value={outcome.resumeNodeId} options={destinations} disabled={!editable} ariaLabel={`Outcome ${index + 1} resume destination`} onChange={(resumeNodeId) => updateOutcome(outcome.id, { resumeNodeId })} />
+                          </Field>
+                          <button type="button" disabled={!editable} className="secondary-button" onClick={() => updateHitlResponse({ ...node.hitl!.response!, allowedOutcomes: node.hitl!.response!.allowedOutcomes.filter((candidate) => candidate.id !== outcome.id) })}>
+                            Remove outcome
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {node.hitl.response?.type === 'selection' && (
+                    <div className="context-inspector__contract-list">
+                      <div className="context-inspector__toggle-row">
+                        <strong>Selection choices</strong>
+                        <button type="button" className="secondary-button" disabled={!editable} onClick={() => updateHitlResponse({ ...node.hitl!.response!, selectionChoices: [...(node.hitl!.response!.selectionChoices ?? []), { id: localId('choice'), label: 'New choice' }] })}>Add choice</button>
+                      </div>
+                      {node.hitl.response.selectionChoices?.map((choice, index) => (
+                        <div key={`${choice.id}-${index}`} className="context-inspector__contract-item">
+                          <Field label={`Choice ${index + 1} label`}>
+                            <input aria-label={`Choice ${index + 1} label`} value={choice.label} disabled={!editable} onChange={(event) => updateSelectionChoice(choice.id, { label: event.target.value })} className="input" />
+                          </Field>
+                          <Field label={`Choice ${index + 1} ID`}>
+                            <input aria-label={`Choice ${index + 1} ID`} value={choice.id} disabled={!editable} onChange={(event) => updateSelectionChoice(choice.id, { id: event.target.value })} className="input" />
+                          </Field>
+                          <button type="button" disabled={!editable} className="secondary-button" onClick={() => updateHitlResponse({ ...node.hitl!.response!, selectionChoices: node.hitl!.response!.selectionChoices?.filter((candidate) => candidate.id !== choice.id) })}>Remove choice</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button type="button" className="secondary-button" onClick={() => setPreviewNodeId(node.id)}>
+                    Preview input request
+                  </button>
+                </div>
+              )}
+            </section>
+            <section
+              ref={(element) => { stepSectionRefs.current.sensitive = element ?? undefined; }}
+              id="inspector-step-sensitive"
+              data-inspector-section="sensitive"
+              tabIndex={-1}
+              className="context-inspector__group context-inspector__group--tinted"
+              aria-labelledby="sensitive-policy-heading"
+            >
+              <div className="context-inspector__toggle-row">
+                <h3 id="sensitive-policy-heading">Sensitive effect policy</h3>
+                <label className="context-inspector__toggle-label">
+                  <span>Enabled</span>
+                  <input type="checkbox" aria-label="Sensitive effect policy enabled" checked={Boolean(node.sensitive)} disabled={!editable} onChange={(event) => updateNode(node.id, { sensitive: event.target.checked ? node.sensitive ?? defaultSensitiveEffectPolicy() : null })} />
+                </label>
+              </div>
+              <p className="context-inspector__help">This policy is independent from HITL. Requiring approval never creates a gate automatically.</p>
+              {node.sensitive && (
+                <div className="context-inspector__fields">
+                  <Field label="Mutation target"><input aria-label="Sensitive mutation target" value={node.sensitive.target} disabled={!editable} onChange={(event) => updateNode(node.id, { sensitive: { ...node.sensitive!, target: event.target.value } })} className="input" /></Field>
+                  <Field label="Authorization"><input aria-label="Sensitive authorization" value={node.sensitive.authorization} disabled={!editable} onChange={(event) => updateNode(node.id, { sensitive: { ...node.sensitive!, authorization: event.target.value } })} className="input" /></Field>
+                  <label className="context-inspector__toggle-label"><span>Approval required</span><input type="checkbox" checked={node.sensitive.approvalRequired} disabled={!editable} onChange={(event) => updateNode(node.id, { sensitive: { ...node.sensitive!, approvalRequired: event.target.checked } })} /></label>
+                  <Field label="Idempotency"><input aria-label="Sensitive idempotency" value={node.sensitive.idempotency} disabled={!editable} onChange={(event) => updateNode(node.id, { sensitive: { ...node.sensitive!, idempotency: event.target.value } })} className="input" /></Field>
                 </div>
               )}
             </section>
@@ -520,10 +700,6 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
                 <label className="context-inspector__toggle-label">
                   <span>Guardrail</span>
                   <input type="checkbox" checked={Boolean(node.modifiers?.guardrail)} disabled={!editable} onChange={(event) => updateModifierFlag('guardrail', event.target.checked)} />
-                </label>
-                <label className="context-inspector__toggle-label">
-                  <span>Sensitive side effect</span>
-                  <input type="checkbox" checked={Boolean(node.modifiers?.sensitiveSideEffect)} disabled={!editable} onChange={(event) => updateModifierFlag('sensitiveSideEffect', event.target.checked)} />
                 </label>
                 <label className="context-inspector__toggle-label">
                   <span>Store read</span>
@@ -577,6 +753,9 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
             <button disabled={!editable} onClick={() => removeNode(node.id)} className="danger-button">Remove node</button>
           </div>
         </div>
+      )}
+      {node?.kind === 'step' && previewNodeId === node.id && node.hitl?.enabled && node.hitl.response && (
+        <PreviewInputRequestSheet graph={graph} node={node} onClose={() => setPreviewNodeId(null)} />
       )}
       {edge && (
         <div className="context-inspector__content">

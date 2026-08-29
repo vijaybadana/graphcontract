@@ -30,6 +30,10 @@
 .context-inspector__actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .context-inspector__actions .danger-button { grid-column: 1 / -1; width: 100%; }
 .context-inspector__help { margin: 6px 0 0; color: #66736b; font-size: 10px; line-height: 1.4; }
+.context-inspector__contract-list { display: grid; gap: 8px; border-top: 1px solid rgb(20 31 27 / 9%); padding-top: 9px; }
+.context-inspector__contract-list strong { color: #35453c; font-size: 11px; }
+.context-inspector__contract-list .secondary-button { min-height: 1.9rem; padding: 5px 7px; font-size: 10px; }
+.context-inspector__contract-item { display: grid; gap: 7px; border: 1px solid rgb(20 31 27 / 10%); border-radius: 8px; background: #fff; padding: 8px; }
 .context-inspector__member-count { min-width: 1.5rem; border-radius: 999px; background: #e7f2eb; color: #16604b; padding: 2px 6px; font-size: 10px; font-weight: 750; text-align: center; }
 .context-inspector__member-action { width: 100%; min-height: 2rem; margin-top: 10px; font-size: 11px; }
 .context-inspector__member-list { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }

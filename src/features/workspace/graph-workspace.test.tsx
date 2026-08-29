@@ -142,10 +142,19 @@ describe('GraphWorkspace subgraph creation', () => {
     const classifier = graph.nodes.find((node) => node.id === 'classifier');
     if (!classifier || classifier.kind !== 'step') throw new Error('Expected a canonical Step fixture.');
     classifier.participation = { internalTools: true };
-    classifier.hitl = { enabled: true, timing: 'before', inputType: 'approval' };
+    classifier.hitl = {
+      enabled: true,
+      timing: 'before',
+      response: { type: 'approval', allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'billing' }] },
+    };
+    classifier.sensitive = {
+      target: 'Customer billing record',
+      authorization: 'Billing administrator',
+      approvalRequired: true,
+      idempotency: 'Ticket ID',
+    };
     classifier.modifiers = {
       guardrail: true,
-      sensitiveSideEffect: true,
       storeRead: true,
       storeWrite: true,
       retryFallback: true,
