@@ -32,6 +32,7 @@ import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-gu
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import { ContractNode } from '@/src/features/canvas/contract-node';
+import { RoutingEdge } from '@/src/features/canvas/routing-edge';
 import {
   NodePalette,
   PaletteKind,
@@ -64,6 +65,7 @@ import {
 import './graph-workspace.css';
 
 const nodeTypes = { contractNode: ContractNode, subgraph: SubgraphNode };
+const edgeTypes = { routing: RoutingEdge };
 const snapGrid: [number, number] = [12, 12];
 const panOnDrag = [1];
 const defaultEdgeOptions: DefaultEdgeOptions = {
@@ -537,6 +539,7 @@ export function GraphWorkspace() {
             nodes={canvasInteractions.nodes}
             edges={canvasInteractions.edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onNodesChange={canvasInteractions.onNodesChange}
             onEdgesChange={canvasInteractions.onEdgesChange}
             onConnect={onConnect}

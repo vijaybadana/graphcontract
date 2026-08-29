@@ -5,6 +5,7 @@ import {
   GraphEdge,
   GraphProposal,
   GraphSubgraph,
+  validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
@@ -18,10 +19,20 @@ export type CanvasEdgeData = {
   edge: GraphEdge;
   domainEdgeIds: string[];
   projection: 'domain' | 'subgraph-proxy';
+  presentation: CanvasEdgePresentation;
   [key: string]: unknown;
 };
 
 export type CanvasFlowEdge = Edge<CanvasEdgeData>;
+
+export type CanvasEdgePresentation = {
+  /** The stored routing mode; loop remains a derived presentation only. */
+  mode: GraphEdge['mode'];
+  loop: boolean;
+  invalid: boolean;
+  frozen: boolean;
+  proposalState?: 'added' | 'updated' | 'removed';
+};
 
 type ProjectedDomainEdge = {
   edge: GraphEdge;
@@ -98,37 +109,129 @@ function edgeVisualState(
   };
 }
 
+function proposalStateForEdges(
+  edges: readonly GraphEdge[],
+  proposal: GraphProposal | null,
+): CanvasEdgePresentation['proposalState'] {
+  if (edges.some((edge) => edgeVisualState(edge.id, proposal).removed)) return 'removed';
+  if (edges.some((edge) => edgeVisualState(edge.id, proposal).added)) return 'added';
+  if (edges.some((edge) => edgeVisualState(edge.id, proposal).updated)) return 'updated';
+  return undefined;
+}
+
+function isEdgeInvalid(
+  edge: GraphEdge,
+  graph: WorkflowGraph,
+  validationIssues: ReturnType<typeof validateGraph>,
+): boolean {
+  // Some validation errors belong to the route itself, while count/mixing
+  // errors belong to its source node. Keep both observable on the canvas.
+  const routePath = `edges.${edge.id}`;
+  const sourcePath = `nodes.${edge.source}`;
+  const validationMarksEdge = validationIssues.some(
+    (issue) =>
+      issue.path === routePath ||
+      issue.path?.startsWith(`${routePath}.`) ||
+      issue.path === sourcePath,
+  );
+  const routeLabelMissing =
+    (edge.mode === 'conditional' || edge.mode === 'command') && !edge.label?.trim();
+  const unreadableCondition =
+    (edge.mode === 'conditional' || edge.mode === 'command') &&
+    edge.condition !== undefined &&
+    !edge.condition.trim();
+
+  // A frozen graph is separately presented as locked, not invalid.
+  return graph.status !== 'frozen' && (validationMarksEdge || routeLabelMissing || unreadableCondition);
+}
+
+/**
+ * A loop is a start-reachable depth-first back edge. The canonical sorted
+ * traversal deliberately matches scenario enumeration, so changing a canvas
+ * layout or collapsing a subgraph cannot change its presentation.
+ */
+export function topologyDerivedLoopEdgeIds(graph: WorkflowGraph): Set<string> {
+  const start = graph.nodes.find((node) => node.kind === 'start' && !node.parentId);
+  if (!start) return new Set();
+
+  const outgoing = new Map<string, GraphEdge[]>();
+  for (const edge of graph.edges) {
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
+  }
+  for (const edges of outgoing.values()) {
+    edges.sort((a, b) =>
+      [a.source, a.target, a.mode, a.label ?? '', a.condition ?? '', a.id]
+        .join('\u0000')
+        .localeCompare([b.source, b.target, b.mode, b.label ?? '', b.condition ?? '', b.id].join('\u0000')),
+    );
+  }
+
+  const loopEdgeIds = new Set<string>();
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const findLoopEdges = (nodeId: string) => {
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId);
+    for (const edge of outgoing.get(nodeId) ?? []) {
+      if (visiting.has(edge.target)) loopEdgeIds.add(edge.id);
+      else findLoopEdges(edge.target);
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  };
+  findLoopEdges(start.id);
+  return loopEdgeIds;
+}
+
 function projectEdge(
   { edge, source, target }: ProjectedDomainEdge,
-  state: EdgeVisualState,
   reconnectable: boolean,
   domainEdgeIds: string[],
   projection: CanvasEdgeData['projection'],
+  presentation: CanvasEdgePresentation,
 ): CanvasFlowEdge {
-  const color = state.added ? '#159160' : state.removed ? '#db4b55' : state.updated ? '#c47b24' : '#4f5954';
+  const color = presentation.frozen
+    ? '#9ca3af'
+    : presentation.invalid
+      ? '#e0353d'
+      : presentation.loop
+        ? '#ea6a18'
+        : presentation.mode === 'conditional'
+          ? '#7136cc'
+          : presentation.mode === 'fallback'
+            ? '#8b55d8'
+          : presentation.mode === 'command'
+            ? '#3346c8'
+            : presentation.proposalState === 'added'
+              ? '#159160'
+              : presentation.proposalState === 'removed'
+                ? '#db4b55'
+                : presentation.proposalState === 'updated'
+                  ? '#c47b24'
+                  : '#303a35';
   return {
     id: projection === 'subgraph-proxy' ? proxyEdgeId(source, target) : edge.id,
-    type: 'smoothstep',
-    className: `contract-edge contract-edge--${edge.mode}`,
+    type: 'routing',
+    className: `contract-edge contract-edge--${presentation.mode}`,
     source,
     target,
-    label: edge.label || (edge.mode === 'fallback' ? 'fallback' : undefined),
+    label: edge.label || (presentation.mode === 'fallback' ? 'fallback' : undefined),
     markerEnd: { type: MarkerType.ArrowClosed, color },
-    animated: state.added,
-    reconnectable: projection === 'domain' && reconnectable,
+    animated: presentation.proposalState === 'added',
+    reconnectable: projection === 'domain' && reconnectable && !presentation.frozen,
     interactionWidth: 28,
     pathOptions: { borderRadius: 16, offset: 28 },
     style: {
       stroke: color,
-      strokeWidth: state.added || state.removed || state.updated ? 2.5 : 1.7,
-      strokeDasharray: state.removed ? '6 5' : undefined,
-      opacity: state.removed ? 0.65 : 1,
+      strokeWidth: presentation.proposalState ? 2.5 : 1.8,
+      strokeDasharray: presentation.proposalState === 'removed' ? '6 5' : undefined,
+      opacity: presentation.proposalState === 'removed' ? 0.65 : 1,
     },
     labelStyle: { fill: '#303a35', fontSize: 11, fontWeight: 720 },
     labelBgStyle: { fill: '#ffffff', fillOpacity: 1 },
     labelBgPadding: [5, 3] as [number, number],
     labelBgBorderRadius: 6,
-    data: { edge, domainEdgeIds, projection },
+    data: { edge, domainEdgeIds, projection, presentation },
   };
 }
 
@@ -295,6 +398,8 @@ export function projectGraphToCanvas(
     ...preview.edges,
     ...graph.edges.filter((edge) => !previewEdgeIds.has(edge.id)),
   ];
+  const loopEdgeIds = topologyDerivedLoopEdgeIds({ ...preview, edges: sourceEdges });
+  const validationIssues = validateGraph(preview);
 
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
     const sourceParent = subgraphsById.get(
@@ -313,6 +418,16 @@ export function projectGraphToCanvas(
   const proxyEdges = new Map<string, ProjectedDomainEdge[]>();
   const edges: CanvasFlowEdge[] = [];
   const canvasEdgesReconnectable = graph.status === 'draft' && !visibleProposal;
+  const edgePresentation = (
+    edge: GraphEdge,
+    group: readonly GraphEdge[] = [edge],
+  ): CanvasEdgePresentation => ({
+    mode: edge.mode,
+    loop: group.some((candidate) => loopEdgeIds.has(candidate.id)),
+    invalid: group.some((candidate) => isEdgeInvalid(candidate, preview, validationIssues)),
+    frozen: graph.status === 'frozen',
+    proposalState: proposalStateForEdges(group, visibleProposal),
+  });
   for (const domainEdge of domainEdges) {
     const collapsedInternal =
       domainEdge.source === domainEdge.target && domainEdge.source !== domainEdge.edge.source;
@@ -324,10 +439,10 @@ export function projectGraphToCanvas(
       edges.push(
         projectEdge(
           domainEdge,
-          edgeVisualState(domainEdge.edge.id, visibleProposal),
           canvasEdgesReconnectable,
           [domainEdge.edge.id],
           'domain',
+          edgePresentation(domainEdge.edge),
         ),
       );
       continue;
@@ -342,10 +457,10 @@ export function projectGraphToCanvas(
     edges.push(
       projectEdge(
         first,
-        edgeVisualState(first.edge.id, visibleProposal),
         false,
         groupedEdges.map(({ edge }) => edge.id),
         'subgraph-proxy',
+        edgePresentation(first.edge, groupedEdges.map(({ edge }) => edge)),
       ),
     );
   }

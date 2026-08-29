@@ -1,0 +1,91 @@
+.routing-edge__path,
+.routing-edge__selection-halo {
+  pointer-events: none;
+  transition: stroke-width 150ms ease, filter 150ms ease, opacity 150ms ease;
+}
+
+.routing-edge__selection-halo {
+  fill: none;
+}
+
+.react-flow__edge:hover .routing-edge__path {
+  filter: drop-shadow(0 0 2px currentColor);
+  stroke-width: 3px !important;
+}
+
+.routing-edge--frozen {
+  opacity: 0.72;
+}
+
+.routing-edge__branch-dot {
+  pointer-events: none;
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+.routing-edge-label {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  color: #24302a;
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.routing-edge-label__surface {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid rgb(23 33 28 / 15%);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 2px 7px rgb(15 23 42 / 10%);
+  padding: 4px 6px;
+}
+
+.routing-edge-label--conditional { color: #6229bd; }
+.routing-edge-label--command { color: #2739bf; }
+.routing-edge-label--fallback { color: #7441c5; }
+.routing-edge-label--loop { color: #cf560e; }
+.routing-edge-label--invalid { color: #c9232d; }
+.routing-edge-label--frozen { color: #6b7280; }
+
+.routing-edge-label--frozen .routing-edge-label__surface {
+  border-style: dashed;
+  box-shadow: none;
+  opacity: 0.84;
+}
+
+.routing-edge-label__icon-chip {
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.routing-edge-label__text { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
+
+.routing-edge-label__cue,
+.routing-edge-label__state,
+.routing-edge-label__proposal {
+  border-left: 1px solid currentColor;
+  padding-left: 4px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.routing-edge-label__state { text-decoration: underline; }
+.routing-edge-label__proposal { opacity: 0.76; }
+
+@media (prefers-reduced-motion: reduce) {
+  .routing-edge__path,
+  .routing-edge__selection-halo { transition: none; }
+}

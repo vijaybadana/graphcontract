@@ -7,8 +7,9 @@ import {
   isCanvasEdgeSelected,
   isSubgraphProxyEdge,
   projectGraphToCanvas,
+  topologyDerivedLoopEdgeIds,
 } from '@/src/adapters/react-flow/project-graph';
-import { createProposal, sampleGraph, WorkflowGraph } from '@/src/domain';
+import { createProposal, researchIntakeRoutingGraph, sampleGraph, WorkflowGraph } from '@/src/domain';
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
@@ -66,6 +67,64 @@ function graphWithTwoSubgraphs(): WorkflowGraph {
 }
 
 describe('projectGraphToCanvas', () => {
+  it('projects routing semantics into reusable edge presentation without storing loop mode', () => {
+    const graph = structuredClone(researchIntakeRoutingGraph);
+    const canvas = projectGraphToCanvas(graph, null);
+    const command = canvas.edges.find((edge) => edge.id === 'clarify-write-brief')!;
+    const conditional = canvas.edges.find((edge) => edge.id === 'supervisor-final-report')!;
+    const fallback = canvas.edges.find((edge) => edge.id === 'supervisor-human-review')!;
+    const loop = canvas.edges.find((edge) => edge.id === 'researcher-continue')!;
+    const forwardCycleEdge = canvas.edges.find((edge) => edge.id === 'supervisor-researcher')!;
+
+    expect(topologyDerivedLoopEdgeIds(graph)).toEqual(new Set(['researcher-continue']));
+    expect(command).toMatchObject({
+      type: 'routing',
+      markerEnd: { type: 'arrowclosed' },
+      data: { presentation: { mode: 'command', loop: false, invalid: false, frozen: false } },
+    });
+    expect(conditional.data.presentation.mode).toBe('conditional');
+    expect(fallback.data.presentation.mode).toBe('fallback');
+    expect(loop.data.presentation).toMatchObject({ mode: 'normal', loop: true });
+    expect(forwardCycleEdge.data.presentation.loop).toBe(false);
+
+    const loopTargetPositionedLater = structuredClone(graph);
+    loopTargetPositionedLater.nodes.find((node) => node.id === 'research-supervisor')!.position = {
+      x: 1100,
+      y: 780,
+    };
+    const layoutIndependentLoop = projectGraphToCanvas(loopTargetPositionedLater, null)
+      .edges.find((edge) => edge.id === 'researcher-continue')!;
+
+    expect(topologyDerivedLoopEdgeIds(loopTargetPositionedLater)).toEqual(
+      new Set(['researcher-continue']),
+    );
+    expect(layoutIndependentLoop.data.presentation.loop).toBe(true);
+  });
+
+  it('keeps invalid, frozen, and proposal-diff states observable without changing reconnect rules', () => {
+    const invalid = structuredClone(researchIntakeRoutingGraph);
+    invalid.edges.find((edge) => edge.id === 'clarify-write-brief')!.label = '  ';
+    const invalidEdge = projectGraphToCanvas(invalid, null)
+      .edges.find((edge) => edge.id === 'clarify-write-brief')!;
+    const frozenEdge = projectGraphToCanvas(
+      { ...researchIntakeRoutingGraph, status: 'frozen' },
+      null,
+    ).edges.find((edge) => edge.id === 'clarify-write-brief')!;
+    const proposal = createProposal(researchIntakeRoutingGraph, {
+      rationale: 'Update the command label for review.',
+      operations: [
+        { type: 'update_edge', edgeId: 'clarify-write-brief', patch: { label: 'approved' } },
+      ],
+    }).proposal!;
+    const proposedEdge = projectGraphToCanvas(researchIntakeRoutingGraph, proposal)
+      .edges.find((edge) => edge.id === 'clarify-write-brief')!;
+
+    expect(invalidEdge.data.presentation.invalid).toBe(true);
+    expect(frozenEdge.data.presentation).toMatchObject({ frozen: true, invalid: false });
+    expect(frozenEdge.reconnectable).toBe(false);
+    expect(proposedEdge.data.presentation.proposalState).toBe('updated');
+  });
+
   it('keeps node dimensions stable while previewing proposal badges', () => {
     const graph = structuredClone(sampleGraph);
     const proposal = createProposal(graph, {
