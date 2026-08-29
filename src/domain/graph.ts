@@ -779,7 +779,8 @@ export function applyGraphOperations(
         next.nodes = next.nodes.map((node) => {
           if (!requested.has(node.id) || !node.parentId) return node;
           const position = absoluteNodePosition(node);
-          const { parentId: _parentId, ...unparented } = node;
+          const unparented = { ...node };
+          delete unparented.parentId;
           return { ...unparented, position };
         });
       }
@@ -790,7 +791,8 @@ export function applyGraphOperations(
         next.nodes = next.nodes.map((node) => {
           if (node.parentId !== operation.subgraphId) return node;
           const position = absoluteNodePosition(node);
-          const { parentId: _parentId, ...unparented } = node;
+          const unparented = { ...node };
+          delete unparented.parentId;
           return { ...unparented, position };
         });
         // Edges remain canonical node-to-node edges. Only the container is

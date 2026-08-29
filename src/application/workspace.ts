@@ -53,6 +53,10 @@ const labels: Record<NodeKind, string> = {
 };
 
 const clone = <T,>(value: T): T => structuredClone(value);
+const CANVAS_NODE_WIDTH = 184;
+const CANVAS_NODE_HEIGHT = 114;
+const SUBGRAPH_BODY_INSET = 12;
+const SUBGRAPH_HEADER_HEIGHT = 56;
 
 const absoluteNodePosition = (graph: WorkflowGraph, node: GraphNode): GraphNode['position'] => {
   const parent = graph.subgraphs.find((subgraph) => subgraph.id === node.parentId);
@@ -62,8 +66,36 @@ const absoluteNodePosition = (graph: WorkflowGraph, node: GraphNode): GraphNode[
 };
 
 const removeParent = (node: GraphNode, position: GraphNode['position']): GraphNode => {
-  const { parentId: _parentId, ...unparented } = node;
+  // Keep the canonical input immutable; this helper is also used by dissolve
+  // and inspector-driven removal paths.
+  const unparented = { ...node };
+  delete unparented.parentId;
   return { ...unparented, position };
+};
+
+/**
+ * A drop belongs to a subgraph only when the visible node centre lands in its
+ * body (not its title bar) and exactly one expanded container contains it.
+ * This deliberately leaves overlapping containers and collapsed cards alone.
+ */
+const dropParentForNode = (
+  graph: WorkflowGraph,
+  node: GraphNode,
+): GraphSubgraph | undefined => {
+  const absolute = absoluteNodePosition(graph, node);
+  const centre = {
+    x: absolute.x + CANVAS_NODE_WIDTH / 2,
+    y: absolute.y + CANVAS_NODE_HEIGHT / 2,
+  };
+  const matches = graph.subgraphs.filter(
+    (subgraph) =>
+      !subgraph.collapsed &&
+      centre.x > subgraph.position.x + SUBGRAPH_BODY_INSET &&
+      centre.x < subgraph.position.x + subgraph.dimensions.width - SUBGRAPH_BODY_INSET &&
+      centre.y > subgraph.position.y + SUBGRAPH_HEADER_HEIGHT &&
+      centre.y < subgraph.position.y + subgraph.dimensions.height - SUBGRAPH_BODY_INSET,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 };
 
 export function createWorkspaceService(dependencies: WorkspaceDependencies) {
@@ -143,6 +175,54 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           positions[node.id] ? { ...node, position: positions[node.id] } : node,
         ),
       }));
+    },
+
+    /**
+     * React Flow reports child positions relative to their current parent and
+     * root positions in canvas coordinates. Apply those coordinates first,
+     * then resolve a deliberate expanded-container drop from absolute canvas
+     * geometry. The movement and any membership conversion form one history
+     * transition at the store seam.
+     */
+    moveCanvasElements(
+      state: WorkspaceCore,
+      positions: Record<string, GraphNode['position']>,
+    ) {
+      const movedIds = new Set(Object.keys(positions));
+      if (movedIds.size === 0) return { state, changed: false };
+      return changeGraph(state, (graph) => {
+        const moved = {
+          ...graph,
+          nodes: graph.nodes.map((node) =>
+            positions[node.id] ? { ...node, position: positions[node.id] } : node,
+          ),
+          subgraphs: graph.subgraphs.map((subgraph) =>
+            positions[subgraph.id]
+              ? { ...subgraph, position: positions[subgraph.id] }
+              : subgraph,
+          ),
+        };
+
+        return {
+          ...moved,
+          nodes: moved.nodes.map((node) => {
+            // Container positions were handled above. Only GraphNode records
+            // can reach this membership conversion.
+            if (!movedIds.has(node.id)) return node;
+            const parent = dropParentForNode(moved, node);
+            if (!parent || node.parentId === parent.id) return node;
+            const absolute = absoluteNodePosition(moved, node);
+            return {
+              ...node,
+              parentId: parent.id,
+              position: {
+                x: absolute.x - parent.position.x,
+                y: absolute.y - parent.position.y,
+              },
+            };
+          }),
+        };
+      }, 'Node movement saved. Dropped nodes join one unambiguous expanded subgraph.');
     },
 
     updateNode(

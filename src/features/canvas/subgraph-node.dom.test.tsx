@@ -1,0 +1,155 @@
+// @vitest-environment jsdom
+
+import { ReactFlow, ReactFlowProvider } from '@xyflow/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useMemo, useState } from 'react';
+
+import { sampleGraph } from '@/src/domain';
+import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
+import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
+import { NodePalette } from './node-palette';
+import { SubgraphNode } from './subgraph-node';
+
+const nodeTypes = { subgraph: SubgraphNode };
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function MountedSubgraphCanvas({
+  onSelectionChange,
+  onMove,
+  onToggle,
+}: {
+  onSelectionChange: () => void;
+  onMove: () => void;
+  onToggle: (collapsed: boolean) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const nodes = useMemo<CanvasFlowNode[]>(
+    () => [
+      {
+        id: 'review-group',
+        type: 'subgraph',
+        position: { x: 120, y: 90 },
+        width: 640,
+        height: 360,
+        data: {
+          id: 'review-group',
+          label: 'Review process',
+          position: { x: 120, y: 90 },
+          dimensions: { width: 640, height: 360 },
+          collapsed,
+          collapseEditable: true,
+          onToggleCollapse: (_, next) => {
+            onToggle(next);
+            setCollapsed(next);
+          },
+        },
+      },
+    ],
+    [collapsed, onToggle],
+  );
+
+  return (
+    <div style={{ width: 1280, height: 720 }}>
+      <ReactFlowProvider>
+        <ReactFlow
+          nodes={nodes}
+          edges={[]}
+          nodeTypes={nodeTypes}
+          onSelectionChange={onSelectionChange}
+          onMove={onMove}
+          nodesDraggable
+          panOnDrag={[1]}
+        />
+      </ReactFlowProvider>
+    </div>
+  );
+}
+
+describe('SubgraphNode in React Flow', () => {
+  it('owns Enter and Space activation without selecting or moving the canvas', async () => {
+    const onToggle = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onMove = vi.fn();
+    render(
+      <MountedSubgraphCanvas
+        onToggle={onToggle}
+        onSelectionChange={onSelectionChange}
+        onMove={onMove}
+      />,
+    );
+
+    const button = await waitFor(() =>
+      screen.getByRole('button', { name: 'Collapse subgraph Review process' }),
+    );
+    button.focus();
+    const selectionBeforeKeys = onSelectionChange.mock.calls.length;
+    const movesBeforeKeys = onMove.mock.calls.length;
+
+    fireEvent.keyDown(button, { key: 'Enter' });
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onToggle).toHaveBeenLastCalledWith(true);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.keyDown(button, { key: ' ' });
+    expect(onToggle).toHaveBeenCalledTimes(2);
+    expect(onToggle).toHaveBeenLastCalledWith(false);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(onSelectionChange).toHaveBeenCalledTimes(selectionBeforeKeys);
+    expect(onMove).toHaveBeenCalledTimes(movesBeforeKeys);
+  });
+
+  it('requires a clear confirmation before loading the replacement demo', () => {
+    const onLoadResearchSupervisorDemo = vi.fn();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(
+      <NodePalette
+        graph={sampleGraph}
+        proposal={null}
+        disabled={false}
+        validationIssueCount={0}
+        onAdd={vi.fn()}
+        onLoadResearchSupervisorDemo={onLoadResearchSupervisorDemo}
+        onCollapse={vi.fn()}
+      />,
+    );
+
+    const demoButton = screen.getByRole('button', { name: 'Load Research Supervisor demo' });
+    fireEvent.click(demoButton);
+    expect(confirm).toHaveBeenLastCalledWith(
+      'Replace the current canvas with the Research Supervisor demo? This replaces the current workflow; one Undo restores it.',
+    );
+    expect(onLoadResearchSupervisorDemo).not.toHaveBeenCalled();
+
+    fireEvent.click(demoButton);
+    expect(onLoadResearchSupervisorDemo).toHaveBeenCalledOnce();
+  });
+
+  it('builds each frozen-contract download in its click event and releases the object URL afterward', () => {
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockImplementation((() => 'blob:graphcontract-download') as typeof URL.createObjectURL);
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL');
+    const frozenGraph = { ...sampleGraph, status: 'frozen' as const };
+    vi.useFakeTimers();
+    try {
+      render(<ScenarioPanel graph={frozenGraph} scenarios={[]} />);
+      const links = screen.getAllByRole('link', { name: /Download / });
+
+      expect(links).toHaveLength(3);
+      links.forEach((link) => link.addEventListener('click', (event) => event.preventDefault()));
+      links.forEach((link) => fireEvent.click(link));
+      expect(createObjectURL).toHaveBeenCalledTimes(3);
+      expect(links.every((link) => link.getAttribute('href') === 'blob:graphcontract-download')).toBe(true);
+
+      vi.runOnlyPendingTimers();
+      expect(revokeObjectURL).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

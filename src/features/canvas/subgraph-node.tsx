@@ -1,6 +1,7 @@
 'use client';
 
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
+import type { KeyboardEvent, PointerEvent } from 'react';
 
 import { GraphSubgraph } from '@/src/domain';
 import './subgraph-node.css';
@@ -24,6 +25,19 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
   const action = data.collapsed ? 'Expand' : 'Collapse';
   const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
   const removed = data.proposalState === 'removed';
+  const toggleCollapse = () => data.onToggleCollapse?.(data.id, !data.collapsed);
+  const stopCanvasPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  };
+  const handleToggleKey = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+    // React Flow also listens for keyboard interaction on its node wrapper.
+    // Own these activation keys at the native button so one press cannot both
+    // toggle the canonical state and select/pan the canvas.
+    event.preventDefault();
+    event.stopPropagation();
+    toggleCollapse();
+  };
 
   return (
     <div
@@ -38,7 +52,15 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
           className="subgraph-node-handle"
         />
       )}
-      <div className="subgraph-node-header">
+      {!data.collapsed && (
+        <>
+          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--top" aria-hidden="true" />
+          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--right" aria-hidden="true" />
+          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--bottom" aria-hidden="true" />
+          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--left" aria-hidden="true" />
+        </>
+      )}
+      <div className="subgraph-node-header subgraph-node-drag-surface">
         <div className="subgraph-node-heading">
           <span className="subgraph-node-indicator">Subgraph</span>
           <p className="subgraph-node-title">{data.label}</p>
@@ -49,9 +71,11 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
           disabled={removed || !data.collapseEditable}
           aria-expanded={!data.collapsed}
           aria-label={`${action} subgraph ${data.label}`}
+          onPointerDownCapture={stopCanvasPointer}
+          onKeyDownCapture={handleToggleKey}
           onClick={(event) => {
             event.stopPropagation();
-            data.onToggleCollapse?.(data.id, !data.collapsed);
+            toggleCollapse();
           }}
         >
           {action}

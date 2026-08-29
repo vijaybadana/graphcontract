@@ -86,8 +86,27 @@ describe('workspace subgraph actions', () => {
   });
 
   it('loads the separate demo explicitly', () => {
+    const previousGraphId = useGraphStore.getState().graph.id;
     useGraphStore.getState().loadResearchSupervisorDemo();
     expect(useGraphStore.getState().graph.id).toBe('research-supervisor-demo');
     expect(useGraphStore.getState().selection).toEqual(emptySelection());
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
+  });
+
+  it('commits a normal-node drop and parent assignment as one history transition', () => {
+    useGraphStore.getState().createSubgraph({
+      position: { x: 400, y: 40 },
+      dimensions: { width: 600, height: 360 },
+    });
+    const subgraphId = useGraphStore.getState().selection.primary!.id;
+    const historyBeforeDrop = useGraphStore.getState().past.length;
+
+    useGraphStore.getState().moveCanvasElements({ billing: { x: 620, y: 150 } });
+    const billing = useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing');
+
+    expect(billing).toMatchObject({ parentId: subgraphId, position: { x: 220, y: 110 } });
+    expect(useGraphStore.getState().past).toHaveLength(historyBeforeDrop + 1);
   });
 });

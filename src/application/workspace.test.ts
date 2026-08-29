@@ -234,6 +234,77 @@ describe('workspace application service', () => {
     expect(dissolved.state.graph.edges).toEqual(originalEdges);
   });
 
+  it('parents a dropped node only after an unambiguous expanded-body drop and keeps coordinates canonical', () => {
+    const created = service.createSubgraph(service.createInitial(), {
+      label: 'Review area',
+      position: { x: 400, y: 40 },
+      dimensions: { width: 600, height: 360 },
+    });
+    const subgraphId = created.result!.subgraphId;
+    const originalEdges = structuredClone(created.state.graph.edges);
+
+    const dropped = service.moveCanvasElements(created.state, {
+      billing: { x: 620, y: 150 },
+    });
+    const billing = dropped.state.graph.nodes.find((node) => node.id === 'billing');
+
+    expect(dropped.changed).toBe(true);
+    expect(billing).toMatchObject({
+      parentId: subgraphId,
+      position: { x: 220, y: 110 },
+    });
+    expect(dropped.state.graph.subgraphs.find((subgraph) => subgraph.id === subgraphId)?.position).toEqual({
+      x: 400,
+      y: 40,
+    });
+    expect(dropped.state.graph.edges).toEqual(originalEdges);
+
+    const collapsed = service.setSubgraphCollapsed(dropped.state, subgraphId, true);
+    const outside = service.moveCanvasElements(collapsed.state, {
+      diagnostic: { x: 650, y: 150 },
+    });
+    expect(outside.state.graph.nodes.find((node) => node.id === 'diagnostic')).toMatchObject({
+      position: { x: 650, y: 150 },
+    });
+    expect(outside.state.graph.nodes.find((node) => node.id === 'diagnostic')?.parentId).toBeUndefined();
+  });
+
+  it('does not parent ambiguous drops and can convert a reparented canvas position exactly once', () => {
+    let nextId = 0;
+    const dropService = createWorkspaceService({
+      now: () => '2026-08-29T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-${++nextId}`,
+    });
+    const first = dropService.createSubgraph(dropService.createInitial(), {
+      position: { x: 400, y: 40 },
+      dimensions: { width: 600, height: 360 },
+    });
+    const second = dropService.createSubgraph(first.state, {
+      position: { x: 400, y: 40 },
+      dimensions: { width: 600, height: 360 },
+    });
+    const firstId = first.result!.subgraphId;
+    const secondId = second.result!.subgraphId;
+
+    const ambiguous = dropService.moveCanvasElements(second.state, { billing: { x: 620, y: 150 } });
+    expect(ambiguous.state.graph.nodes.find((node) => node.id === 'billing')?.parentId).toBeUndefined();
+
+    const separated = dropService.updateSubgraph(ambiguous.state, secondId, {
+      position: { x: 1000, y: 40 },
+    });
+    const assigned = dropService.moveCanvasElements(separated.state, { billing: { x: 620, y: 150 } });
+    expect(assigned.state.graph.nodes.find((node) => node.id === 'billing')).toMatchObject({
+      parentId: firstId,
+      position: { x: 220, y: 110 },
+    });
+
+    const reparented = dropService.moveCanvasElements(assigned.state, { billing: { x: 620, y: 110 } });
+    expect(reparented.state.graph.nodes.find((node) => node.id === 'billing')).toMatchObject({
+      parentId: secondId,
+      position: { x: 20, y: 110 },
+    });
+  });
+
   it('loads a valid Research Supervisor demo and locks all subgraph edits during review or freeze', () => {
     const demo = service.loadResearchSupervisorDemo(service.createInitial());
     expect(validateGraph(demo.state.graph)).toEqual([]);
@@ -262,6 +333,8 @@ describe('workspace application service', () => {
     expect(
       service.dissolveSubgraph(frozen.state, 'research-supervisor').changed,
     ).toBe(false);
+    expect(service.loadResearchSupervisorDemo(proposed.state).changed).toBe(false);
+    expect(service.loadResearchSupervisorDemo(frozen.state).changed).toBe(false);
   });
 
   it('supports inspector-level subgraph label, size, membership, collapse, and dissolve edits', () => {

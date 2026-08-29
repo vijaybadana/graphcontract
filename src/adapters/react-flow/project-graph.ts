@@ -143,11 +143,10 @@ function subgraphFlowNode(
     id: subgraph.id,
     type: 'subgraph',
     position: subgraph.position,
-    // Expanded containers are quiet canvas boundaries behind their members.
-    // A collapsed container is an interactive card and must stay above any
-    // unrelated node occupying the same coordinates so its expand control
-    // cannot redirect the click to the obscuring node.
-    zIndex: removed ? -1 : subgraph.collapsed ? 10 : -1,
+    // Expanded containers sit directly below their member nodes. Restricting
+    // their drag handle to the rendered header/border keeps children fully
+    // interactive while preserving a reliable parent selection surface.
+    zIndex: removed ? -1 : subgraph.collapsed ? 10 : 0,
     width,
     height,
     initialWidth: width,
@@ -155,6 +154,7 @@ function subgraphFlowNode(
     style: { width, height },
     selectable: !removed,
     draggable: !removed,
+    dragHandle: '.subgraph-node-drag-surface, .subgraph-node-boundary-drag-surface',
     focusable: !removed,
     connectable: false,
     ariaLabel: `${subgraph.label} subgraph, ${proposalState ? `proposed ${proposalState}, ` : ''}${subgraph.collapsed ? 'collapsed' : 'expanded'}`,
@@ -251,7 +251,12 @@ export function projectGraphToCanvas(
       initialWidth: CONTRACT_NODE_WIDTH,
       initialHeight: CONTRACT_NODE_HEIGHT,
       ...(node.parentId
-        ? { parentId: node.parentId, extent: 'parent' as const, expandParent: false }
+        ? {
+            parentId: node.parentId,
+            extent: 'parent' as const,
+            expandParent: false,
+            zIndex: 1,
+          }
         : {}),
       hidden: Boolean(parent?.collapsed),
       data: { ...node, proposalState },

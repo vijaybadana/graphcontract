@@ -113,6 +113,16 @@ export function ContextInspector() {
                   onChange={(event) => setSubgraphCollapsed(subgraph.id, event.target.checked)}
                 />
               </label>
+              <button
+                type="button"
+                disabled={!editable}
+                aria-expanded={!subgraph.collapsed}
+                aria-label={`${subgraph.collapsed ? 'Expand' : 'Collapse'} subgraph ${subgraph.label}`}
+                onClick={() => setSubgraphCollapsed(subgraph.id, !subgraph.collapsed)}
+                className="secondary-button"
+              >
+                {subgraph.collapsed ? 'Expand subgraph' : 'Collapse subgraph'}
+              </button>
               <div className="context-inspector__two-column-fields">
                 <Field label="Width">
                   <input
@@ -236,7 +246,7 @@ export function ContextInspector() {
                     }
                   }}
                 />
-                <p className="context-inspector__help">Choose a group or remove this node while keeping its canvas position.</p>
+                <p className="context-inspector__help">Choose a group or remove this node while keeping its canvas position. Dragging outside a group does not ungroup it.</p>
               </Field>
             </div>
           </section>

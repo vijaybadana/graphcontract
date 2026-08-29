@@ -187,32 +187,8 @@ export const useGraphStore = create<WorkspaceStore>()(
         moveNodes: (positions) => commit(workspace.moveNodes(currentCore(), positions)),
         moveSubgraph: (id, position) =>
           commit(workspace.moveSubgraph(currentCore(), id, position)),
-        moveCanvasElements: (positions) => {
-          const initialState = currentCore();
-          const subgraphIds = new Set(initialState.graph.subgraphs.map((subgraph) => subgraph.id));
-          const nodePositions = Object.fromEntries(
-            Object.entries(positions).filter(([id]) => !subgraphIds.has(id)),
-          );
-          let state = initialState;
-          let changed = false;
-          let notice: string | undefined;
-
-          if (Object.keys(nodePositions).length > 0) {
-            const transition = workspace.moveNodes(state, nodePositions);
-            state = transition.state;
-            changed ||= transition.changed;
-            notice = transition.notice ?? notice;
-          }
-          for (const [subgraphId, position] of Object.entries(positions)) {
-            if (!subgraphIds.has(subgraphId)) continue;
-            const transition = workspace.moveSubgraph(state, subgraphId, position);
-            state = transition.state;
-            changed ||= transition.changed;
-            notice = transition.notice ?? notice;
-          }
-
-          if (changed) commit({ state, changed, notice });
-        },
+        moveCanvasElements: (positions) =>
+          commit(workspace.moveCanvasElements(currentCore(), positions)),
         updateNode: (id, patch) => commit(workspace.updateNode(currentCore(), id, patch)),
         updateSubgraph: (id, patch) =>
           commit(workspace.updateSubgraph(currentCore(), id, patch)),

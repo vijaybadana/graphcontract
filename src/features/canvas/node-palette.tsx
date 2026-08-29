@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, useEffect, useMemo, useState } from 'react';
+import { DragEvent, useMemo, useState } from 'react';
 import {
   FlagCheckeredIcon,
   HandIcon,
@@ -79,15 +79,7 @@ export function getContractHealthLabel(
   return graph.status === 'frozen' ? 'Frozen' : 'Ready to freeze';
 }
 
-export function NodePalette({
-  graph,
-  disabled,
-  validationIssueCount,
-  proposal,
-  onAdd,
-  onLoadResearchSupervisorDemo,
-  onCollapse,
-}: {
+type NodePaletteProps = {
   graph: WorkflowGraph;
   disabled: boolean;
   validationIssueCount: number;
@@ -95,18 +87,40 @@ export function NodePalette({
   onAdd: (kind: PaletteKind) => void;
   onLoadResearchSupervisorDemo: () => void;
   onCollapse: () => void;
-}) {
-  const [query, setQuery] = useState('');
+};
 
-  useEffect(() => {
-    if (graph.status === 'frozen') setQuery('');
-  }, [graph.status]);
+export function NodePalette(props: NodePaletteProps) {
+  // A status transition remounts only the palette contents, which clears a
+  // stale search without synchronously mutating state from an effect.
+  return <NodePaletteContents key={props.graph.status} {...props} />;
+}
+
+function NodePaletteContents({
+  graph,
+  disabled,
+  validationIssueCount,
+  proposal,
+  onAdd,
+  onLoadResearchSupervisorDemo,
+  onCollapse,
+}: NodePaletteProps) {
+  const [query, setQuery] = useState('');
 
   const visiblePalette = useMemo(() => filterPaletteItems(query), [query]);
 
   const onDragStart = (event: DragEvent<HTMLButtonElement>, kind: PaletteKind) => {
     event.dataTransfer.setData('application/graphcontract-node', kind);
     event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const loadResearchSupervisorDemo = () => {
+    if (
+      window.confirm(
+        'Replace the current canvas with the Research Supervisor demo? This replaces the current workflow; one Undo restores it.',
+      )
+    ) {
+      onLoadResearchSupervisorDemo();
+    }
   };
 
   return (
@@ -168,13 +182,13 @@ export function NodePalette({
         <button
           type="button"
           disabled={disabled}
-          onClick={onLoadResearchSupervisorDemo}
+          onClick={loadResearchSupervisorDemo}
           className="node-palette__demo-button"
         >
           <RobotIcon aria-hidden="true" size={15} weight="duotone" />
           Load Research Supervisor demo
         </button>
-        <p>Replaces this canvas. Reset restores the Customer Support sample.</p>
+        <p>Requires confirmation and replaces this canvas. One Undo restores your workflow.</p>
       </div>
       <p className="node-palette__keys">Keys: ⌘/Ctrl Z undo · D duplicate · Delete remove</p>
     </aside>

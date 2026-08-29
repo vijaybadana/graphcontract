@@ -226,6 +226,8 @@ describe('projectGraphToCanvas', () => {
       selectable: true,
       draggable: true,
       focusable: true,
+      zIndex: 0,
+      dragHandle: '.subgraph-node-drag-surface, .subgraph-node-boundary-drag-surface',
     });
     expect(child).toMatchObject({
       type: 'contractNode',
@@ -233,6 +235,7 @@ describe('projectGraphToCanvas', () => {
       position: { x: 60, y: 120 },
       extent: 'parent',
       expandParent: false,
+      zIndex: 1,
       hidden: false,
     });
   });

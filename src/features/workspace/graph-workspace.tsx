@@ -106,6 +106,7 @@ export function GraphWorkspace() {
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
   const [showPalette, setShowPalette] = useState(true);
   const [showInspector, setShowInspector] = useState(false);
+  const [compactPanelPreference, setCompactPanelPreference] = useState<'palette' | 'inspector' | null>(null);
   const [paletteWidth, setPaletteWidth] = useState(232);
   const [inspectorWidth, setInspectorWidth] = useState(344);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
@@ -115,6 +116,15 @@ export function GraphWorkspace() {
   const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
 
   const editable = graph.status === 'draft' && !proposal;
+  const autoInspectorOpen = Boolean(selection.primary) || Boolean(proposal) ||
+    (rightTab === 'scenarios' && scenarios.length > 0);
+  const paletteWinsCompactOverlay =
+    isCompactWorkspace && showPalette && compactPanelPreference === 'palette';
+  const inspectorVisible = paletteWinsCompactOverlay
+    ? false
+    : showInspector || autoInspectorOpen;
+  const paletteVisible = showPalette && (!isCompactWorkspace || !inspectorVisible);
+  const inspectorTab = proposal || selection.primary ? 'review' : rightTab;
   const toggleSubgraphCollapse = useCallback(
     (subgraphId: string, collapsed: boolean) => {
       if (editable) setSubgraphCollapsed(subgraphId, collapsed);
@@ -148,14 +158,15 @@ export function GraphWorkspace() {
     editable,
     onCommitPositions: moveCanvasElements,
   });
+  const { clearRenderedSelection } = canvasInteractions;
   const fitPadding = useMemo(
     () => ({
       top: '110px' as const,
-      right: `${!isCompactWorkspace && showInspector ? inspectorWidth + 32 : 32}px` as const,
+      right: `${!isCompactWorkspace && inspectorVisible ? inspectorWidth + 32 : 32}px` as const,
       bottom: '94px' as const,
-      left: `${!isCompactWorkspace && showPalette ? paletteWidth + 32 : 32}px` as const,
+      left: `${!isCompactWorkspace && paletteVisible ? paletteWidth + 32 : 32}px` as const,
     }),
-    [inspectorWidth, isCompactWorkspace, paletteWidth, showInspector, showPalette],
+    [inspectorVisible, inspectorWidth, isCompactWorkspace, paletteVisible, paletteWidth],
   );
   const { fitGraph } = useCoalescedFitView<CanvasFlowNode, CanvasFlowEdge>({
     enabled: hasHydrated,
@@ -199,34 +210,36 @@ export function GraphWorkspace() {
     return () => window.clearTimeout(timeout);
   }, [notice, clearNotice]);
 
-  useEffect(() => {
-    if (!proposal) return;
-    setRightTab('review');
-    setShowInspector(true);
-    if (isCompactWorkspace) setShowPalette(false);
-  }, [isCompactWorkspace, proposal]);
-
-  useEffect(() => {
-    if (selection.primary || (rightTab === 'scenarios' && scenarios.length > 0)) {
-      setShowInspector(true);
-      if (isCompactWorkspace) setShowPalette(false);
-    }
-  }, [isCompactWorkspace, rightTab, scenarios.length, selection.primary]);
-
-  useEffect(() => {
-    if (isCompactWorkspace && showPalette && showInspector) setShowPalette(false);
-  }, [isCompactWorkspace, showInspector, showPalette]);
-
   const togglePalette = () => {
-    const next = !showPalette;
-    if (next && isCompactWorkspace) setShowInspector(false);
+    const next = !paletteVisible;
+    if (next && isCompactWorkspace) {
+      setShowInspector(false);
+      setCompactPanelPreference('palette');
+    } else if (!next) {
+      setCompactPanelPreference(null);
+    }
     setShowPalette(next);
   };
 
   const toggleInspector = () => {
-    const next = !showInspector;
-    if (next && isCompactWorkspace) setShowPalette(false);
+    const next = !inspectorVisible;
+    if (next && isCompactWorkspace) {
+      setShowPalette(false);
+      setCompactPanelPreference('inspector');
+    } else if (!next) {
+      setCompactPanelPreference(null);
+    }
     setShowInspector(next);
+  };
+
+  const closePalette = () => {
+    setShowPalette(false);
+    setCompactPanelPreference(null);
+  };
+
+  const closeInspector = () => {
+    setShowInspector(false);
+    setCompactPanelPreference(null);
   };
 
   const handleInspectorTabChange = useCallback(
@@ -234,10 +247,10 @@ export function GraphWorkspace() {
       setRightTab(tab);
       if (tab === 'scenarios') {
         clearSelection();
-        canvasInteractions.clearRenderedSelection();
+        clearRenderedSelection();
       }
     },
-    [canvasInteractions.clearRenderedSelection, clearSelection],
+    [clearRenderedSelection, clearSelection],
   );
 
   useEffect(() => {
@@ -339,6 +352,7 @@ export function GraphWorkspace() {
           : edgeIds.length
             ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
             : null;
+      if (primary) setRightTab('review');
       setSelection({ nodeIds, subgraphIds, edgeIds, primary });
     },
     [setSelection],
@@ -415,10 +429,13 @@ export function GraphWorkspace() {
   const handleFreeze = () => {
     const result = freezeGraph();
     if (result.ok) {
-      canvasInteractions.clearRenderedSelection();
+      clearRenderedSelection();
       setRightTab('scenarios');
       setShowInspector(true);
-      if (isCompactWorkspace) setShowPalette(false);
+      if (isCompactWorkspace) {
+        setShowPalette(false);
+        setCompactPanelPreference('inspector');
+      }
     }
   };
 
@@ -450,8 +467,8 @@ export function GraphWorkspace() {
         ref={stageRef}
         className="workspace-stage"
         style={stageStyle}
-        data-palette-open={showPalette}
-        data-inspector-open={showInspector}
+        data-palette-open={paletteVisible}
+        data-inspector-open={inspectorVisible}
       >
         <WorkspaceHeader
           graphName={graph.name}
@@ -461,8 +478,8 @@ export function GraphWorkspace() {
           edgeCount={graph.edges.length}
           issueCount={validationIssues.length}
           proposalPending={Boolean(proposal)}
-          paletteOpen={showPalette}
-          inspectorOpen={showInspector}
+          paletteOpen={paletteVisible}
+          inspectorOpen={inspectorVisible}
           canUndo={editable && past.length > 0}
           canRedo={editable && future.length > 0}
           canDuplicate={editable && selection.nodeIds.length > 0}
@@ -482,7 +499,7 @@ export function GraphWorkspace() {
 
         {notice && <div className="workspace-notice">{notice}</div>}
 
-        {showPalette && (
+        {paletteVisible && (
           <div className="workspace-palette-slot">
             <NodePalette
               graph={graph}
@@ -491,7 +508,7 @@ export function GraphWorkspace() {
               validationIssueCount={validationIssues.length}
               onAdd={addAtCenter}
               onLoadResearchSupervisorDemo={loadResearchSupervisorDemo}
-              onCollapse={() => setShowPalette(false)}
+              onCollapse={closePalette}
             />
             <PanelResizer
               side="left"
@@ -506,14 +523,14 @@ export function GraphWorkspace() {
           </div>
         )}
         <section className="workspace-canvas">
-          {!showPalette && (
+          {!paletteVisible && (
             <PanelExpandButton
               side="left"
               label="Palette"
               onExpand={togglePalette}
             />
           )}
-          {!showInspector && (
+          {!inspectorVisible && (
             <PanelExpandButton
               side="right"
               label="Inspector"
@@ -603,27 +620,27 @@ export function GraphWorkspace() {
           {graph.status === 'frozen' && <div className="workspace-frozen-banner">Frozen contract · {scenarios.length} paths</div>}
         </section>
 
-        {showInspector && (
+        {inspectorVisible && (
           <aside className="workspace-panel workspace-inspector-panel">
             <div className="flex items-center gap-2">
               <InspectorTabs
-                active={rightTab}
+                active={inspectorTab}
                 scenarioCount={scenarios.length}
                 onChange={handleInspectorTabChange}
               />
               <PanelCollapseButton
                 side="right"
-                onCollapse={() => setShowInspector(false)}
+                onCollapse={closeInspector}
                 label="Collapse inspector"
               />
             </div>
             <div
               id="graph-inspector-tabpanel"
               role="tabpanel"
-              aria-labelledby={activeInspectorTabId(rightTab)}
+              aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {rightTab === 'review' ? <div className="space-y-3"><ContextInspector /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
             </div>
             <PanelResizer
               side="right"

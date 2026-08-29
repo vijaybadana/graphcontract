@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { MouseEvent, useMemo } from 'react';
 
 import {
   buildGraphContractDownload,
@@ -50,19 +50,19 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
 }
 
 function DownloadLink({ artifact }: { artifact: DownloadArtifact }) {
-  const [url, setUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const nextUrl = URL.createObjectURL(new Blob([artifact.content], { type: artifact.type }));
-    setUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [artifact.content, artifact.type]);
+  const prepareDownload = (event: MouseEvent<HTMLAnchorElement>) => {
+    // Build the Blob at the user gesture. The browser reads this href during
+    // the subsequent native download action, then it is safe to release.
+    const url = URL.createObjectURL(new Blob([artifact.content], { type: artifact.type }));
+    event.currentTarget.href = url;
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
 
   return (
     <a
-      href={url ?? undefined}
+      href="#download"
       download={artifact.filename}
-      aria-disabled={!url}
+      onClick={prepareDownload}
       className="download-button"
     >
       Download {artifact.filename}
