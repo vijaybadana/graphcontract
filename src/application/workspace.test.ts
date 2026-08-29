@@ -175,4 +175,30 @@ describe('workspace application service', () => {
       service.dissolveSubgraph(frozen.state, 'research-supervisor').changed,
     ).toBe(false);
   });
+
+  it('supports inspector-level subgraph label, size, membership, collapse, and dissolve edits', () => {
+    const created = service.createSubgraph(service.createInitial(), {
+      position: { x: 300, y: 100 },
+    });
+    const subgraphId = created.result!.subgraphId;
+    const configured = service.updateSubgraph(created.state, subgraphId, {
+      label: 'Triage workspace',
+      dimensions: { width: 720, height: 420 },
+    });
+    const assigned = service.assignNodesToSubgraph(configured.state, subgraphId, ['billing']);
+    const collapsed = service.setSubgraphCollapsed(assigned.state, subgraphId, true);
+
+    expect(collapsed.state.graph.subgraphs[0]).toMatchObject({
+      label: 'Triage workspace',
+      dimensions: { width: 720, height: 420 },
+      collapsed: true,
+    });
+    expect(collapsed.state.graph.nodes.find((node) => node.id === 'billing')?.parentId).toBe(subgraphId);
+
+    const dissolved = service.dissolveSubgraph(collapsed.state, subgraphId);
+    expect(dissolved.state.graph.subgraphs).toEqual([]);
+    const billing = dissolved.state.graph.nodes.find((node) => node.id === 'billing');
+    expect(billing?.position).toEqual({ x: 480, y: 60 });
+    expect(billing).not.toHaveProperty('parentId');
+  });
 });

@@ -88,7 +88,11 @@ export function InspectorSelect<Value extends string>({
   };
 
   return (
-    <div ref={containerRef} className="relative">
+    <div
+      ref={containerRef}
+      className="relative"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <button
         ref={triggerRef}
         type="button"

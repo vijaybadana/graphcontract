@@ -7,7 +7,6 @@ import {
   ConnectionLineType,
   Controls,
   DefaultEdgeOptions,
-  Edge,
   MiniMap,
   NodeMouseHandler,
   OnSelectionChangeParams,
@@ -24,6 +23,7 @@ import {
   canReconnectCanvasEdge,
   CanvasFlowEdge,
   domainEdgeIdsForCanvasEdge,
+  isSubgraphProxyEdge,
   projectGraphToCanvas,
 } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
@@ -33,7 +33,11 @@ import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-gu
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import { ContractNode } from '@/src/features/canvas/contract-node';
-import { NodePalette, readDroppedNodeKind } from '@/src/features/canvas/node-palette';
+import {
+  NodePalette,
+  PaletteKind,
+  readDroppedPaletteKind,
+} from '@/src/features/canvas/node-palette';
 import { SubgraphNode } from '@/src/features/canvas/subgraph-node';
 import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
 import { ContextInspector } from '@/src/features/inspector/context-inspector';
@@ -78,7 +82,9 @@ export function GraphWorkspace() {
   const future = useGraphStore((state) => state.future);
   const fitViewRevision = useGraphStore((state) => state.fitViewRevision);
   const addNode = useGraphStore((state) => state.addNode);
-  const moveNodes = useGraphStore((state) => state.moveNodes);
+  const createSubgraph = useGraphStore((state) => state.createSubgraph);
+  const moveCanvasElements = useGraphStore((state) => state.moveCanvasElements);
+  const setSubgraphCollapsed = useGraphStore((state) => state.setSubgraphCollapsed);
   const addEdge = useGraphStore((state) => state.addEdge);
   const updateEdge = useGraphStore((state) => state.updateEdge);
   const setSelection = useGraphStore((state) => state.setSelection);
@@ -92,6 +98,7 @@ export function GraphWorkspace() {
   const freezeGraph = useGraphStore((state) => state.freezeGraph);
   const unfreezeGraph = useGraphStore((state) => state.unfreezeGraph);
   const resetGraph = useGraphStore((state) => state.resetGraph);
+  const loadResearchSupervisorDemo = useGraphStore((state) => state.loadResearchSupervisorDemo);
   const clearNotice = useGraphStore((state) => state.clearNotice);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
@@ -105,16 +112,39 @@ export function GraphWorkspace() {
   const reconnectingEdgeIdRef = useRef<string | null>(null);
   const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
 
-  const validationIssues = useMemo(() => validateGraph(graph), [graph]);
-  const canvas = useMemo(() => projectGraphToCanvas(graph, proposal), [graph, proposal]);
   const editable = graph.status === 'draft' && !proposal;
+  const toggleSubgraphCollapse = useCallback(
+    (subgraphId: string, collapsed: boolean) => {
+      if (editable) setSubgraphCollapsed(subgraphId, collapsed);
+    },
+    [editable, setSubgraphCollapsed],
+  );
+  const validationIssues = useMemo(() => validateGraph(graph), [graph]);
+  const canvas = useMemo(() => {
+    const projected = projectGraphToCanvas(graph, proposal);
+    return {
+      ...projected,
+      nodes: projected.nodes.map((node) =>
+        node.type === 'subgraph'
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                collapseEditable: editable,
+                onToggleCollapse: editable ? toggleSubgraphCollapse : undefined,
+              },
+            }
+          : node,
+      ),
+    };
+  }, [editable, graph, proposal, toggleSubgraphCollapse]);
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
     projectedEdges: canvas.edges,
     selectedNodeIds: selection.nodeIds,
     selectedEdgeIds: selection.edgeIds,
     editable,
-    onCommitPositions: moveNodes,
+    onCommitPositions: moveCanvasElements,
   });
   const fitPadding = useMemo(
     () => ({
@@ -281,32 +311,50 @@ export function GraphWorkspace() {
 
   const handleSelectionChange = useCallback(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
-      const nodeIds = nodes.map((node) => node.id).sort();
+      const nodeIds = nodes
+        .filter((node) => node.type === 'contractNode')
+        .map((node) => node.id)
+        .sort();
+      const subgraphIds = nodes
+        .filter((node) => node.type === 'subgraph')
+        .map((node) => node.id)
+        .sort();
       const edgeIds = [...new Set(edges.flatMap(domainEdgeIdsForCanvasEdge))].sort();
+      const protectedEdgeIds = [
+        ...new Set(
+          edges.filter(isSubgraphProxyEdge).flatMap(domainEdgeIdsForCanvasEdge),
+        ),
+      ].sort();
       const currentPrimary = useGraphStore.getState().selection.primary;
       const currentPrimaryStillSelected = currentPrimary
         ? currentPrimary.type === 'node'
           ? nodeIds.includes(currentPrimary.id)
+          : currentPrimary.type === 'subgraph'
+            ? subgraphIds.includes(currentPrimary.id)
           : edgeIds.includes(currentPrimary.id)
         : false;
       const primary = currentPrimaryStillSelected
         ? currentPrimary
         : nodeIds.length
           ? { type: 'node' as const, id: nodeIds[nodeIds.length - 1] }
+          : subgraphIds.length
+            ? { type: 'subgraph' as const, id: subgraphIds[subgraphIds.length - 1] }
           : edgeIds.length
             ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
             : null;
-      setSelection({ nodeIds, edgeIds, primary });
+      setSelection({ nodeIds, subgraphIds, edgeIds, protectedEdgeIds, primary });
     },
     [setSelection],
   );
 
-  const makePrimary = useCallback((primary: { type: 'node' | 'edge'; id: string }) => {
+  const makePrimary = useCallback((primary: { type: 'node' | 'edge' | 'subgraph'; id: string }) => {
     queueMicrotask(() => {
       const currentSelection = useGraphStore.getState().selection;
       const stillSelected =
         primary.type === 'node'
           ? currentSelection.nodeIds.includes(primary.id)
+          : primary.type === 'subgraph'
+            ? currentSelection.subgraphIds.includes(primary.id)
           : currentSelection.edgeIds.includes(primary.id);
       if (!stillSelected) return;
       useGraphStore.getState().setSelection({ ...currentSelection, primary });
@@ -314,7 +362,8 @@ export function GraphWorkspace() {
   }, []);
 
   const handleNodeClick = useCallback<NodeMouseHandler<CanvasFlowNode>>(
-    (_, node) => makePrimary({ type: 'node', id: node.id }),
+    (_, node) =>
+      makePrimary({ type: node.type === 'subgraph' ? 'subgraph' : 'node', id: node.id }),
     [makePrimary],
   );
 
@@ -327,23 +376,30 @@ export function GraphWorkspace() {
   );
 
   const addAtCenter = useCallback(
-    (kind: NodeKind) => {
-      addNode(
-        kind,
-        screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
-      );
+    (kind: PaletteKind) => {
+      const position = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      if (kind === 'subgraph') {
+        createSubgraph({ position });
+        return;
+      }
+      addNode(kind, position);
     },
-    [addNode, screenToFlowPosition],
+    [addNode, createSubgraph, screenToFlowPosition],
   );
 
   const onDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
-      const kind = readDroppedNodeKind(event);
+      const kind = readDroppedPaletteKind(event);
       if (!kind || !editable) return;
-      addNode(kind, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      if (kind === 'subgraph') {
+        createSubgraph({ position });
+        return;
+      }
+      addNode(kind, position);
     },
-    [addNode, editable, screenToFlowPosition],
+    [addNode, createSubgraph, editable, screenToFlowPosition],
   );
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
@@ -351,7 +407,7 @@ export function GraphWorkspace() {
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
-  const onReconnectStart = useCallback((_: unknown, edge: Edge) => {
+  const onReconnectStart = useCallback((_: unknown, edge: CanvasFlowEdge) => {
     reconnectingEdgeIdRef.current = edge.id;
   }, []);
 
@@ -380,7 +436,12 @@ export function GraphWorkspace() {
     );
   }
 
-  const selectionCount = selection.nodeIds.length + selection.edgeIds.length;
+  const selectionCount =
+    selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length;
+  const hasDeletableSelection =
+    selection.nodeIds.length > 0 ||
+    selection.subgraphIds.length > 0 ||
+    selection.edgeIds.some((edgeId) => !selection.protectedEdgeIds.includes(edgeId));
   const stageStyle = {
     '--palette-width': `${paletteWidth}px`,
     '--inspector-width': `${inspectorWidth}px`,
@@ -408,7 +469,7 @@ export function GraphWorkspace() {
           canUndo={editable && past.length > 0}
           canRedo={editable && future.length > 0}
           canDuplicate={editable && selection.nodeIds.length > 0}
-          canDelete={editable && selectionCount > 0}
+          canDelete={editable && hasDeletableSelection}
           canFreeze={validationIssues.length === 0 && !proposal}
           onTogglePalette={togglePalette}
           onToggleInspector={toggleInspector}
@@ -432,6 +493,7 @@ export function GraphWorkspace() {
               disabled={!editable}
               validationIssueCount={validationIssues.length}
               onAdd={addAtCenter}
+              onLoadResearchSupervisorDemo={loadResearchSupervisorDemo}
               onCollapse={() => setShowPalette(false)}
             />
             <PanelResizer

@@ -29,6 +29,13 @@ const kindLabel: Record<GraphNode['kind'], string> = {
   end: 'End',
 };
 
+function nodeKindBadge(node: GraphNode): string {
+  // The existing kind/config seam already expresses the Supervisor's intent;
+  // keep it compact instead of introducing a second taxonomy.
+  if (node.kind === 'agent' && node.config?.capability === 'ai') return 'AI';
+  return kindLabel[node.kind];
+}
+
 function NodeKindIcon({ kind }: { kind: GraphNode['kind'] }) {
   const iconProps = { 'aria-hidden': true, size: 17, weight: 'bold' as const };
 
@@ -74,7 +81,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
         </div>
         <div className="contract-node-divider" />
         <div className="contract-node-meta" aria-label="Node status">
-          <span className="contract-node-kind-badge">{kindLabel[data.kind]}</span>
+          <span className="contract-node-kind-badge">{nodeKindBadge(data)}</span>
           <div className="contract-node-statuses">
             {data.proposalState && (
               <span className="contract-node-proposal-status">

@@ -3,7 +3,7 @@ import { ReactNode } from 'react';
 
 import './context-inspector.css';
 
-import { GraphEdge, GraphNode } from '@/src/domain';
+import { GraphEdge, GraphNode, GraphSubgraph } from '@/src/domain';
 import {
   InspectorSelect,
   InspectorSelectOption,
@@ -30,11 +30,33 @@ const edgeModeOptions: readonly InspectorSelectOption<GraphEdge['mode']>[] = [
   { value: 'fallback', label: 'Fallback' },
 ];
 
+const noParentSubgraphValue = '__no_subgraph__';
+
+export function subgraphParentOptions(
+  subgraphs: GraphSubgraph[],
+): readonly InspectorSelectOption<string>[] {
+  return [
+    { value: noParentSubgraphValue, label: 'No subgraph' },
+    ...subgraphs.map((subgraph) => ({ value: subgraph.id, label: subgraph.label })),
+  ];
+}
+
+const normalizedDimension = (value: string, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(160, Math.round(parsed)) : fallback;
+};
+
 export function ContextInspector() {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
   const selection = useGraphStore((state) => state.selection);
   const updateNode = useGraphStore((state) => state.updateNode);
+  const updateSubgraph = useGraphStore((state) => state.updateSubgraph);
+  const setSubgraphCollapsed = useGraphStore((state) => state.setSubgraphCollapsed);
+  const assignNodesToSubgraph = useGraphStore((state) => state.assignNodesToSubgraph);
+  const assignNodeToSubgraph = useGraphStore((state) => state.assignNodesToSubgraph);
+  const removeNodeFromSubgraph = useGraphStore((state) => state.removeNodeFromSubgraph);
+  const dissolveSubgraph = useGraphStore((state) => state.dissolveSubgraph);
   const removeNode = useGraphStore((state) => state.removeNode);
   const duplicateSelection = useGraphStore((state) => state.duplicateSelection);
   const updateEdge = useGraphStore((state) => state.updateEdge);
@@ -43,7 +65,15 @@ export function ContextInspector() {
   const { fitView } = useReactFlow();
   const primary = selection.primary;
   const node = primary?.type === 'node' ? graph.nodes.find((item) => item.id === primary.id) : undefined;
+  const subgraph =
+    primary?.type === 'subgraph'
+      ? graph.subgraphs.find((item) => item.id === primary.id)
+      : undefined;
   const edge = primary?.type === 'edge' ? graph.edges.find((item) => item.id === primary.id) : undefined;
+  const selectedNodeIds = selection.nodeIds.filter((nodeId) =>
+    graph.nodes.some((node) => node.id === nodeId),
+  );
+  const parentOptions = subgraphParentOptions(graph.subgraphs);
 
   return (
     <section className="context-inspector" aria-label="Context inspector">
@@ -51,15 +81,136 @@ export function ContextInspector() {
         <p className="context-inspector__eyebrow">Context</p>
         <h2>Inspector</h2>
       </header>
-      {!node && !edge && (
+      {!node && !subgraph && !edge && (
         <p className="context-inspector__empty">
-          Select a node or edge to configure it. Shift-click or drag-select multiple nodes.
+          Select a node, subgraph, or edge to configure it. Shift-click or drag-select multiple nodes.
         </p>
       )}
-      {selection.nodeIds.length + selection.edgeIds.length > 1 && (
+      {selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length > 1 && (
         <p className="context-inspector__selection-summary" role="status" aria-live="polite">
-          {selection.nodeIds.length + selection.edgeIds.length} elements selected
+          {selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length} elements selected
         </p>
+      )}
+      {subgraph && (
+        <div className="context-inspector__content">
+          <section className="context-inspector__group" aria-labelledby="subgraph-details-heading">
+            <h3 id="subgraph-details-heading">Subgraph details</h3>
+            <div className="context-inspector__fields">
+              <Field label="Label">
+                <input
+                  value={subgraph.label}
+                  disabled={!editable}
+                  onChange={(event) => updateSubgraph(subgraph.id, { label: event.target.value })}
+                  className="input"
+                />
+              </Field>
+              <label className="context-inspector__toggle-label">
+                <span>Collapsed on canvas</span>
+                <input
+                  type="checkbox"
+                  checked={subgraph.collapsed}
+                  disabled={!editable}
+                  onChange={(event) => setSubgraphCollapsed(subgraph.id, event.target.checked)}
+                />
+              </label>
+              <div className="context-inspector__two-column-fields">
+                <Field label="Width">
+                  <input
+                    type="number"
+                    min="160"
+                    step="12"
+                    inputMode="numeric"
+                    value={subgraph.dimensions.width}
+                    disabled={!editable}
+                    onChange={(event) =>
+                      updateSubgraph(subgraph.id, {
+                        dimensions: {
+                          ...subgraph.dimensions,
+                          width: normalizedDimension(event.target.value, subgraph.dimensions.width),
+                        },
+                      })
+                    }
+                    className="input"
+                  />
+                </Field>
+                <Field label="Height">
+                  <input
+                    type="number"
+                    min="160"
+                    step="12"
+                    inputMode="numeric"
+                    value={subgraph.dimensions.height}
+                    disabled={!editable}
+                    onChange={(event) =>
+                      updateSubgraph(subgraph.id, {
+                        dimensions: {
+                          ...subgraph.dimensions,
+                          height: normalizedDimension(event.target.value, subgraph.dimensions.height),
+                        },
+                      })
+                    }
+                    className="input"
+                  />
+                </Field>
+              </div>
+            </div>
+          </section>
+          <section className="context-inspector__group context-inspector__group--tinted" aria-labelledby="subgraph-members-heading">
+            <div className="context-inspector__toggle-row">
+              <h3 id="subgraph-members-heading">Member nodes</h3>
+              <span className="context-inspector__member-count">{graph.nodes.filter((node) => node.parentId === subgraph.id).length}</span>
+            </div>
+            <p className="context-inspector__help">Add a Start and End node before freezing this subgraph.</p>
+            <button
+              type="button"
+              disabled={!editable || selectedNodeIds.length === 0}
+              onClick={() => assignNodesToSubgraph(subgraph.id, selectedNodeIds)}
+              className="secondary-button context-inspector__member-action"
+            >
+              Add selected nodes ({selectedNodeIds.length})
+            </button>
+            <ul className="context-inspector__member-list">
+              {graph.nodes
+                .filter((node) => node.parentId === subgraph.id)
+                .map((member) => (
+                  <li key={member.id}>
+                    <span>
+                      <strong>{member.label}</strong>
+                      <small>{member.kind}</small>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!editable}
+                      onClick={() => removeNodeFromSubgraph(member.id)}
+                      className="secondary-button"
+                    >
+                      Remove from group
+                    </button>
+                  </li>
+                ))}
+              {graph.nodes.every((node) => node.parentId !== subgraph.id) && (
+                <li className="context-inspector__member-empty">No member nodes yet.</li>
+              )}
+            </ul>
+          </section>
+          <div className="context-inspector__actions">
+            <button
+              type="button"
+              onClick={() => void fitView({ nodes: [{ id: subgraph.id }], duration: 180, padding: 1.4 })}
+              className="secondary-button"
+            >
+              Focus subgraph
+            </button>
+            <button
+              type="button"
+              disabled={!editable}
+              onClick={() => dissolveSubgraph(subgraph.id)}
+              className="danger-button"
+            >
+              Dissolve subgraph — keep child nodes and edges
+            </button>
+          </div>
+        </div>
       )}
       {node && (
         <div className="context-inspector__content">
@@ -71,6 +222,21 @@ export function ContextInspector() {
               </Field>
               <Field label="Description">
                 <textarea value={node.description ?? ''} disabled={!editable} onChange={(event) => updateNode(node.id, { description: event.target.value })} className="input min-h-16 resize-y" placeholder="What happens at this step?" />
+              </Field>
+              <Field label="Parent subgraph">
+                <InspectorSelect
+                  value={node.parentId ?? noParentSubgraphValue}
+                  options={parentOptions}
+                  disabled={!editable}
+                  onChange={(subgraphId) => {
+                    if (subgraphId === noParentSubgraphValue) {
+                      removeNodeFromSubgraph(node.id);
+                    } else {
+                      assignNodeToSubgraph(subgraphId, [node.id]);
+                    }
+                  }}
+                />
+                <p className="context-inspector__help">Choose a group or remove this node while keeping its canvas position.</p>
               </Field>
             </div>
           </section>

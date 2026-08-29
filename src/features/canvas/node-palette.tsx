@@ -1,31 +1,51 @@
 'use client';
 
 import { DragEvent, useEffect, useMemo, useState } from 'react';
-import { FlagCheckeredIcon, HandIcon, LightningIcon, PlayCircleIcon, RobotIcon, WrenchIcon } from '@phosphor-icons/react';
+import {
+  FlagCheckeredIcon,
+  HandIcon,
+  LightningIcon,
+  PlayCircleIcon,
+  RobotIcon,
+  StackIcon,
+  WrenchIcon,
+} from '@phosphor-icons/react';
 
 import { GraphProposal, NodeKind, nodeKinds, WorkflowGraph } from '@/src/domain';
 import { PanelCollapseButton } from '@/src/features/workspace/panel-collapse-control';
 
 import './node-palette.css';
 
-type PaletteItem = { kind: NodeKind; label: string; group: 'Flow' | 'Work' | 'Human' };
+export type PaletteKind = NodeKind | 'subgraph';
+export type PaletteItem = {
+  kind: PaletteKind;
+  label: string;
+  group: 'Flow' | 'Work' | 'Structure' | 'Human';
+};
 
-const palette: PaletteItem[] = [
+export const paletteItems: readonly PaletteItem[] = [
   { kind: 'start', label: 'Start', group: 'Flow' },
   { kind: 'end', label: 'End', group: 'Flow' },
+  { kind: 'subgraph', label: 'Subgraph', group: 'Structure' },
   { kind: 'agent', label: 'Agent', group: 'Work' },
   { kind: 'action', label: 'Action / function', group: 'Work' },
   { kind: 'tool', label: 'Tool', group: 'Work' },
   { kind: 'human_input', label: 'Human Input', group: 'Human' },
 ];
 
-const groups: PaletteItem['group'][] = ['Flow', 'Work', 'Human'];
+const groups: PaletteItem['group'][] = ['Flow', 'Structure', 'Work', 'Human'];
 
-function PaletteIcon({ kind }: { kind: NodeKind }) {
+export function filterPaletteItems(query: string): PaletteItem[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  return paletteItems.filter((item) => item.label.toLowerCase().includes(normalizedQuery));
+}
+
+function PaletteIcon({ kind }: { kind: PaletteKind }) {
   const props = { 'aria-hidden': true, size: 16, weight: 'duotone' as const };
   switch (kind) {
     case 'start': return <PlayCircleIcon {...props} />;
     case 'end': return <FlagCheckeredIcon {...props} />;
+    case 'subgraph': return <StackIcon {...props} />;
     case 'agent': return <RobotIcon {...props} />;
     case 'action': return <LightningIcon {...props} />;
     case 'tool': return <WrenchIcon {...props} />;
@@ -52,13 +72,15 @@ export function NodePalette({
   validationIssueCount,
   proposal,
   onAdd,
+  onLoadResearchSupervisorDemo,
   onCollapse,
 }: {
   graph: WorkflowGraph;
   disabled: boolean;
   validationIssueCount: number;
   proposal: GraphProposal | null;
-  onAdd: (kind: NodeKind) => void;
+  onAdd: (kind: PaletteKind) => void;
+  onLoadResearchSupervisorDemo: () => void;
   onCollapse: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -67,13 +89,9 @@ export function NodePalette({
     if (graph.status === 'frozen') setQuery('');
   }, [graph.status]);
 
-  const normalizedQuery = query.trim().toLowerCase();
-  const visiblePalette = useMemo(
-    () => palette.filter((item) => item.label.toLowerCase().includes(normalizedQuery)),
-    [normalizedQuery],
-  );
+  const visiblePalette = useMemo(() => filterPaletteItems(query), [query]);
 
-  const onDragStart = (event: DragEvent<HTMLButtonElement>, kind: NodeKind) => {
+  const onDragStart = (event: DragEvent<HTMLButtonElement>, kind: PaletteKind) => {
     event.dataTransfer.setData('application/graphcontract-node', kind);
     event.dataTransfer.effectAllowed = 'move';
   };
@@ -83,7 +101,7 @@ export function NodePalette({
       <div className="node-palette__header">
         <div>
           <p className="eyebrow">Node inventory</p>
-          <p className="node-palette__count">{palette.length} components</p>
+          <p className="node-palette__count">{paletteItems.length} components</p>
         </div>
         <div className="flex items-center gap-2">
           <span className={`health-dot ${proposal?.status === 'pending' || !validationIssueCount ? 'bg-emerald-500' : 'bg-amber-500'}`} />
@@ -105,7 +123,7 @@ export function NodePalette({
         <label className="sr-only" htmlFor="node-palette-search">Search components</label>
         <input id="node-palette-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search components" autoComplete="off" />
       </div>
-      <p className="sr-only" aria-live="polite" aria-atomic="true">{visiblePalette.length} of {palette.length} components shown</p>
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{visiblePalette.length} of {paletteItems.length} components shown</p>
       <div className="node-palette__groups">
         {groups.map((group) => {
           const items = visiblePalette.filter((item) => item.group === group);
@@ -115,7 +133,9 @@ export function NodePalette({
               <p className="node-palette__group-label">{group}</p>
               <div className="node-palette__rows">
                 {items.map((item) => {
-                  const singletonExists = (item.kind === 'start' || item.kind === 'end') && graph.nodes.some((node) => node.kind === item.kind);
+                  const singletonExists =
+                    (item.kind === 'start' || item.kind === 'end') &&
+                    graph.nodes.some((node) => node.kind === item.kind);
                   return (
                     <button key={item.kind} type="button" draggable={!disabled && !singletonExists} disabled={disabled || singletonExists} onDragStart={(event) => onDragStart(event, item.kind)} onClick={() => onAdd(item.kind)} className="node-palette__row">
                       <span className={`node-palette__icon node-palette__icon--${item.kind}`}><PaletteIcon kind={item.kind} /></span>
@@ -133,6 +153,18 @@ export function NodePalette({
         <p>Contract health</p>
         <strong>{getContractHealthLabel(graph, proposal, validationIssueCount)}</strong>
       </div>
+      <div className="node-palette__demo">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onLoadResearchSupervisorDemo}
+          className="node-palette__demo-button"
+        >
+          <RobotIcon aria-hidden="true" size={15} weight="duotone" />
+          Load Research Supervisor demo
+        </button>
+        <p>Replaces this canvas. Reset restores the Customer Support sample.</p>
+      </div>
       <p className="node-palette__keys">Keys: ⌘/Ctrl Z undo · D duplicate · Delete remove</p>
     </aside>
   );
@@ -141,4 +173,9 @@ export function NodePalette({
 export function readDroppedNodeKind(event: DragEvent<HTMLDivElement>): NodeKind | null {
   const kind = event.dataTransfer.getData('application/graphcontract-node') as NodeKind;
   return nodeKinds.includes(kind) ? kind : null;
+}
+
+export function readDroppedPaletteKind(event: DragEvent<HTMLDivElement>): PaletteKind | null {
+  const kind = event.dataTransfer.getData('application/graphcontract-node') as PaletteKind;
+  return kind === 'subgraph' || nodeKinds.includes(kind as NodeKind) ? kind : null;
 }

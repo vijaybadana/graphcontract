@@ -3,7 +3,10 @@
 import { OnNodeDrag, useEdgesState, useNodesState } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { CanvasFlowEdge } from '@/src/adapters/react-flow/project-graph';
+import {
+  CanvasFlowEdge,
+  isCanvasEdgeSelected,
+} from '@/src/adapters/react-flow/project-graph';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import { AlignmentGuides, CanvasPosition, snapNodeToAlignment } from './canvas-geometry';
 
@@ -25,6 +28,34 @@ const nodeProjectionKey = (node: CanvasFlowNode) =>
   JSON.stringify(node, (key, value) => (transientNodeFields.has(key) ? undefined : value));
 const edgeProjectionKey = (edge: CanvasFlowEdge) =>
   JSON.stringify(edge, (key, value) => (key === 'selected' ? undefined : value));
+
+/** A dragged container carries its children visually, but their relative graph
+ * coordinates must never be committed as a side effect of that parent drag. */
+export function positionsForCanvasCommit(
+  draggedNodes: CanvasFlowNode[],
+  positions: Record<string, CanvasPosition>,
+): Record<string, CanvasPosition> {
+  const draggedSubgraphIds = new Set(
+    draggedNodes
+      .filter((node) => node.type === 'subgraph')
+      .map((node) => node.id),
+  );
+  if (draggedSubgraphIds.size === 0) return positions;
+
+  const childIds = new Set(
+    draggedNodes
+      .filter(
+        (node) =>
+          node.type === 'contractNode' &&
+          node.parentId &&
+          draggedSubgraphIds.has(node.parentId),
+      )
+      .map((node) => node.id),
+  );
+  return Object.fromEntries(
+    Object.entries(positions).filter(([nodeId]) => !childIds.has(nodeId)),
+  );
+}
 
 function reconcileProjectedNodes(
   currentNodes: CanvasFlowNode[],
@@ -63,14 +94,20 @@ function reconcileProjectedEdges(
   let changed = currentEdges.length !== projectedEdges.length;
   const reconciled = projectedEdges.map((projectedEdge, index) => {
     const currentEdge = currentById.get(projectedEdge.id);
+    const selected = isCanvasEdgeSelected(projectedEdge, selectedEdgeIds);
     if (!currentEdge) {
       changed = true;
-      return { ...projectedEdge, selected: selectedEdgeIds.includes(projectedEdge.id) };
+      return { ...projectedEdge, selected };
     }
     if (currentEdges[index]?.id !== projectedEdge.id) changed = true;
-    if (edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge)) return currentEdge;
+    if (
+      edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge) &&
+      currentEdge.selected === selected
+    ) {
+      return currentEdge;
+    }
     changed = true;
-    return { ...projectedEdge, selected: currentEdge.selected };
+    return { ...projectedEdge, selected };
   });
   return changed ? reconciled : currentEdges;
 }
@@ -112,6 +149,15 @@ export function useCanvasInteractions({
     );
   }, [projectedEdges, setEdges]);
 
+  useEffect(() => {
+    setEdges((currentEdges) =>
+      currentEdges.map((edge) => {
+        const selected = isCanvasEdgeSelected(edge, selectedEdgeIds);
+        return edge.selected === selected ? edge : { ...edge, selected };
+      }),
+    );
+  }, [selectedEdgeIds, setEdges]);
+
   const clearRenderedSelection = useCallback(() => {
     setNodes((currentNodes) =>
       currentNodes.some((node) => node.selected)
@@ -130,6 +176,7 @@ export function useCanvasInteractions({
   }, [clearRenderedSelection, editable]);
 
   const onNodeDragStart = useCallback<OnNodeDrag<CanvasFlowNode>>((_, node, draggedNodes) => {
+    if (!editable) return;
     draggingRef.current = true;
     lastDragRef.current = {
       positions: Object.fromEntries(
@@ -140,7 +187,7 @@ export function useCanvasInteractions({
       ),
     };
     setDraggedNodeId(node.id);
-  }, []);
+  }, [editable]);
 
   const onNodeDrag = useCallback<OnNodeDrag<CanvasFlowNode>>(
     (_, node, draggedNodes) => {
@@ -177,10 +224,11 @@ export function useCanvasInteractions({
 
   const onNodeDragStop = useCallback<OnNodeDrag<CanvasFlowNode>>(
     (_, node, draggedNodes) => {
+      const dragged = draggedNodes.length > 0 ? draggedNodes : [node];
       const positions =
         lastDragRef.current?.positions ??
         Object.fromEntries(
-          (draggedNodes.length > 0 ? draggedNodes : [node]).map((draggedNode) => [
+          dragged.map((draggedNode) => [
             draggedNode.id,
             draggedNode.position,
           ]),
@@ -190,7 +238,7 @@ export function useCanvasInteractions({
       setGuides({});
       setCollisionNodeIds([]);
       setDraggedNodeId(null);
-      if (editable) onCommitPositions(positions);
+      if (editable) onCommitPositions(positionsForCanvasCommit(dragged, positions));
     },
     [editable, onCommitPositions],
   );

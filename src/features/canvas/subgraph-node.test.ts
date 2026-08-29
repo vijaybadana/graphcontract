@@ -23,6 +23,7 @@ describe('SubgraphNode', () => {
         position: { x: 0, y: 0 },
         dimensions: { width: 640, height: 360 },
         collapsed: false,
+        collapseEditable: true,
         onToggleCollapse,
       },
       selected: false,
@@ -35,6 +36,7 @@ describe('SubgraphNode', () => {
     expect(button?.props['aria-expanded']).toBe(true);
     expect(button?.props['aria-label']).toBe('Collapse subgraph Review process');
     expect(button?.props.className).toContain('nodrag');
+    expect(button?.props.disabled).toBe(false);
 
     (button?.props.onClick as (event: { stopPropagation: () => void }) => void)({ stopPropagation });
 
@@ -57,5 +59,6 @@ describe('SubgraphNode', () => {
 
     expect(button?.props['aria-expanded']).toBe(false);
     expect(button?.props['aria-label']).toBe('Expand subgraph Review process');
+    expect(button?.props.disabled).toBe(true);
   });
 });

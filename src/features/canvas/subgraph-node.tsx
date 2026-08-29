@@ -11,6 +11,8 @@ export type SubgraphNodeData = GraphSubgraph & {
    * mutation. The workspace seam supplies it when subgraph editing is wired.
    */
   onToggleCollapse?: (subgraphId: string, collapsed: boolean) => void;
+  /** Projection-only edit affordance; it never belongs to the canonical graph. */
+  collapseEditable?: boolean;
   [key: string]: unknown;
 };
 
@@ -37,6 +39,7 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
         <button
           type="button"
           className="subgraph-node-toggle nodrag nopan"
+          disabled={!data.collapseEditable}
           aria-expanded={!data.collapsed}
           aria-label={`${action} subgraph ${data.label}`}
           onClick={(event) => {

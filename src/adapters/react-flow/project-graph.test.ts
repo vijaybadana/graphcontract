@@ -4,6 +4,7 @@ import {
   canConnectCanvasEndpoints,
   canReconnectCanvasEdge,
   domainEdgeIdsForCanvasEdge,
+  isCanvasEdgeSelected,
   isSubgraphProxyEdge,
   projectGraphToCanvas,
 } from '@/src/adapters/react-flow/project-graph';
@@ -151,6 +152,8 @@ describe('projectGraphToCanvas', () => {
     expect(incoming).toBeDefined();
     expect(domainEdgeIdsForCanvasEdge(incoming!)).toEqual(['enter-review', 'enter-approve']);
     expect(canReconnectCanvasEdge(incoming!)).toBe(false);
+    expect(isCanvasEdgeSelected(incoming!, ['enter-approve'])).toBe(true);
+    expect(isCanvasEdgeSelected(incoming!, ['subgraph-proxy:start:review-group'])).toBe(false);
   });
 
   it('restores canonical edge ids and allows only visible graph-node endpoints after expansion', () => {

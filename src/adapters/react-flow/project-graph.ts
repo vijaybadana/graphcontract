@@ -38,11 +38,26 @@ const proxyEdgeId = (source: string, target: string) =>
   `subgraph-proxy:${encodeURIComponent(source)}:${encodeURIComponent(target)}`;
 
 export function domainEdgeIdsForCanvasEdge(edge: CanvasFlowEdge): string[] {
-  return [...edge.data.domainEdgeIds];
+  // React Flow permits an edge without data even when the projected edge type
+  // is more specific. Treat that as an unselectable, non-domain edge rather
+  // than letting a transient canvas edge break the editor.
+  const domainEdgeIds = edge.data?.domainEdgeIds;
+  return Array.isArray(domainEdgeIds)
+    ? domainEdgeIds.filter((edgeId): edgeId is string => typeof edgeId === 'string')
+    : [];
 }
 
 export function isSubgraphProxyEdge(edge: CanvasFlowEdge): boolean {
-  return edge.data.projection === 'subgraph-proxy';
+  return edge.data?.projection === 'subgraph-proxy';
+}
+
+/** A collapsed proxy is selected when any canonical edge it represents is selected. */
+export function isCanvasEdgeSelected(
+  edge: CanvasFlowEdge,
+  selectedDomainEdgeIds: readonly string[],
+): boolean {
+  const selected = new Set(selectedDomainEdgeIds);
+  return domainEdgeIdsForCanvasEdge(edge).some((edgeId) => selected.has(edgeId));
 }
 
 /** Only a visible canonical graph node may be used for a new domain edge. */
@@ -67,7 +82,7 @@ export function canConnectCanvasEndpoints(
 
 /** Proxies stand for several or hidden canonical edges and are never reconnectable. */
 export function canReconnectCanvasEdge(edge: CanvasFlowEdge): boolean {
-  return !isSubgraphProxyEdge(edge) && edge.data.domainEdgeIds.length === 1;
+  return !isSubgraphProxyEdge(edge) && domainEdgeIdsForCanvasEdge(edge).length === 1;
 }
 
 function edgeVisualState(
