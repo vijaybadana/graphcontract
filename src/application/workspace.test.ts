@@ -28,6 +28,81 @@ describe('workspace application service', () => {
     expect(approved.state.proposal).toBeNull();
   });
 
+  it('keeps the accepted graph immutable for an invalid multi-operation proposal', () => {
+    const initial = service.createInitial();
+    const before = structuredClone(initial.graph);
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Rename billing while adding an invalid return route.',
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'billing-missing-return',
+            source: 'billing',
+            target: 'missing-node',
+            mode: 'normal',
+          },
+        },
+      ],
+    });
+
+    expect(proposed.result?.proposal.status).toBe('invalid');
+    expect(proposed.state.graph).toEqual(before);
+
+    const approval = service.approveProposal(proposed.state);
+    expect(approval.result).toEqual({
+      ok: false,
+      error: {
+        code: 'PROPOSAL_INVALID',
+        message: 'There is no valid pending proposal to approve.',
+      },
+    });
+    expect(approval.state.graph).toEqual(before);
+  });
+
+  it('approves a canonical source-to-target return edge as derived loop topology', () => {
+    const initial = service.createInitial();
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Route billing back to classification for a corrected request.',
+      expectedGraphUpdatedAt: initial.graph.updatedAt,
+      operations: [
+        { type: 'remove_edge', edgeId: 'billing-refund' },
+        { type: 'remove_edge', edgeId: 'diagnostic-end' },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'billing-classifier-return',
+            source: 'billing',
+            target: 'classifier',
+            mode: 'normal',
+          },
+        },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'diagnostic-refund',
+            source: 'diagnostic',
+            target: 'refund',
+            mode: 'normal',
+          },
+        },
+      ],
+    });
+
+    expect(proposed.result?.proposal.status).toBe('pending');
+    expect(proposed.state.graph.edges.some((edge) => edge.id === 'billing-classifier-return')).toBe(false);
+
+    const approved = service.approveProposal(proposed.state);
+    expect(approved.result?.ok).toBe(true);
+    expect(approved.state.graph.edges).toContainEqual({
+      id: 'billing-classifier-return',
+      source: 'billing',
+      target: 'classifier',
+      mode: 'normal',
+    });
+  });
+
   it('approves a valid subgraph proposal through the human path and keeps child coordinates relative', () => {
     let timestamp = '2026-08-28T12:00:00.000Z';
     const timestampedService = createWorkspaceService({

@@ -69,11 +69,28 @@ describe('WebMCP adapter', () => {
     ]);
     const proposalSchema = registered.get('propose_graph_changes')!.inputSchema as {
       required?: string[];
-      properties?: { operations?: { items?: { oneOf?: Array<{ properties?: { type?: { const?: string }; node?: { properties?: Record<string, unknown> } } }> } } };
+      properties?: {
+        operations?: {
+          items?: {
+            oneOf?: Array<{
+              properties?: {
+                type?: { const?: string };
+                node?: { properties?: Record<string, unknown> };
+                edge?: { properties?: Record<string, unknown> };
+                patch?: { properties?: Record<string, unknown> };
+              };
+            }>;
+          };
+        };
+      };
     };
     const variants = proposalSchema.properties?.operations?.items?.oneOf ?? [];
     const operationTypes = variants.map((variant) => variant.properties?.type?.const);
     const addNode = variants.find((variant) => variant.properties?.type?.const === 'add_node');
+    const addEdge = variants.find((variant) => variant.properties?.type?.const === 'add_edge');
+    const updateEdge = variants.find((variant) => variant.properties?.type?.const === 'update_edge');
+    const edgeModes = (properties?: Record<string, unknown>) =>
+      (properties?.mode as { enum?: string[] } | undefined)?.enum;
 
     expect(proposalSchema.required).toEqual(['operations', 'rationale']);
     expect(operationTypes).toEqual(expect.arrayContaining([
@@ -84,5 +101,25 @@ describe('WebMCP adapter', () => {
       'dissolve_subgraph',
     ]));
     expect(addNode?.properties?.node?.properties).toHaveProperty('parentId');
+    expect(addEdge?.properties?.edge?.properties).toMatchObject({
+      source: { type: 'string' },
+      target: { type: 'string' },
+    });
+    expect(updateEdge?.properties?.patch?.properties).toMatchObject({
+      source: { type: 'string' },
+      target: { type: 'string' },
+    });
+    expect(edgeModes(addEdge?.properties?.edge?.properties)).toEqual([
+      'normal',
+      'conditional',
+      'command',
+      'fallback',
+    ]);
+    expect(edgeModes(updateEdge?.properties?.patch?.properties)).toEqual([
+      'normal',
+      'conditional',
+      'command',
+      'fallback',
+    ]);
   });
 });

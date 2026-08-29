@@ -181,7 +181,7 @@ const operationSchema = {
             id: { type: 'string' },
             source: { type: 'string' },
             target: { type: 'string' },
-            mode: { enum: ['normal', 'conditional', 'fallback'] },
+            mode: { type: 'string', enum: ['normal', 'conditional', 'command', 'fallback'] },
             label: { type: 'string' },
             condition: { type: 'string' },
           },
@@ -200,7 +200,7 @@ const operationSchema = {
           properties: {
             source: { type: 'string' },
             target: { type: 'string' },
-            mode: { enum: ['normal', 'conditional', 'fallback'] },
+            mode: { type: 'string', enum: ['normal', 'conditional', 'command', 'fallback'] },
             label: { type: 'string' },
             condition: { type: 'string' },
           },
@@ -255,7 +255,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only proposal. It cannot approve, reject, freeze, or directly modify the accepted graph.',
+          'Creates a review-only proposal. Operations may add or update canonical source-to-target edges as normal, conditional, command, or fallback routes; a return source/target connection forms derived loop topology and is never a loop mode. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, freeze, or directly modify the accepted graph.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],
