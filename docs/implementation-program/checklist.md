@@ -59,8 +59,8 @@
   Acceptance: The canvas never presents external or inferred behavior as a native edge; hiding the overlay preserves metadata.
   Verify: Validation/projection/scenario/export/DOM tests and browser evidence-overlay/relationship-family journey.
 
-- [ ] **9. Build the ten-template registry**
-  Spec ref: `lead-handover.md > Package 6 — ten-template library, scenario highlighting and proposal review`
+- [x] **9. Build the ten-template registry**
+  Spec ref: `docs/implementation-program/graph-library-phase.md`
   What to build: Author ten original normalized fixtures, registry metadata, compact searchable library and topology thumbnails.
   Acceptance: Every template validates, persists, exports/reloads and credits inspiration without copying source code/assets.
   Verify: Per-template validation and scenario snapshots plus browser search/load/replace/undo journey.
