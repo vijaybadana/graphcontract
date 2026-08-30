@@ -4,6 +4,7 @@ import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowsClockwise,
+  Books,
   Copy,
   FrameCorners,
   GitBranch,
@@ -26,6 +27,8 @@ type WorkspaceHeaderProps = {
   edgeCount: number;
   issueCount: number;
   proposalPending: boolean;
+  libraryOpen: boolean;
+  libraryEntryCount: number;
   paletteOpen: boolean;
   inspectorOpen: boolean;
   canUndo: boolean;
@@ -38,6 +41,7 @@ type WorkspaceHeaderProps = {
   runtimeUnavailableReason?: string;
   onTogglePalette: () => void;
   onToggleInspector: () => void;
+  onOpenLibrary: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onDuplicate: () => void;
@@ -57,6 +61,8 @@ export function WorkspaceHeader({
   edgeCount,
   issueCount,
   proposalPending,
+  libraryOpen,
+  libraryEntryCount,
   paletteOpen,
   inspectorOpen,
   canUndo,
@@ -69,6 +75,7 @@ export function WorkspaceHeader({
   runtimeUnavailableReason,
   onTogglePalette,
   onToggleInspector,
+  onOpenLibrary,
   onUndo,
   onRedo,
   onDuplicate,
@@ -113,6 +120,19 @@ export function WorkspaceHeader({
           </span>
         </div>
         <div className="workspace-command-divider workspace-panel-command-divider" />
+        <button
+          type="button"
+          className={`workspace-library-button ${libraryOpen ? 'is-active' : ''}`}
+          aria-label={`Graph library, ${libraryEntryCount} templates`}
+          aria-haspopup="dialog"
+          aria-expanded={libraryOpen}
+          onClick={onOpenLibrary}
+        >
+          <Books aria-hidden="true" size={15} weight="duotone" />
+          <span>Graph library</span>
+          <strong aria-hidden="true">{libraryEntryCount}</strong>
+        </button>
+        <div className="workspace-command-divider workspace-library-command-divider" />
         <div className="workspace-command-group workspace-panel-command-group" role="group" aria-label="Panel controls">
           <HeaderIconButton label={paletteOpen ? 'Hide inventory' : 'Show inventory'} icon={SidebarSimple} active={paletteOpen} onClick={onTogglePalette} />
           <HeaderIconButton label={inspectorOpen ? 'Hide inspector' : 'Show inspector'} icon={SidebarSimple} active={inspectorOpen} mirrored onClick={onToggleInspector} />

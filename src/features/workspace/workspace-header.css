@@ -167,6 +167,42 @@
 .workspace-view-button.is-active { background: #17211c; color: #fff; }
 .workspace-view-button:disabled { cursor: not-allowed; opacity: .42; }
 
+.workspace-library-button {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgb(17 24 39 / 10%);
+  border-radius: 9px;
+  background: #f8f9f7;
+  padding: 0 7px;
+  color: rgb(17 24 39 / 72%);
+  font-size: 9px;
+  font-weight: 760;
+  white-space: nowrap;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.workspace-library-button strong {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(23 33 28 / 8%);
+  font-size: 8px;
+}
+
+.workspace-library-button:hover,
+.workspace-library-button.is-active {
+  border-color: #17211c;
+  background: #17211c;
+  color: white;
+}
+
+.workspace-library-button.is-active strong,
+.workspace-library-button:hover strong { background: rgb(255 255 255 / 16%); }
+
 .workspace-icon-button {
   display: grid;
   width: 34px;
@@ -297,6 +333,8 @@
     grid-template-columns: auto minmax(90px, 1fr);
   }
 
+  .workspace-library-button span { display: none; }
+
   .workspace-contract-state {
     grid-column: 2;
     justify-self: start;
@@ -319,6 +357,8 @@
   }
 
   .workspace-view-command-divider { display: none; }
+
+  .workspace-library-command-divider { display: none; }
 
   .workspace-command-island {
     min-width: 0;
@@ -353,6 +393,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .workspace-icon-button,
+  .workspace-library-button,
   .workspace-freeze-button {
     transition: none;
   }

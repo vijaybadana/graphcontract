@@ -8,6 +8,7 @@ import { WorkspaceHeader } from './workspace-header';
 const callbacks = {
   onTogglePalette() {},
   onToggleInspector() {},
+  onOpenLibrary() {},
   onUndo() {},
   onRedo() {},
   onDuplicate() {},
@@ -22,6 +23,40 @@ const callbacks = {
 afterEach(() => cleanup());
 
 describe('WorkspaceHeader freeze control', () => {
+  it('exposes the ten-entry Graph Library as a top-level dialog control', () => {
+    const onOpenLibrary = vi.fn();
+    render(
+      <WorkspaceHeader
+        graphName="Support workflow"
+        graphStatus="draft"
+        webMcpStatus="connected"
+        nodeCount={7}
+        edgeCount={6}
+        issueCount={0}
+        proposalPending={false}
+        libraryOpen={false}
+        libraryEntryCount={10}
+        paletteOpen
+        inspectorOpen={false}
+        canUndo={false}
+        canRedo={false}
+        canDuplicate={false}
+        canDelete={false}
+        canFreeze
+        viewMode="design"
+        runtimeAvailable={false}
+        {...callbacks}
+        onOpenLibrary={onOpenLibrary}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Graph library, 10 templates' });
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(button);
+    expect(onOpenLibrary).toHaveBeenCalledOnce();
+  });
+
   it('exposes Design and Runtime as an accessible projection switch with a truthful unavailable state', () => {
     const onViewModeChange = vi.fn();
     render(
@@ -33,6 +68,8 @@ describe('WorkspaceHeader freeze control', () => {
         edgeCount={5}
         issueCount={0}
         proposalPending={false}
+        libraryOpen={false}
+        libraryEntryCount={10}
         paletteOpen
         inspectorOpen
         canUndo={false}
@@ -63,6 +100,8 @@ describe('WorkspaceHeader freeze control', () => {
         edgeCount={5}
         issueCount={0}
         proposalPending={false}
+        libraryOpen={false}
+        libraryEntryCount={10}
         paletteOpen
         inspectorOpen
         canUndo={false}
@@ -90,6 +129,8 @@ describe('WorkspaceHeader freeze control', () => {
       edgeCount: 8,
       issueCount: 0,
       proposalPending: false,
+      libraryOpen: false,
+      libraryEntryCount: 10,
       paletteOpen: true,
       inspectorOpen: true,
       canUndo: false,
@@ -121,6 +162,8 @@ describe('WorkspaceHeader freeze control', () => {
       nodeCount: 8,
       edgeCount: 8,
       issueCount: 0,
+      libraryOpen: false,
+      libraryEntryCount: 10,
       paletteOpen: true,
       inspectorOpen: true,
       canUndo: false,

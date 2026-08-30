@@ -27,6 +27,7 @@ import {
 } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
 import { evaluateConnection } from '@/src/application/connection-policy';
+import { GRAPH_LIBRARY_ENTRY_COUNT } from '@/src/application/graph-library-contract';
 import { NodeKind, validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
@@ -138,6 +139,7 @@ export function GraphWorkspace() {
   const [viewMode, setViewMode] = useState<'design' | 'runtime'>('design');
   const [runtimeSelection, setRuntimeSelection] = useState<RuntimeInstanceNodeData | null>(null);
   const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
@@ -580,6 +582,8 @@ export function GraphWorkspace() {
           edgeCount={graph.edges.length}
           issueCount={validationIssues.length}
           proposalPending={Boolean(proposal)}
+          libraryOpen={libraryOpen}
+          libraryEntryCount={GRAPH_LIBRARY_ENTRY_COUNT}
           paletteOpen={paletteVisible}
           inspectorOpen={inspectorVisible}
           canUndo={canvasEditable && past.length > 0}
@@ -592,6 +596,7 @@ export function GraphWorkspace() {
           runtimeUnavailableReason={runtimeUnavailableReason}
           onTogglePalette={togglePalette}
           onToggleInspector={toggleInspector}
+          onOpenLibrary={() => setLibraryOpen(true)}
           onUndo={undo}
           onRedo={redo}
           onDuplicate={duplicateSelection}
