@@ -25,10 +25,13 @@ describe('contract health presentation', () => {
     );
   });
 
-  it('keeps Subgraph in the searchable inventory and accepts it on canvas drop', () => {
-    expect(paletteItems).toHaveLength(8);
+  it('keeps Subgraph and Merge in the searchable inventory and accepts presets on canvas drop', () => {
+    expect(paletteItems).toHaveLength(9);
     expect(filterPaletteItems('subgraph')).toEqual([
       expect.objectContaining({ kind: 'subgraph', group: 'Structure' }),
+    ]);
+    expect(filterPaletteItems('merge')).toEqual([
+      expect.objectContaining({ kind: 'merge', group: 'Flow' }),
     ]);
     expect(
       readDroppedPaletteKind({
