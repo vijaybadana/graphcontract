@@ -1,0 +1,45 @@
+.merge-node-shell {
+  position: relative;
+  width: 13.75rem;
+  min-height: 8.375rem;
+  overflow: visible;
+  border: 1px solid #64748b;
+  border-radius: .875rem;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 10%);
+  color: #182333;
+  transition: border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.merge-node-shell::before {
+  position: absolute;
+  top: .62rem;
+  right: .62rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  transform: rotate(45deg);
+  border: 2px solid #526477;
+  border-radius: .18rem;
+  background: #eaf0f5;
+  content: '';
+}
+
+.merge-node-shell:hover { border-color: #334155; box-shadow: 0 0 0 2px rgb(71 85 105 / 14%), 0 8px 18px rgb(15 23 42 / 16%); }
+.merge-node-shell.is-selected { border-color: #2563eb; box-shadow: 0 0 0 3px rgb(37 99 235 / 30%), 0 8px 18px rgb(15 23 42 / 16%); }
+.merge-node-shell.is-invalid { border-color: #dc2626; box-shadow: 0 0 0 2px rgb(220 38 38 / 20%), 0 3px 12px rgb(15 23 42 / 10%); }
+.merge-node-shell.is-frozen { filter: saturate(.42); }
+.merge-node-shell.is-proposed-added { border-style: solid; }
+.merge-node-shell.is-proposed-updated { border-style: double; }
+.merge-node-shell.is-proposed-removed { border-style: dashed; opacity: .62; text-decoration: line-through; }
+
+.merge-node-heading { display: flex; align-items: flex-start; gap: .625rem; padding: .75rem .75rem .55rem; }
+.merge-node-icon { display: grid; width: 1.875rem; height: 1.875rem; place-items: center; border-radius: .5rem; background: #eef3f7; color: #44566a; }
+.merge-node-kind { display: block; color: #526477; font-size: .5625rem; font-weight: 800; letter-spacing: .12em; line-height: 1.1; text-transform: uppercase; }
+.merge-node-title { display: -webkit-box; max-width: 9rem; margin-top: .25rem; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: .8125rem; line-height: 1.2; }
+.merge-node-details { display: grid; gap: .32rem; margin: 0 .75rem; border-top: 1px solid #e2e8f0; padding: .58rem 0; color: #526477; font-size: .61rem; font-weight: 650; }
+.merge-node-detail { display: flex; align-items: center; gap: .3rem; }
+.merge-node-state { overflow: hidden; color: #334155; font-size: .58rem; text-overflow: ellipsis; white-space: nowrap; }
+.merge-node-statuses { display: flex; min-height: 1.85rem; align-items: center; justify-content: space-between; gap: .3rem; border-top: 1px solid #e2e8f0; padding: .44rem .75rem; color: #475569; font-size: .52rem; font-weight: 800; letter-spacing: .035em; text-transform: uppercase; }
+.merge-node-handle { width: .6875rem !important; height: .6875rem !important; border: 2px solid #fff !important; background: #526477 !important; }
+
+@media (prefers-reduced-motion: reduce) { .merge-node-shell { transition: none; } }

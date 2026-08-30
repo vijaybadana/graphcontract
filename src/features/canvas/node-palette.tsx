@@ -2,6 +2,7 @@
 
 import { DragEvent, useMemo, useState } from 'react';
 import {
+  ArrowsInIcon,
   FlagCheckeredIcon,
   HandIcon,
   LightningIcon,
@@ -30,6 +31,7 @@ export type PaletteItem = {
 
 export const paletteItems: readonly PaletteItem[] = [
   { kind: 'start', label: 'Start', group: 'Flow' },
+  { kind: 'merge', label: 'Merge', group: 'Flow' },
   { kind: 'end', label: 'End', group: 'Flow' },
   { kind: 'subgraph', label: 'Subgraph', group: 'Structure' },
   { kind: 'step', label: 'Step', group: 'Work' },
@@ -70,6 +72,7 @@ function PaletteIcon({ kind }: { kind: PaletteKind }) {
   const props = { 'aria-hidden': true, size: 16, weight: 'duotone' as const };
   switch (kind) {
     case 'start': return <PlayCircleIcon {...props} />;
+    case 'merge': return <ArrowsInIcon {...props} />;
     case 'end': return <FlagCheckeredIcon {...props} />;
     case 'subgraph': return <StackIcon {...props} />;
     case 'step': return <LightningIcon {...props} />;
@@ -96,12 +99,14 @@ export function getContractHealthLabel(
 type NodePaletteProps = {
   graph: WorkflowGraph;
   disabled: boolean;
+  readOnlyReason?: string;
   validationIssueCount: number;
   proposal: GraphProposal | null;
   onAdd: (kind: PaletteKind) => void;
   onLoadResearchSupervisorDemo: () => void;
   onLoadResearchIntakeRoutingDemo: () => void;
   onLoadHumanControlHitlDemo: () => void;
+  onLoadDynamicParallelismDemo: () => void;
   onCollapse: () => void;
 };
 
@@ -114,12 +119,14 @@ export function NodePalette(props: NodePaletteProps) {
 function NodePaletteContents({
   graph,
   disabled,
+  readOnlyReason,
   validationIssueCount,
   proposal,
   onAdd,
   onLoadResearchSupervisorDemo,
   onLoadResearchIntakeRoutingDemo,
   onLoadHumanControlHitlDemo,
+  onLoadDynamicParallelismDemo,
   onCollapse,
 }: NodePaletteProps) {
   const [query, setQuery] = useState('');
@@ -161,6 +168,16 @@ function NodePaletteContents({
     }
   };
 
+  const loadDynamicParallelismDemo = () => {
+    if (
+      window.confirm(
+        'Replace the current canvas with the Parallel research Send ×N demo? This replaces the current workflow; one Undo restores it.',
+      )
+    ) {
+      onLoadDynamicParallelismDemo();
+    }
+  };
+
   return (
     <aside className="workspace-panel node-palette absolute left-3 top-3 z-30 max-h-[calc(100%-1.5rem)] w-[232px] overflow-y-auto p-3">
       <div className="node-palette__header">
@@ -178,11 +195,11 @@ function NodePaletteContents({
         </div>
       </div>
       <p className="node-palette__hint">
-        {proposal
+        {readOnlyReason ?? (proposal
           ? 'Palette locked while a proposal awaits review. Approve or reject it to continue editing.'
           : graph.status === 'frozen'
             ? 'Palette locked while the contract is frozen.'
-            : 'Drag onto the canvas or click to add.'}
+            : 'Drag onto the canvas or click to add.')}
       </p>
       <div className="node-palette__search">
         <label className="sr-only" htmlFor="node-palette-search">Search components</label>
@@ -217,6 +234,16 @@ function NodePaletteContents({
         <strong>{getContractHealthLabel(graph, proposal, validationIssueCount)}</strong>
       </div>
       <div className="node-palette__demo">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={loadDynamicParallelismDemo}
+          className="node-palette__demo-button"
+        >
+          <ArrowsInIcon aria-hidden="true" size={15} weight="duotone" />
+          Load Parallel research · Send ×N
+        </button>
+        <p>Includes one worker template, a Merge reducer, and a validated read-only runtime fixture.</p>
         <button
           type="button"
           disabled={disabled}

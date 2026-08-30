@@ -43,12 +43,29 @@ beforeEach(() => {
     future: [],
     notice: null,
     fitViewRevision: 0,
+    runtimeProjectionFixture: null,
   });
 });
 
 afterEach(() => cleanup());
 
 describe('GraphWorkspace subgraph creation', () => {
+  it('shows validated observed workers only in Runtime view without mutating the accepted graph', async () => {
+    useGraphStore.getState().loadDynamicParallelismDemo();
+    const acceptedBefore = structuredClone(useGraphStore.getState().graph);
+    renderWorkspace(false);
+
+    const runtime = await screen.findByRole('radio', { name: 'Runtime' });
+    expect((runtime as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(runtime);
+
+    expect(await screen.findByText(/Runtime projection · observed instances are read-only/)).toBeTruthy();
+    const instance = await screen.findByText('Search evidence · query 1');
+    fireEvent.click(instance);
+    expect(await screen.findByText(/Observed trace projection — read-only/)).toBeTruthy();
+    expect(useGraphStore.getState().graph).toEqual(acceptedBefore);
+  }, 30_000);
+
   it('opens Edit & review while keeping the desktop palette open after palette click creation', async () => {
     renderWorkspace(false);
 

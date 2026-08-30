@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createProposal, researchIntakeRoutingGraph, sampleGraph } from '@/src/domain';
+import { dynamicParallelismDemoGraph } from '@/src/application/package-three-demo';
 import { useGraphStore } from '@/src/state/workspace-store';
 import { ContextInspector } from './context-inspector';
 
@@ -60,6 +61,56 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ContextInspector routing details', () => {
+  it('keeps Send configuration and Merge reducer controls separate from Step controls', () => {
+    useGraphStore.setState({ graph: structuredClone(dynamicParallelismDemoGraph) });
+    selectNode('merge-evidence');
+    renderInspector();
+
+    expect(screen.getByText('Merge reducer')).toBeTruthy();
+    expect(screen.queryByText('Executor')).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Merge reducer name' }), {
+      target: { value: 'append evidence' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Merge completion policy' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Quorum' }));
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'merge-evidence')).toMatchObject({
+      kind: 'merge',
+      merge: { reducer: { name: 'append evidence' }, completion: { mode: 'quorum', quorum: 1 } },
+    });
+
+    cleanup();
+    selectEdge('parallel-send-search');
+    renderInspector();
+    expect(screen.getByText('Send ×N · dynamic worker template')).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Send payload label' }), {
+      target: { value: 'research query' },
+    });
+    expect(useGraphStore.getState().graph.edges.find((edge) => edge.id === 'parallel-send-search')).toMatchObject({
+      mode: 'send',
+      send: { destinationTemplateId: 'search-evidence', payloadLabel: 'research query' },
+    });
+  });
+
+  it('renders a selected runtime instance as a read-only projection surface', () => {
+    render(
+      <ReactFlowProvider>
+        <ContextInspector
+          readOnly
+          runtimeInstance={{
+            runtimeId: 'worker-1',
+            sendEdgeId: 'parallel-send-search',
+            templateNodeId: 'search-evidence',
+            label: 'Search evidence · query 1',
+            ordinal: 1,
+          }}
+        />
+      </ReactFlowProvider>,
+    );
+
+    expect(screen.getByText('Observed runtime instance')).toBeTruthy();
+    expect(screen.getByText(/not part of the accepted graph/)).toBeTruthy();
+  });
+
   it('edits the v3 HITL response contract and sensitive policy independently', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     selectNode('classifier');

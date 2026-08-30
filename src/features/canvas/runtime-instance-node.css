@@ -1,0 +1,20 @@
+.runtime-instance-node {
+  display: flex;
+  width: 11.7rem;
+  min-height: 3.65rem;
+  align-items: center;
+  gap: .5rem;
+  border: 1px dashed #5b6fcf;
+  border-radius: .7rem;
+  background: rgb(247 248 255 / 96%);
+  box-shadow: 0 2px 8px rgb(51 70 200 / 10%);
+  padding: .55rem .62rem;
+  color: #263270;
+}
+.runtime-instance-node.is-selected { border-color: #2563eb; box-shadow: 0 0 0 3px rgb(37 99 235 / 25%), 0 2px 8px rgb(51 70 200 / 10%); }
+.runtime-instance-node__icon { display: grid; width: 1.65rem; height: 1.65rem; place-items: center; border-radius: .45rem; background: #e7ebff; }
+.runtime-instance-node__copy { display: grid; min-width: 0; gap: .13rem; }
+.runtime-instance-node__eyebrow { color: #5364b7; font-size: .5rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.runtime-instance-node strong { overflow: hidden; font-size: .67rem; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-instance-node__read-only { margin-left: auto; flex: 0 0 auto; color: #52606d; }
+.runtime-instance-node__handle { width: .58rem !important; height: .58rem !important; border: 2px solid #fff !important; background: #5969c8 !important; pointer-events: none; }

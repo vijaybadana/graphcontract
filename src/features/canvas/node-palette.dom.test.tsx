@@ -21,11 +21,13 @@ describe('NodePalette Step presets', () => {
         onLoadResearchSupervisorDemo={vi.fn()}
         onLoadResearchIntakeRoutingDemo={vi.fn()}
         onLoadHumanControlHitlDemo={vi.fn()}
+        onLoadDynamicParallelismDemo={vi.fn()}
         onCollapse={vi.fn()}
       />,
     );
 
     expect(screen.getByRole('button', { name: 'Step' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Merge' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Agent' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Action' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Tool' })).toBeTruthy();

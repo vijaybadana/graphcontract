@@ -53,5 +53,6 @@
 .context-inspector__validation--invalid strong { display: block; }
 .context-inspector__validation--invalid ul { display: grid; gap: 3px; margin: 4px 0 0; padding-left: 16px; }
 .context-inspector__read-only { margin: 10px 0 0; border: 1px solid #c7d4ea; border-radius: 8px; background: #f3f7ff; color: #315792; padding: 8px 9px; font-size: 10px; font-weight: 700; line-height: 1.45; }
+.context-inspector__read-only-value { margin: 0; overflow-wrap: anywhere; color: #475569; font-size: .74rem; line-height: 1.35; }
 
 @media (max-width: 360px) { .context-inspector__two-column-fields { grid-template-columns: 1fr; } }

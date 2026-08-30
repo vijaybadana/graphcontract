@@ -147,6 +147,26 @@
   gap: 3px;
 }
 
+.workspace-view-command-group {
+  gap: 2px;
+  border: 1px solid rgb(17 24 39 / 10%);
+  border-radius: 8px;
+  background: #f6f7f5;
+  padding: 2px;
+}
+
+.workspace-view-button {
+  min-height: 28px;
+  border-radius: 6px;
+  padding: 0 7px;
+  color: rgb(17 24 39 / 68%);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.workspace-view-button.is-active { background: #17211c; color: #fff; }
+.workspace-view-button:disabled { cursor: not-allowed; opacity: .42; }
+
 .workspace-icon-button {
   display: grid;
   width: 34px;
@@ -297,6 +317,8 @@
   .workspace-webmcp {
     display: none;
   }
+
+  .workspace-view-command-divider { display: none; }
 
   .workspace-command-island {
     min-width: 0;

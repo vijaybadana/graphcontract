@@ -222,6 +222,7 @@ describe('SubgraphNode in React Flow', () => {
     const onLoadResearchSupervisorDemo = vi.fn();
     const onLoadResearchIntakeRoutingDemo = vi.fn();
     const onLoadHumanControlHitlDemo = vi.fn();
+    const onLoadDynamicParallelismDemo = vi.fn();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(
       <NodePalette
@@ -233,6 +234,7 @@ describe('SubgraphNode in React Flow', () => {
         onLoadResearchSupervisorDemo={onLoadResearchSupervisorDemo}
         onLoadResearchIntakeRoutingDemo={onLoadResearchIntakeRoutingDemo}
         onLoadHumanControlHitlDemo={onLoadHumanControlHitlDemo}
+        onLoadDynamicParallelismDemo={onLoadDynamicParallelismDemo}
         onCollapse={vi.fn()}
       />,
     );
@@ -248,6 +250,7 @@ describe('SubgraphNode in React Flow', () => {
     expect(onLoadResearchIntakeRoutingDemo).toHaveBeenCalledOnce();
     expect(onLoadResearchSupervisorDemo).not.toHaveBeenCalled();
     expect(onLoadHumanControlHitlDemo).not.toHaveBeenCalled();
+    expect(onLoadDynamicParallelismDemo).not.toHaveBeenCalled();
   });
 
   it('prepares native Blob download links and releases their URLs after unmount', () => {

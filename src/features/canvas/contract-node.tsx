@@ -3,6 +3,7 @@
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import {
   ArrowsClockwiseIcon,
+  ArrowsInIcon,
   CubeIcon,
   DatabaseIcon,
   FlagCheckeredIcon,
@@ -66,6 +67,12 @@ export type ContractNodeData = GraphNode & {
   frozen?: boolean;
   /** Projection-only warning for a node visually inside, but not assigned to, a subgraph. */
   outsideSubgraph?: boolean;
+  /** A canonical Step is the single design-time worker template for Send/map. */
+  sendTemplate?: {
+    edgeId: string;
+    payloadLabel: string;
+    mergeNodeId: string;
+  };
   /**
    * The projection publishes an inspector target without owning navigation or
    * mutation. Package 1 integration can attach the corresponding focus path.
@@ -81,6 +88,7 @@ export type ContractFlowNode = Node<ContractNodeData, 'contractNode'>;
 const kindLabel: Record<GraphNode['kind'], string> = {
   start: 'Start',
   step: 'Step',
+  merge: 'Merge',
   end: 'End',
 };
 
@@ -218,6 +226,7 @@ function NodeKindIcon({ node }: { node: GraphNode }) {
   const iconProps = { 'aria-hidden': true, size: 18, weight: 'bold' as const };
   if (node.kind === 'start') return <PlayCircleIcon {...iconProps} />;
   if (node.kind === 'end') return <FlagCheckeredIcon {...iconProps} />;
+  if (node.kind === 'merge') return <ArrowsInIcon {...iconProps} />;
 
   switch (node.executor) {
     case 'ai': return <RobotIcon {...iconProps} />;
@@ -371,6 +380,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
   const rendersTargetHandle = data.kind !== 'start' || Boolean(data.parentId);
   const rendersSourceHandle = data.kind !== 'end' || Boolean(data.parentId);
   const modifierData = data.kind === 'step' ? data : null;
+  const sendTemplate = modifierData ? data.sendTemplate : undefined;
 
   return (
     <div
@@ -378,7 +388,8 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
       data-executor={modifierData?.executor}
       data-invalid={invalid || undefined}
       data-frozen={frozen || undefined}
-      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${frozen ? 'is-frozen' : ''} ${proposalClass}`}
+      data-send-template={sendTemplate ? 'true' : undefined}
+      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${frozen ? 'is-frozen' : ''} ${proposalClass} ${sendTemplate ? 'is-send-template' : ''}`}
     >
       {modifierData && <HitlTimingMarker data={modifierData} />}
       {rendersTargetHandle && (
@@ -398,6 +409,14 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
       <div className="contract-node-meta" aria-label="Node status and modifiers">
         {modifierData ? <StepModifierRail data={modifierData} /> : <span />}
         <div className="contract-node-statuses">
+          {sendTemplate && (
+            <span
+              className="contract-node-template-status"
+              title={`Dynamic worker template; payload ${sendTemplate.payloadLabel || 'not labelled'}`}
+            >
+              Template ×N
+            </span>
+          )}
           {invalid && (
             <span className="contract-node-status contract-node-status--invalid">
               <WarningCircleIcon aria-hidden="true" size={12} weight="bold" />

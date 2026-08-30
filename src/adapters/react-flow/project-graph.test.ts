@@ -18,6 +18,10 @@ import {
   validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
+import {
+  dynamicParallelismDemoGraph,
+  runtimeFixtureForLoadedDynamicParallelismDemo,
+} from '@/src/application/package-three-demo';
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
@@ -77,6 +81,43 @@ function graphWithTwoSubgraphs(): WorkflowGraph {
 }
 
 describe('projectGraphToCanvas', () => {
+  it('keeps one design template and projects validated runtime instances without moving the Merge', () => {
+    const fixture = runtimeFixtureForLoadedDynamicParallelismDemo(dynamicParallelismDemoGraph)!;
+    const design = projectGraphToCanvas(dynamicParallelismDemoGraph, null);
+    const template = design.nodes.find((node) => node.id === 'search-evidence')!;
+    const merge = design.nodes.find((node) => node.id === 'merge-evidence')!;
+
+    expect(template).toMatchObject({
+      type: 'contractNode',
+      data: { sendTemplate: { edgeId: 'parallel-send-search', payloadLabel: 'query' } },
+    });
+    expect(merge.type).toBe('mergeJunction');
+    expect(design.edges.find((edge) => edge.id === 'parallel-send-search')?.label).toBe('Send ×N');
+
+    const runtime = projectGraphToCanvas(dynamicParallelismDemoGraph, null, {
+      mode: 'runtime',
+      runtimeFixture: fixture,
+    });
+    const runtimeNodes = runtime.nodes.filter((node) => node.type === 'runtimeInstance');
+    const runtimeMerge = runtime.nodes.find((node) => node.id === 'merge-evidence')!;
+    const runtimeTemplate = runtime.nodes.find((node) => node.id === 'search-evidence')!;
+
+    expect(runtimeTemplate.hidden).toBe(true);
+    expect(runtimeNodes).toHaveLength(3);
+    expect(runtimeNodes.every((node) => !node.draggable && !node.connectable && !node.deletable)).toBe(true);
+    expect(runtime.edges.filter((edge) => edge.data.projection === 'runtime-instance')).toHaveLength(6);
+    expect(runtime.edges.filter((edge) => edge.data.projection === 'runtime-instance').every(
+      (edge) => edge.data.domainEdgeIds.length === 0,
+    )).toBe(true);
+    expect(runtime.edges.find((edge) => edge.id === 'parallel-send-search')).toBeUndefined();
+    expect(runtimeNodes.every((node) => node.position.x + 188 < runtimeMerge.position.x)).toBe(true);
+
+    const revised = { ...dynamicParallelismDemoGraph, updatedAt: '2026-08-31T00:00:00.000Z' };
+    expect(projectGraphToCanvas(revised, null, { mode: 'runtime', runtimeFixture: fixture }).nodes.some(
+      (node) => node.type === 'runtimeInstance',
+    )).toBe(false);
+  });
+
   it('projects routing semantics into reusable edge presentation without storing loop mode', () => {
     const graph = structuredClone(researchIntakeRoutingGraph);
     const canvas = projectGraphToCanvas(graph, null);

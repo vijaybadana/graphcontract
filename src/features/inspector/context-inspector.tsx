@@ -21,6 +21,7 @@ import {
   HitlResponseContract,
   HumanSelectionChoice,
   SensitiveEffectPolicy,
+  SendMapConfig,
   StepExecutor,
   StepModifierSummary,
   ValidationIssue,
@@ -30,6 +31,7 @@ import {
 import { topologyDerivedLoopEdgeIds } from '@/src/adapters/react-flow/project-graph';
 import { evaluateConnection } from '@/src/application/connection-policy';
 import type { StepModifierInspectorSection } from '@/src/features/canvas/contract-node';
+import type { RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
 import {
   InspectorSelect,
   InspectorSelectOption,
@@ -67,6 +69,16 @@ const edgeModeOptions: readonly InspectorSelectOption<GraphEdge['mode']>[] = [
   { value: 'conditional', label: 'Conditional edge' },
   { value: 'command', label: 'Command' },
   { value: 'fallback', label: 'Fallback' },
+  { value: 'send', label: 'Send/map · dynamic workers' },
+];
+const mergeCompletionOptions: readonly InspectorSelectOption<'all' | 'any' | 'quorum'>[] = [
+  { value: 'all', label: 'All dynamic inputs' },
+  { value: 'any', label: 'Any input' },
+  { value: 'quorum', label: 'Quorum' },
+];
+const mergeContinuationOptions: readonly InspectorSelectOption<'once' | 'per_batch'>[] = [
+  { value: 'once', label: 'Continue once' },
+  { value: 'per_batch', label: 'Continue per batch' },
 ];
 
 const noParentSubgraphValue = '__no_subgraph__';
@@ -190,7 +202,47 @@ function edgeDestinationOptions(
     : [{ value: edge.target, label: `Missing target · ${edge.target}` }, ...destinations];
 }
 
-export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFocusRequest | null }) {
+function sendDestinationOptions(
+  graph: WorkflowGraph,
+  edge: GraphEdge,
+): readonly InspectorSelectOption<string>[] {
+  const source = graph.nodes.find((node) => node.id === edge.source);
+  const destinations = graph.nodes
+    .filter(
+      (node) =>
+        node.kind === 'step' &&
+        node.parentId === source?.parentId,
+    )
+    .map((node) => ({ value: node.id, label: `${node.label} · worker template` }));
+  return destinations.some((destination) => destination.value === edge.target)
+    ? destinations
+    : [{ value: edge.target, label: `Invalid template · ${edge.target}` }, ...destinations];
+}
+
+function defaultSendConfig(graph: WorkflowGraph, edge: GraphEdge, target: string): SendMapConfig {
+  const source = graph.nodes.find((node) => node.id === edge.source);
+  const merge = graph.nodes.find(
+    (node) => node.kind === 'merge' && node.parentId === source?.parentId,
+  );
+  return {
+    destinationTemplateId: target,
+    multiplicity: 'dynamic',
+    payloadLabel: 'payload',
+    mergeNodeId: merge?.id ?? '',
+  };
+}
+
+export type RuntimeInstanceInspectorSelection = RuntimeInstanceNodeData;
+
+export function ContextInspector({
+  focusRequest,
+  runtimeInstance,
+  readOnly = false,
+}: {
+  focusRequest?: InspectorFocusRequest | null;
+  runtimeInstance?: RuntimeInstanceInspectorSelection | null;
+  readOnly?: boolean;
+}) {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
   const selection = useGraphStore((state) => state.selection);
@@ -207,7 +259,7 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
   const removeEdge = useGraphStore((state) => state.removeEdge);
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
   const previewTriggerRef = useRef<HTMLButtonElement>(null);
-  const editable = graph.status === 'draft' && !proposal;
+  const editable = graph.status === 'draft' && !proposal && !readOnly;
   const { fitView } = useReactFlow();
   const primary = selection.primary;
   const node = primary?.type === 'node' ? graph.nodes.find((item) => item.id === primary.id) : undefined;
@@ -230,6 +282,7 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
   const edgeIsLoop = edge ? topologyDerivedLoopEdgeIds(edgeGraph).has(edge.id) : false;
   const edgePreviewState = edge ? edgeProposalState(proposal, edge.id) : undefined;
   const edgeDestinations = edge ? edgeDestinationOptions(edgeGraph, edge) : [];
+  const sendDestinations = edge ? sendDestinationOptions(edgeGraph, edge) : [];
   const selectedNodeIds = selection.nodeIds.filter((nodeId) =>
     graph.nodes.some((node) => node.id === nodeId),
   );
@@ -305,7 +358,7 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
         <p className="context-inspector__eyebrow">Context</p>
         <h2>Inspector</h2>
       </header>
-      {!node && !subgraph && !edge && (
+      {!runtimeInstance && !node && !subgraph && !edge && (
         <p className="context-inspector__empty">
           Select a node, subgraph, or edge to configure it. Shift-click or drag-select multiple nodes.
         </p>
@@ -314,6 +367,22 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
         <p className="context-inspector__selection-summary" role="status" aria-live="polite">
           {selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length} elements selected
         </p>
+      )}
+      {runtimeInstance && (
+        <div className="context-inspector__content">
+          <section className="context-inspector__group context-inspector__group--tinted" aria-labelledby="runtime-instance-heading">
+            <h3 id="runtime-instance-heading">Observed runtime instance</h3>
+            <div className="context-inspector__fields">
+              <Field label="Instance"><p className="context-inspector__read-only-value">{runtimeInstance.label}</p></Field>
+              <Field label="Runtime ID"><p className="context-inspector__read-only-value">{runtimeInstance.runtimeId}</p></Field>
+              <Field label="Template"><p className="context-inspector__read-only-value">{runtimeInstance.templateNodeId}</p></Field>
+              <Field label="Send relationship"><p className="context-inspector__read-only-value">{runtimeInstance.sendEdgeId}</p></Field>
+            </div>
+            <p className="context-inspector__read-only" role="status">
+              Observed trace projection — read-only. This instance is not part of the accepted graph and cannot change the contract.
+            </p>
+          </section>
+        </div>
       )}
       {subgraph && (
         <div className="context-inspector__content">
@@ -752,6 +821,86 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
             </section>
             </>
           )}
+          {node.kind === 'merge' && (
+            <section className="context-inspector__group context-inspector__group--tinted" aria-labelledby="merge-configuration-heading">
+              <h3 id="merge-configuration-heading">Merge reducer</h3>
+              <p className="context-inspector__help">Merge waits for dynamic Send inputs. It is a structural junction, not a work Step.</p>
+              <div className="context-inspector__fields">
+                <Field label="Reducer name">
+                  <input
+                    aria-label="Merge reducer name"
+                    value={node.merge.reducer.name}
+                    disabled={!editable}
+                    onChange={(event) => updateNode(node.id, {
+                      merge: { ...node.merge, reducer: { ...node.merge.reducer, name: event.target.value } },
+                    })}
+                    className="input"
+                  />
+                </Field>
+                <Field label="Aggregate state">
+                  <input
+                    aria-label="Merge aggregate state"
+                    value={node.merge.reducer.aggregateState}
+                    disabled={!editable}
+                    onChange={(event) => updateNode(node.id, {
+                      merge: { ...node.merge, reducer: { ...node.merge.reducer, aggregateState: event.target.value } },
+                    })}
+                    className="input"
+                  />
+                </Field>
+                <div className="context-inspector__two-column-fields">
+                  <Field label="Completion">
+                    <InspectorSelect
+                      value={node.merge.completion.mode}
+                      options={mergeCompletionOptions}
+                      disabled={!editable}
+                      ariaLabel="Merge completion policy"
+                      onChange={(mode) => updateNode(node.id, {
+                        merge: {
+                          ...node.merge,
+                          completion: mode === 'quorum'
+                            ? { mode, quorum: node.merge.completion.quorum ?? 1 }
+                            : { mode },
+                        },
+                      })}
+                    />
+                  </Field>
+                  <Field label="Continuation">
+                    <InspectorSelect
+                      value={node.merge.continuation.mode}
+                      options={mergeContinuationOptions}
+                      disabled={!editable}
+                      ariaLabel="Merge continuation policy"
+                      onChange={(mode) => updateNode(node.id, {
+                        merge: { ...node.merge, continuation: { mode } },
+                      })}
+                    />
+                  </Field>
+                </div>
+                {node.merge.completion.mode === 'quorum' && (
+                  <Field label="Quorum">
+                    <input
+                      aria-label="Merge quorum"
+                      type="number"
+                      min={1}
+                      value={node.merge.completion.quorum ?? 1}
+                      disabled={!editable}
+                      onChange={(event) => updateNode(node.id, {
+                        merge: {
+                          ...node.merge,
+                          completion: {
+                            mode: 'quorum',
+                            quorum: Math.max(1, Math.trunc(Number(event.target.value) || 1)),
+                          },
+                        },
+                      })}
+                      className="input"
+                    />
+                  </Field>
+                )}
+              </div>
+            </section>
+          )}
           <div className="context-inspector__actions">
             <button
               type="button"
@@ -791,30 +940,50 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
                   options={edgeModeOptions}
                   disabled={!editable}
                   ariaLabel="Routing mode"
-                  onChange={(mode) => updateEdge(edge.id, { mode })}
+                  onChange={(mode) => {
+                    if (mode === 'send') {
+                      const destination = sendDestinations.find((option) => option.value === edge.target)?.value ?? sendDestinations[0]?.value ?? edge.target;
+                      updateEdge(edge.id, {
+                        mode,
+                        target: destination,
+                        send: defaultSendConfig(edgeGraph, edge, destination),
+                      });
+                      return;
+                    }
+                    updateEdge(edge.id, { mode });
+                  }}
                 />
               </Field>
               <Field label="Destination">
                 <InspectorSelect
                   value={edge.target}
-                  options={edgeDestinations}
+                  options={edge.mode === 'send' ? sendDestinations : edgeDestinations}
                   disabled={!editable}
                   ariaLabel="Destination"
-                  onChange={(target) => updateEdge(edge.id, { target })}
+                  onChange={(target) => updateEdge(
+                    edge.id,
+                    edge.mode === 'send'
+                      ? { target, send: { ...edge.send, destinationTemplateId: target } }
+                      : { target },
+                  )}
                 />
                 <p className="context-inspector__help">
-                  Canonical target: {edgeTarget?.label ?? 'Missing node'} · {edge.target}
+                  {edge.mode === 'send'
+                    ? `Canonical worker template: ${edgeTarget?.label ?? 'Missing Step'} · ${edge.target}`
+                    : `Canonical target: ${edgeTarget?.label ?? 'Missing node'} · ${edge.target}`}
                 </p>
               </Field>
-              <Field label={edge.mode === 'fallback' ? 'Fallback label' : 'Route label'}>
+              <Field label={edge.mode === 'send' ? 'Relationship label' : edge.mode === 'fallback' ? 'Fallback label' : 'Route label'}>
                 <input
-                  aria-label={edge.mode === 'fallback' ? 'Fallback label' : 'Route label'}
+                  aria-label={edge.mode === 'send' ? 'Send relationship label' : edge.mode === 'fallback' ? 'Fallback label' : 'Route label'}
                   value={edge.label ?? ''}
                   disabled={!editable}
                   onChange={(event) => updateEdge(edge.id, { label: event.target.value })}
                   className="input"
                   placeholder={
-                    edge.mode === 'fallback'
+                    edge.mode === 'send'
+                      ? 'Optional label'
+                      : edge.mode === 'fallback'
                       ? 'fallback'
                       : edge.mode === 'normal'
                         ? 'Optional label'
@@ -838,6 +1007,75 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
                   <p className="context-inspector__help">Leave blank or enter a readable condition for the route.</p>
                 </Field>
               )}
+              {edge.mode === 'send' && (
+                <>
+                  <Field label="Payload label">
+                    <input
+                      aria-label="Send payload label"
+                      value={edge.send.payloadLabel}
+                      disabled={!editable}
+                      onChange={(event) => updateEdge(edge.id, {
+                        send: { ...edge.send, payloadLabel: event.target.value },
+                      })}
+                      className="input"
+                      placeholder="query"
+                    />
+                  </Field>
+                  <Field label="Payload schema reference">
+                    <input
+                      aria-label="Send payload schema reference"
+                      value={edge.send.payloadSchemaRef ?? ''}
+                      disabled={!editable}
+                      onChange={(event) => {
+                        const payloadSchemaRef = event.target.value;
+                        const send = { ...edge.send };
+                        if (payloadSchemaRef.trim()) send.payloadSchemaRef = payloadSchemaRef;
+                        else delete send.payloadSchemaRef;
+                        updateEdge(edge.id, { send });
+                      }}
+                      className="input"
+                      placeholder="Optional schema reference"
+                    />
+                  </Field>
+                  <Field label="Merge destination">
+                    <InspectorSelect
+                      value={edge.send.mergeNodeId}
+                      options={edgeGraph.nodes
+                        .filter(
+                          (node) =>
+                            node.kind === 'merge' &&
+                            node.parentId === edgeGraph.nodes.find((candidate) => candidate.id === edge.source)?.parentId,
+                        )
+                        .map((node) => ({ value: node.id, label: `${node.label} · reducer` }))}
+                      disabled={!editable}
+                      ariaLabel="Send merge destination"
+                      onChange={(mergeNodeId) => updateEdge(edge.id, {
+                        send: { ...edge.send, mergeNodeId },
+                      })}
+                    />
+                    <p className="context-inspector__help">Multiplicity is dynamic. Concrete workers appear only in runtime evidence.</p>
+                  </Field>
+                </>
+              )}
+              {edgeIsLoop && (
+                <Field label="Loop cap">
+                  <input
+                    aria-label="Loop cap"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={edge.loopCap ?? ''}
+                    disabled={!editable}
+                    onChange={(event) => {
+                      const value = event.target.value.trim();
+                      updateEdge(edge.id, { loopCap: value ? Math.max(1, Math.min(10, Math.trunc(Number(value) || 1))) : undefined });
+                    }}
+                    className="input"
+                    placeholder="Required for a loop containing Send"
+                  />
+                  <p className="context-inspector__help">Topology loops containing Send need an explicit cap from 1 through 10.</p>
+                </Field>
+              )}
             </div>
           </section>
           <section className="context-inspector__group context-inspector__group--tinted" aria-labelledby="edge-presentation-heading">
@@ -847,13 +1085,16 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
                 {edge.mode === 'conditional' && <GitBranch size={15} weight="bold" aria-hidden="true" />}
                 {edge.mode === 'command' && <Lightning size={15} weight="fill" aria-hidden="true" />}
                 {edge.mode === 'fallback' && <Shield size={15} weight="bold" aria-hidden="true" />}
+                {edge.mode === 'send' && <GitBranch size={15} weight="bold" aria-hidden="true" />}
                 <span>
                   {edge.mode === 'normal'
                     ? 'Edge'
                     : edge.mode === 'conditional'
                       ? 'Conditional edge'
-                      : edge.mode === 'command'
-                        ? 'Command'
+                    : edge.mode === 'command'
+                      ? 'Command'
+                      : edge.mode === 'send'
+                        ? 'Send ×N · dynamic worker template'
                         : 'Fallback'}
                 </span>
               </li>
@@ -903,7 +1144,9 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
           </section>
           {!editable && (
             <p className="context-inspector__read-only" role="status">
-              {proposal
+              {readOnly
+                ? 'Runtime projection is read-only. Switch to Design view to edit the accepted graph.'
+                : proposal
                 ? 'Proposal preview is read-only. A human must approve or reject the proposal before editing the accepted graph.'
                 : 'Frozen contract: route editing is unavailable until the graph is unfrozen.'}
             </p>

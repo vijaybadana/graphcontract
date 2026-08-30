@@ -35,6 +35,8 @@ import {
   ContractNode,
   type StepModifierPresentation,
 } from '@/src/features/canvas/contract-node';
+import { MergeNode } from '@/src/features/canvas/merge-node';
+import { RuntimeInstanceNode, type RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
 import { RoutingEdge } from '@/src/features/canvas/routing-edge';
 import {
   NodePalette,
@@ -65,6 +67,7 @@ import {
 import type { CompactPanelPreference } from '@/src/features/workspace/panel-visibility';
 import { WebMcpStatus, WorkspaceHeader } from '@/src/features/workspace/workspace-header';
 import { useMediaQuery } from '@/src/features/workspace/use-media-query';
+import { runtimeProjectionAvailability } from '@/src/features/workspace/runtime-projection';
 import {
   isDomainEdgeProjectedAsCollapsedProxy,
   useGraphStore,
@@ -72,7 +75,12 @@ import {
 
 import './graph-workspace.css';
 
-const nodeTypes = { contractNode: ContractNode, subgraph: SubgraphNode };
+const nodeTypes = {
+  contractNode: ContractNode,
+  mergeJunction: MergeNode,
+  runtimeInstance: RuntimeInstanceNode,
+  subgraph: SubgraphNode,
+};
 const edgeTypes = { routing: RoutingEdge };
 const snapGrid: [number, number] = [12, 12];
 const panOnDrag = [1];
@@ -83,6 +91,7 @@ const defaultEdgeOptions: DefaultEdgeOptions = {
 const minimapColors: Record<NodeKind, string> = {
   start: '#34d399',
   step: '#64748b',
+  merge: '#526477',
   end: '#52525b',
 };
 
@@ -95,6 +104,7 @@ export function GraphWorkspace() {
   const past = useGraphStore((state) => state.past);
   const future = useGraphStore((state) => state.future);
   const fitViewRevision = useGraphStore((state) => state.fitViewRevision);
+  const runtimeProjectionFixture = useGraphStore((state) => state.runtimeProjectionFixture);
   const addNode = useGraphStore((state) => state.addNode);
   const createSubgraph = useGraphStore((state) => state.createSubgraph);
   const moveCanvasElements = useGraphStore((state) => state.moveCanvasElements);
@@ -115,6 +125,7 @@ export function GraphWorkspace() {
   const loadResearchSupervisorDemo = useGraphStore((state) => state.loadResearchSupervisorDemo);
   const loadResearchIntakeRoutingDemo = useGraphStore((state) => state.loadResearchIntakeRoutingDemo);
   const loadHumanControlHitlDemo = useGraphStore((state) => state.loadHumanControlHitlDemo);
+  const loadDynamicParallelismDemo = useGraphStore((state) => state.loadDynamicParallelismDemo);
   const clearNotice = useGraphStore((state) => state.clearNotice);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
@@ -124,6 +135,8 @@ export function GraphWorkspace() {
   const [paletteWidth, setPaletteWidth] = useState(232);
   const [inspectorWidth, setInspectorWidth] = useState(344);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
+  const [viewMode, setViewMode] = useState<'design' | 'runtime'>('design');
+  const [runtimeSelection, setRuntimeSelection] = useState<RuntimeInstanceNodeData | null>(null);
   const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
@@ -131,6 +144,28 @@ export function GraphWorkspace() {
   const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
 
   const editable = graph.status === 'draft' && !proposal;
+  const runtimeAvailability = useMemo(
+    () => runtimeProjectionAvailability(graph, runtimeProjectionFixture),
+    [graph, runtimeProjectionFixture],
+  );
+  const runtimeAvailable = runtimeAvailability.available && !proposal;
+  const runtimeUnavailableReason = proposal
+    ? 'Runtime view is unavailable while a proposal is awaiting human review.'
+    : runtimeAvailability.available
+      ? undefined
+      : runtimeAvailability.reason;
+  const activeViewMode = viewMode === 'runtime' && runtimeAvailable ? 'runtime' : 'design';
+  const canvasEditable = editable && activeViewMode === 'design';
+
+  useEffect(() => {
+    if (viewMode !== 'runtime' || runtimeAvailable) return;
+    // Deferring avoids a cascading render while ensuring an invalidated
+    // request never re-enters Runtime after a proposal/revision changes.
+    queueMicrotask(() => {
+      setViewMode('design');
+      setRuntimeSelection(null);
+    });
+  }, [runtimeAvailable, viewMode]);
   const openInspectorForSelection = useCallback(() => {
     setRightTab('review');
     setShowInspector(true);
@@ -167,16 +202,19 @@ export function GraphWorkspace() {
     proposalPending: Boolean(proposal),
   });
   const inspectorTab = proposal || selection.primary ? 'review' : rightTab;
-  const inspectorSelectionKey = `${graph.status}:${proposal?.id ?? ''}:${selection.primary?.type ?? ''}:${selection.primary?.id ?? ''}`;
+  const inspectorSelectionKey = `${graph.status}:${proposal?.id ?? ''}:${activeViewMode}:${selection.primary?.type ?? ''}:${selection.primary?.id ?? ''}:${runtimeSelection?.runtimeId ?? ''}`;
   const toggleSubgraphCollapse = useCallback(
     (subgraphId: string, collapsed: boolean) => {
-      if (editable) setSubgraphCollapsed(subgraphId, collapsed);
+      if (canvasEditable) setSubgraphCollapsed(subgraphId, collapsed);
     },
-    [editable, setSubgraphCollapsed],
+    [canvasEditable, setSubgraphCollapsed],
   );
   const validationIssues = useMemo(() => validateGraph(graph), [graph]);
   const canvas = useMemo(() => {
-    const projected = projectGraphToCanvas(graph, proposal);
+    const projected = projectGraphToCanvas(graph, proposal, {
+      mode: activeViewMode,
+      runtimeFixture: runtimeProjectionFixture,
+    });
     return {
       ...projected,
       nodes: projected.nodes.map((node) => {
@@ -185,8 +223,8 @@ export function GraphWorkspace() {
             ...node,
             data: {
               ...node.data,
-              collapseEditable: editable,
-              onToggleCollapse: editable ? toggleSubgraphCollapse : undefined,
+              collapseEditable: canvasEditable,
+              onToggleCollapse: canvasEditable ? toggleSubgraphCollapse : undefined,
             },
           };
         }
@@ -199,13 +237,21 @@ export function GraphWorkspace() {
         };
       }),
     };
-  }, [activateStepModifier, editable, graph, proposal, toggleSubgraphCollapse]);
+  }, [
+    activateStepModifier,
+    canvasEditable,
+    graph,
+    proposal,
+    runtimeProjectionFixture,
+    toggleSubgraphCollapse,
+    activeViewMode,
+  ]);
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
     projectedEdges: canvas.edges,
     selectedNodeIds: selection.nodeIds,
     selectedEdgeIds: selection.edgeIds,
-    editable,
+    editable: canvasEditable,
     onCommitPositions: moveCanvasElements,
   });
   const { clearRenderedSelection } = canvasInteractions;
@@ -296,6 +342,7 @@ export function GraphWorkspace() {
     (tab: 'review' | 'scenarios') => {
       setRightTab(tab);
       if (tab === 'scenarios') {
+        setRuntimeSelection(null);
         clearSelection();
         clearRenderedSelection();
       }
@@ -307,6 +354,7 @@ export function GraphWorkspace() {
     const handleKeys = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return;
+      if (!canvasEditable) return;
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault();
@@ -330,11 +378,12 @@ export function GraphWorkspace() {
     };
     window.addEventListener('keydown', handleKeys);
     return () => window.removeEventListener('keydown', handleKeys);
-  }, [copySelection, deleteSelection, duplicateSelection, pasteSelection, redo, undo]);
+  }, [canvasEditable, copySelection, deleteSelection, duplicateSelection, pasteSelection, redo, undo]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
       if (
+        canvasEditable &&
         connection.source &&
         connection.target &&
         canConnectCanvasEndpoints(canvas.nodes, connection.source, connection.target) &&
@@ -343,23 +392,23 @@ export function GraphWorkspace() {
         addEdge(connection.source, connection.target);
       }
     },
-    [addEdge, canvas.nodes, graph],
+    [addEdge, canvas.nodes, canvasEditable, graph],
   );
 
   const isValidConnection = useCallback(
     (connection: Connection) =>
-      editable &&
+      canvasEditable &&
       canConnectCanvasEndpoints(canvas.nodes, connection.source, connection.target) &&
       evaluateConnection(graph, connection, {
         reconnectingEdgeId: reconnectingEdgeIdRef.current,
       }).valid,
-    [canvas.nodes, editable, graph],
+    [canvas.nodes, canvasEditable, graph],
   );
 
   const onReconnect = useCallback<OnReconnect<CanvasFlowEdge>>(
     (edge, connection) => {
       if (
-        !editable ||
+        !canvasEditable ||
         !canReconnectCanvasEdge(edge) ||
         !connection.source ||
         !connection.target ||
@@ -375,17 +424,22 @@ export function GraphWorkspace() {
         updateEdge(domainEdgeId, { source: connection.source, target: connection.target });
       }
     },
-    [canvas.nodes, editable, graph, updateEdge],
+    [canvas.nodes, canvasEditable, graph, updateEdge],
   );
 
   const handleSelectionChange = useCallback(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
+      const selectedRuntimeNode = nodes.find(
+        (node): node is Extract<CanvasFlowNode, { type: 'runtimeInstance' }> =>
+          node.type === 'runtimeInstance',
+      );
+      setRuntimeSelection(selectedRuntimeNode?.data ?? null);
       const nextSelection = workspaceSelectionFromCanvas(
         nodes,
         edges,
         useGraphStore.getState().selection.primary,
       );
-      if (nextSelection.primary) {
+      if (nextSelection.primary || selectedRuntimeNode) {
         openInspectorForSelection();
       }
       setSelection(nextSelection);
@@ -408,9 +462,16 @@ export function GraphWorkspace() {
   }, []);
 
   const handleNodeClick = useCallback<NodeMouseHandler<CanvasFlowNode>>(
-    (_, node) =>
-      makePrimary({ type: node.type === 'subgraph' ? 'subgraph' : 'node', id: node.id }),
-    [makePrimary],
+    (_, node) => {
+      if (node.type === 'runtimeInstance') {
+        setRuntimeSelection(node.data);
+        openInspectorForSelection();
+        return;
+      }
+      setRuntimeSelection(null);
+      makePrimary({ type: node.type === 'subgraph' ? 'subgraph' : 'node', id: node.id });
+    },
+    [makePrimary, openInspectorForSelection],
   );
 
   const handleEdgeClick = useCallback<EdgeMouseHandler<CanvasFlowEdge>>(
@@ -424,7 +485,7 @@ export function GraphWorkspace() {
   const addPalettePayload = useCallback(
     (payload: PalettePayloadKind, position: { x: number; y: number }) => {
       const kind = normalizePalettePreset(payload);
-      if (!kind || !editable) return;
+      if (!kind || !canvasEditable) return;
       if (kind === 'subgraph') {
         createSubgraph({ position });
         openInspectorForSelection();
@@ -432,7 +493,7 @@ export function GraphWorkspace() {
       }
       addNode(kind, position);
     },
-    [addNode, createSubgraph, editable, openInspectorForSelection],
+    [addNode, canvasEditable, createSubgraph, openInspectorForSelection],
   );
 
   const addAtCenter = useCallback(
@@ -456,8 +517,8 @@ export function GraphWorkspace() {
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
+    event.dataTransfer.dropEffect = canvasEditable ? 'move' : 'none';
+  }, [canvasEditable]);
 
   const onReconnectStart = useCallback((_: unknown, edge: CanvasFlowEdge) => {
     reconnectingEdgeIdRef.current = edge.id;
@@ -492,7 +553,7 @@ export function GraphWorkspace() {
   }
 
   const selectionCount =
-    selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length;
+    selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length + (runtimeSelection ? 1 : 0);
   const hasDeletableSelection =
     selection.nodeIds.length > 0 ||
     selection.subgraphIds.length > 0 ||
@@ -521,11 +582,14 @@ export function GraphWorkspace() {
           proposalPending={Boolean(proposal)}
           paletteOpen={paletteVisible}
           inspectorOpen={inspectorVisible}
-          canUndo={editable && past.length > 0}
-          canRedo={editable && future.length > 0}
-          canDuplicate={editable && selection.nodeIds.length > 0}
-          canDelete={editable && hasDeletableSelection}
+          canUndo={canvasEditable && past.length > 0}
+          canRedo={canvasEditable && future.length > 0}
+          canDuplicate={canvasEditable && selection.nodeIds.length > 0}
+          canDelete={canvasEditable && hasDeletableSelection}
           canFreeze={validationIssues.length === 0 && !proposal}
+          viewMode={activeViewMode}
+          runtimeAvailable={runtimeAvailable}
+          runtimeUnavailableReason={runtimeUnavailableReason}
           onTogglePalette={togglePalette}
           onToggleInspector={toggleInspector}
           onUndo={undo}
@@ -536,6 +600,11 @@ export function GraphWorkspace() {
           onReset={resetGraph}
           onFreeze={handleFreeze}
           onUnfreeze={unfreezeGraph}
+          onViewModeChange={(mode) => {
+            if (mode === 'runtime' && !runtimeAvailable) return;
+            setRuntimeSelection(null);
+            setViewMode(mode);
+          }}
         />
 
         {notice && <div className="workspace-notice">{notice}</div>}
@@ -545,12 +614,18 @@ export function GraphWorkspace() {
             <NodePalette
               graph={graph}
               proposal={proposal}
-              disabled={!editable}
+              disabled={!canvasEditable}
+              readOnlyReason={
+                activeViewMode === 'runtime'
+                  ? 'Runtime projection is read-only. Switch to Design view to add or edit contract elements.'
+                  : undefined
+              }
               validationIssueCount={validationIssues.length}
               onAdd={addAtCenter}
               onLoadResearchSupervisorDemo={loadResearchSupervisorDemo}
               onLoadResearchIntakeRoutingDemo={loadResearchIntakeRoutingDemo}
               onLoadHumanControlHitlDemo={loadHumanControlHitlDemo}
+              onLoadDynamicParallelismDemo={loadDynamicParallelismDemo}
               onCollapse={closePalette}
             />
             <PanelResizer
@@ -595,15 +670,18 @@ export function GraphWorkspace() {
             onSelectionChange={handleSelectionChange}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
-            onPaneClick={clearSelection}
+            onPaneClick={() => {
+              setRuntimeSelection(null);
+              clearSelection();
+            }}
             onNodeDragStart={canvasInteractions.onNodeDragStart}
             onNodeDrag={canvasInteractions.onNodeDrag}
             onNodeDragStop={canvasInteractions.onNodeDragStop}
             onDrop={onDrop}
             onDragOver={onDragOver}
-            nodesDraggable={editable}
-            nodesConnectable={editable}
-            edgesReconnectable={editable}
+            nodesDraggable={canvasEditable}
+            nodesConnectable={canvasEditable}
+            edgesReconnectable={canvasEditable}
             elementsSelectable
             selectionOnDrag
             selectionMode={SelectionMode.Partial}
@@ -636,7 +714,11 @@ export function GraphWorkspace() {
               nodeColor={(node) =>
                 node.type === 'contractNode'
                   ? minimapColors[node.data.kind] ?? '#94a3b8'
-                  : '#5c8f7d'
+                  : node.type === 'mergeJunction'
+                    ? '#526477'
+                    : node.type === 'runtimeInstance'
+                      ? '#5969c8'
+                      : '#5c8f7d'
               }
               nodeStrokeColor="#ffffff"
               nodeStrokeWidth={2}
@@ -651,7 +733,7 @@ export function GraphWorkspace() {
             />
           </ReactFlow>
 
-          <CanvasInstructionStrip editable={editable} />
+          <CanvasInstructionStrip editable={canvasEditable} runtimeMode={activeViewMode === 'runtime'} />
           <CanvasStatusStrip
             graph={graph}
             issueCount={validationIssues.length}
@@ -684,7 +766,7 @@ export function GraphWorkspace() {
               aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} readOnly={activeViewMode === 'runtime'} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
             </div>
             <PanelResizer
               side="right"

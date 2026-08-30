@@ -46,7 +46,7 @@ export function positionsForCanvasCommit(
     draggedNodes
       .filter(
         (node) =>
-          node.type === 'contractNode' &&
+          (node.type === 'contractNode' || node.type === 'mergeJunction') &&
           node.parentId &&
           draggedSubgraphIds.has(node.parentId),
       )

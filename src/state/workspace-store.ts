@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import { migrateWorkspaceV4 } from '@/src/adapters/persistence/migrate-workspace';
+import { migrateWorkspaceV5 } from '@/src/adapters/persistence/migrate-workspace';
 import {
   createWorkspaceService,
   FreezeResult,
@@ -13,12 +13,14 @@ import {
   WorkspaceTransition,
 } from '@/src/application/workspace';
 import {
-  GraphEdge,
+  GraphEdgePatch,
   GraphNodePatch,
   GraphPosition,
   GraphSubgraph,
+  RuntimeProjectionFixture,
   WorkflowGraph,
 } from '@/src/domain';
+import { runtimeFixtureForLoadedDynamicParallelismDemo } from '@/src/application/package-three-demo';
 
 export type WorkspaceSelection = {
   nodeIds: string[];
@@ -28,6 +30,8 @@ export type WorkspaceSelection = {
 };
 
 type WorkspaceStore = WorkspaceCore & {
+  /** Ephemeral evidence: deliberately absent from core history and persistence. */
+  runtimeProjectionFixture: RuntimeProjectionFixture | null;
   selection: WorkspaceSelection;
   clipboardNodeIds: string[];
   past: WorkspaceCore[];
@@ -53,7 +57,7 @@ type WorkspaceStore = WorkspaceCore & {
   dissolveSubgraph: (subgraphId: string) => void;
   removeNode: (id: string) => void;
   addEdge: (source: string, target: string) => void;
-  updateEdge: (id: string, patch: Partial<Omit<GraphEdge, 'id'>>) => void;
+  updateEdge: (id: string, patch: GraphEdgePatch) => void;
   removeEdge: (id: string) => void;
   setSelection: (selection: WorkspaceSelection) => void;
   clearSelection: () => void;
@@ -72,6 +76,7 @@ type WorkspaceStore = WorkspaceCore & {
   loadResearchSupervisorDemo: () => void;
   loadResearchIntakeRoutingDemo: () => void;
   loadHumanControlHitlDemo: () => void;
+  loadDynamicParallelismDemo: () => void;
   clearNotice: () => void;
 };
 
@@ -148,6 +153,7 @@ export const useGraphStore = create<WorkspaceStore>()(
 
       return {
         ...initial,
+        runtimeProjectionFixture: null,
         selection: emptySelection(),
         clipboardNodeIds: [],
         past: [],
@@ -364,13 +370,18 @@ export const useGraphStore = create<WorkspaceStore>()(
           const transition = workspace.resetGraph(currentCore());
           commit(transition, { selection: transition.changed ? emptySelection() : get().selection });
           if (transition.changed) {
-            set((state) => ({ clipboardNodeIds: [], fitViewRevision: state.fitViewRevision + 1 }));
+            set((state) => ({
+              runtimeProjectionFixture: null,
+              clipboardNodeIds: [],
+              fitViewRevision: state.fitViewRevision + 1,
+            }));
           }
         },
 
         loadResearchSupervisorDemo: () => {
           commit(workspace.loadResearchSupervisorDemo(currentCore()), { selection: emptySelection() });
           set((state) => ({
+            runtimeProjectionFixture: null,
             clipboardNodeIds: [],
             fitViewRevision: state.fitViewRevision + 1,
           }));
@@ -379,6 +390,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         loadResearchIntakeRoutingDemo: () => {
           commit(workspace.loadResearchIntakeRoutingDemo(currentCore()), { selection: emptySelection() });
           set((state) => ({
+            runtimeProjectionFixture: null,
             clipboardNodeIds: [],
             fitViewRevision: state.fitViewRevision + 1,
           }));
@@ -387,6 +399,16 @@ export const useGraphStore = create<WorkspaceStore>()(
         loadHumanControlHitlDemo: () => {
           commit(workspace.loadHumanControlHitlDemo(currentCore()), { selection: emptySelection() });
           set((state) => ({
+            runtimeProjectionFixture: null,
+            clipboardNodeIds: [],
+            fitViewRevision: state.fitViewRevision + 1,
+          }));
+        },
+
+        loadDynamicParallelismDemo: () => {
+          commit(workspace.loadDynamicParallelismDemo(currentCore()), { selection: emptySelection() });
+          set((state) => ({
+            runtimeProjectionFixture: runtimeFixtureForLoadedDynamicParallelismDemo(get().graph),
             clipboardNodeIds: [],
             fitViewRevision: state.fitViewRevision + 1,
           }));
@@ -397,11 +419,11 @@ export const useGraphStore = create<WorkspaceStore>()(
     },
     {
       name: 'graphcontract-workspace-v1',
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
       migrate: (persistedState) =>
-        migrateWorkspaceV4(persistedState, workspace.createInitial) as WorkspaceStore,
+        migrateWorkspaceV5(persistedState, workspace.createInitial) as WorkspaceStore,
       partialize: (state) => ({
         graph: state.graph,
         proposal: state.proposal,

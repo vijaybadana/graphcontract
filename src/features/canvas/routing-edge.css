@@ -48,6 +48,7 @@
 
 .routing-edge-label--conditional { color: #6229bd; }
 .routing-edge-label--command { color: #2739bf; }
+.routing-edge-label--send { color: #4f5fb9; }
 .routing-edge-label--fallback { color: #7441c5; }
 .routing-edge-label--loop { color: #cf560e; }
 .routing-edge-label--invalid { color: #c9232d; }

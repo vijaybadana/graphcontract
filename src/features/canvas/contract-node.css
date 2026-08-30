@@ -14,6 +14,18 @@
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, opacity 160ms ease;
 }
 
+.contract-node-shell.is-send-template::after {
+  position: absolute;
+  z-index: -1;
+  inset: .4rem -.38rem -.4rem .38rem;
+  border: 1px solid #6876ca;
+  border-radius: .875rem;
+  background: #edf0ff;
+  box-shadow: -.22rem .22rem 0 #f7f8ff, -.42rem .42rem 0 #e5e9ff;
+  content: '';
+  pointer-events: none;
+}
+
 .contract-node-shell[data-kind='start'] { --node-accent: #059669; --node-accent-soft: #ecfdf5; --node-accent-ink: #064e3b; }
 .contract-node-shell[data-kind='end'] { --node-accent: #475569; --node-accent-soft: #f8fafc; --node-accent-ink: #0f172a; }
 .contract-node-shell[data-kind='step'][data-executor='ai'] { --node-accent: #c8752d; --node-accent-soft: #fff7ed; --node-accent-ink: #3d2816; }
@@ -42,7 +54,7 @@
 .contract-node-meta { display: flex; align-items: center; justify-content: space-between; gap: .375rem; min-height: 2.15rem; padding: .5rem .75rem; }
 
 .contract-node-modifier-rail { display: flex; align-items: center; gap: .22rem; min-width: 0; }
-.contract-node-modifier-chip, .contract-node-modifier-overflow-button, .contract-node-status, .contract-node-proposal-status, .contract-node-membership-status { white-space: nowrap; font-size: .53rem; font-weight: 800; letter-spacing: .035em; line-height: 1; text-transform: uppercase; }
+.contract-node-modifier-chip, .contract-node-modifier-overflow-button, .contract-node-status, .contract-node-proposal-status, .contract-node-membership-status, .contract-node-template-status { white-space: nowrap; font-size: .53rem; font-weight: 800; letter-spacing: .035em; line-height: 1; text-transform: uppercase; }
 .contract-node-modifier-chip { display: inline-flex; align-items: center; gap: .16rem; min-width: 1.875rem; min-height: 1.5rem; max-width: 3.8rem; overflow: hidden; border: 1px solid currentColor; border-radius: .3rem; background: white; padding: .2rem .28rem; color: var(--modifier-ink); text-overflow: ellipsis; }
 .contract-node-modifier-chip:hover { background: var(--modifier-soft); }
 .contract-node-modifier-chip:focus-visible, .contract-node-modifier-overflow-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
@@ -69,6 +81,7 @@
 .contract-node-status--frozen { color: #475569; }
 .contract-node-proposal-status { overflow: hidden; max-width: 5.6rem; color: #475569; text-overflow: ellipsis; }
 .contract-node-membership-status { border: 1px solid #f2c45f; border-radius: 999px; padding: .25rem .3125rem; background: #fff7df; color: #8b5b08; }
+.contract-node-template-status { border: 1px solid #6876ca; border-radius: 999px; background: #eef0ff; padding: .25rem .3125rem; color: #3f4f9e; }
 .contract-node-handle { width: .6875rem !important; height: .6875rem !important; border: 2px solid #fff !important; background: var(--node-accent) !important; }
 .contract-node-hitl-marker { position: absolute; z-index: 5; display: grid; width: 2rem; height: 2rem; place-items: center; border: 2px solid #fb7185; border-radius: 999px; background: #fff1f2; box-shadow: 0 2px 7px rgb(190 24 93 / 20%); color: #e11d48; }
 .contract-node-hitl-marker--before { top: 50%; left: -1.2rem; transform: translateY(-50%); }

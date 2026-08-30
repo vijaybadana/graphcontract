@@ -8,6 +8,7 @@ import {
   Position,
 } from '@xyflow/react';
 import {
+  GitFork,
   GitBranch,
   Lightning,
   LockSimple,
@@ -30,6 +31,9 @@ type RoutingEdgeTokens = {
 
 /** Exported for focused component coverage and to keep state precedence explicit. */
 export function routingEdgeTokens(presentation: CanvasEdgePresentation): RoutingEdgeTokens {
+  if (presentation.runtimeInstance) {
+    return { color: '#5969c8', haloColor: 'rgb(89 105 200 / 25%)', dasharray: '4 4' };
+  }
   if (presentation.frozen) {
     return { color: '#9ca3af', haloColor: 'rgb(156 163 175 / 30%)', dasharray: '5 5' };
   }
@@ -81,6 +85,8 @@ function loopPath(
 
 function semanticName(presentation: CanvasEdgePresentation): string {
   if (presentation.loop) return `Loop ${presentation.mode} edge`;
+  if (presentation.runtimeInstance) return 'Observed runtime projection link';
+  if (presentation.mode === 'send') return 'Send/map edge';
   if (presentation.mode === 'conditional') return 'Conditional edge';
   if (presentation.mode === 'command') return 'Command edge';
   if (presentation.mode === 'fallback') return 'Fallback edge';
@@ -124,13 +130,14 @@ export function RoutingEdge({
   const displayLabel = routeLabel || (presentation.loop ? 'continue' : '');
   const semantic = semanticName(presentation);
   const proposal = proposalDescription(presentation);
-  const showSourceDot = presentation.mode !== 'normal' && !presentation.loop;
+  const showSourceDot = presentation.mode !== 'normal' && !presentation.loop && !presentation.runtimeInstance;
   const showLabel = Boolean(
-    displayLabel ||
+    !presentation.runtimeInstance &&
+      (displayLabel ||
       presentation.mode !== 'normal' ||
       presentation.invalid ||
       presentation.frozen ||
-      proposal,
+      proposal),
   );
   const pathStyle = {
     ...style,
@@ -196,6 +203,9 @@ export function RoutingEdge({
             <span className="routing-edge-label__surface">
               {presentation.mode === 'conditional' && (
                 <GitBranch size={13} weight="bold" aria-hidden="true" />
+              )}
+              {presentation.mode === 'send' && (
+                <GitFork size={14} weight="bold" aria-hidden="true" />
               )}
               {presentation.mode === 'command' && (
                 <span className="routing-edge-label__icon-chip" title="Command route">

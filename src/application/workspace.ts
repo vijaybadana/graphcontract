@@ -3,7 +3,7 @@ import {
   BranchScenario,
   createProposal,
   enumerateScenarios,
-  GraphEdge,
+  GraphEdgePatch,
   GraphNode,
   GraphNodePatch,
   GraphProposal,
@@ -19,6 +19,7 @@ import {
   WorkflowGraph,
   StepExecutor,
 } from '@/src/domain';
+import { dynamicParallelismDemoGraph } from './package-three-demo';
 import { layoutWorkflowGraph } from './layout-workflow';
 import { createDraftEdge } from './connection-policy';
 import { CONTRACT_NODE_HEIGHT, CONTRACT_NODE_WIDTH } from './canvas-geometry';
@@ -51,7 +52,8 @@ export type WorkspaceDependencies = {
 
 /**
  * Creation remains a presentation choice. Every work-oriented preset creates
- * the same active graph kind (`step`) and selects only its executor defaults.
+ * the same active graph kind (`step`) and selects only its executor defaults;
+ * Merge is structural and never a Step preset.
  */
 export const stepPresetDefinitions = {
   step: { label: 'New Step', executor: 'deterministic' },
@@ -62,10 +64,11 @@ export const stepPresetDefinitions = {
 } as const satisfies Record<string, { label: string; executor: StepExecutor }>;
 
 export type StepPreset = keyof typeof stepPresetDefinitions;
-export type NodeCreationPreset = Extract<NodeKind, 'start' | 'end'> | StepPreset;
+export type NodeCreationPreset = Extract<NodeKind, 'start' | 'merge' | 'end'> | StepPreset;
 
-const structuralPresetLabels: Record<Extract<NodeKind, 'start' | 'end'>, string> = {
+const structuralPresetLabels: Record<Extract<NodeKind, 'start' | 'merge' | 'end'>, string> = {
   start: 'Start',
+  merge: 'Merge',
   end: 'End',
 };
 
@@ -83,6 +86,21 @@ function createNodeFromPreset(
     };
   }
 
+  if (preset === 'merge') {
+    return {
+      id: dependencies.makeId('merge'),
+      kind: 'merge',
+      label: structuralPresetLabels.merge,
+      position,
+      merge: {
+        reducer: { name: 'merge', aggregateState: 'aggregate' },
+        completion: { mode: 'all' },
+        continuation: { mode: 'once' },
+        waitingForDynamicInputs: true,
+      },
+    };
+  }
+
   const definition = stepPresetDefinitions[preset];
   return {
     id: dependencies.makeId('step'),
@@ -96,6 +114,7 @@ function createNodeFromPreset(
 const clone = <T,>(value: T): T => structuredClone(value);
 const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
   ['executor', 'participation', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
+const hasMergeOnlyPatchFields = (patch: GraphNodePatch) => 'merge' in patch;
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
 
@@ -266,6 +285,13 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           state,
           changed: false,
           notice: 'Step-only fields can only update Step nodes.',
+        };
+      }
+      if (node && node.kind !== 'merge' && hasMergeOnlyPatchFields(patch)) {
+        return {
+          state,
+          changed: false,
+          notice: 'Merge configuration can only update Merge nodes.',
         };
       }
       return changeGraph(state, (graph) => ({
@@ -499,7 +525,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     updateEdge(
       state: WorkspaceCore,
       edgeId: string,
-      patch: Partial<Omit<GraphEdge, 'id'>>,
+      patch: GraphEdgePatch,
     ) {
       return changeGraph(state, (graph) => ({
         ...graph,
@@ -718,6 +744,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         state,
         () => clone(humanControlHitlDemoGraph),
         'Human Control & HITL demo loaded.',
+      );
+    },
+
+    loadDynamicParallelismDemo(state: WorkspaceCore): WorkspaceTransition {
+      return changeGraph(
+        state,
+        () => clone(dynamicParallelismDemoGraph),
+        'Parallel research demo loaded. Runtime workers are available as a read-only fixture.',
       );
     },
   };

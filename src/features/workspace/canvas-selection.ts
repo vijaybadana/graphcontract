@@ -11,7 +11,7 @@ export function workspaceSelectionFromCanvas(
   currentPrimary: WorkspaceSelection['primary'],
 ): WorkspaceSelection {
   const nodeIds = nodes
-    .filter((node) => node.type === 'contractNode')
+    .filter((node) => node.type === 'contractNode' || node.type === 'mergeJunction')
     .map((node) => node.id)
     .sort();
   const subgraphIds = nodes

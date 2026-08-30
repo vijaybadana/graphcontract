@@ -4,7 +4,13 @@ import type { WorkflowGraph } from '@/src/domain';
 
 import './canvas-chrome.css';
 
-export function CanvasInstructionStrip({ editable }: { editable: boolean }) {
+export function CanvasInstructionStrip({
+  editable,
+  runtimeMode = false,
+}: {
+  editable: boolean;
+  runtimeMode?: boolean;
+}) {
   return (
     <div className="canvas-instruction-strip" role="note">
       {editable ? (
@@ -13,6 +19,8 @@ export function CanvasInstructionStrip({ editable }: { editable: boolean }) {
           <span>Shift-drag to multi-select</span>
           <span>Connect from Node ports</span>
         </>
+      ) : runtimeMode ? (
+        <span>Runtime projection · observed instances are read-only and do not change the contract</span>
       ) : (
         <span>Review mode · graph editing is temporarily locked</span>
       )}

@@ -3,8 +3,10 @@ import { Edge, MarkerType } from '@xyflow/react';
 import {
   applyGraphOperations,
   GraphEdge,
+  GraphNode,
   GraphProposal,
   GraphSubgraph,
+  RuntimeProjectionFixture,
   validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
@@ -13,14 +15,21 @@ import {
   CONTRACT_NODE_WIDTH,
 } from '@/src/application/canvas-geometry';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
+import {
+  runtimeProjectionAvailability,
+} from '@/src/features/workspace/runtime-projection';
 
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
+const RUNTIME_INSTANCE_WIDTH = 188;
+const RUNTIME_INSTANCE_HEIGHT = 58;
+const RUNTIME_INSTANCE_VERTICAL_GAP = 20;
 
 export type CanvasEdgeData = {
   edge: GraphEdge;
   domainEdgeIds: string[];
-  projection: 'domain' | 'subgraph-proxy';
+  projection: 'domain' | 'subgraph-proxy' | 'runtime-instance';
+  runtimeInstanceId?: string;
   presentation: CanvasEdgePresentation;
   [key: string]: unknown;
 };
@@ -34,6 +43,14 @@ export type CanvasEdgePresentation = {
   invalid: boolean;
   frozen: boolean;
   proposalState?: 'added' | 'updated' | 'removed';
+  /** Runtime-only lines visually attach observed instances without becoming routes. */
+  runtimeInstance?: boolean;
+};
+
+export type CanvasProjectionMode = 'design' | 'runtime';
+export type CanvasProjectionOptions = {
+  mode?: CanvasProjectionMode;
+  runtimeFixture?: RuntimeProjectionFixture | null;
 };
 
 type ProjectedDomainEdge = {
@@ -78,7 +95,7 @@ export function isCanvasEdgeSelected(
 export function isConnectableDomainEndpoint(
   node: CanvasFlowNode | undefined,
 ): boolean {
-  return node?.type === 'contractNode' && !node.hidden;
+  return (node?.type === 'contractNode' || node?.type === 'mergeJunction') && !node.hidden;
 }
 
 export function canConnectCanvasEndpoints(
@@ -96,7 +113,7 @@ export function canConnectCanvasEndpoints(
 
 /** Proxies stand for several or hidden canonical edges and are never reconnectable. */
 export function canReconnectCanvasEdge(edge: CanvasFlowEdge): boolean {
-  return !isSubgraphProxyEdge(edge) && domainEdgeIdsForCanvasEdge(edge).length === 1;
+  return edge.data?.projection === 'domain' && domainEdgeIdsForCanvasEdge(edge).length === 1;
 }
 
 function edgeVisualState(
@@ -213,6 +230,8 @@ function projectEdge(
         ? '#ea6a18'
         : presentation.mode === 'conditional'
           ? '#7136cc'
+          : presentation.mode === 'send'
+            ? '#5969c8'
           : presentation.mode === 'fallback'
             ? '#8b55d8'
           : presentation.mode === 'command'
@@ -225,12 +244,20 @@ function projectEdge(
                   ? '#c47b24'
                   : '#303a35';
   return {
-    id: projection === 'subgraph-proxy' ? proxyEdgeId(source, target) : edge.id,
+    id:
+      projection === 'subgraph-proxy'
+        ? proxyEdgeId(source, target)
+        : projection === 'runtime-instance'
+          ? `runtime-projection:${encodeURIComponent(edge.id)}:${encodeURIComponent(source)}:${encodeURIComponent(target)}`
+          : edge.id,
     type: 'routing',
     className: `contract-edge contract-edge--${presentation.mode}`,
     source,
     target,
-    label: edge.label || (presentation.mode === 'fallback' ? 'fallback' : undefined),
+    label: presentation.runtimeInstance
+      ? undefined
+      : edge.label ||
+        (presentation.mode === 'send' ? 'Send ×N' : presentation.mode === 'fallback' ? 'fallback' : undefined),
     markerEnd: { type: MarkerType.ArrowClosed, color },
     animated: presentation.proposalState === 'added',
     reconnectable: projection === 'domain' && reconnectable && !presentation.frozen,
@@ -239,7 +266,12 @@ function projectEdge(
     style: {
       stroke: color,
       strokeWidth: presentation.proposalState ? 2.5 : 1.8,
-      strokeDasharray: presentation.proposalState === 'removed' ? '6 5' : undefined,
+      strokeDasharray:
+        presentation.runtimeInstance || presentation.mode === 'send'
+          ? '7 5'
+          : presentation.proposalState === 'removed'
+            ? '6 5'
+            : undefined,
       opacity: presentation.proposalState === 'removed' ? 0.65 : 1,
     },
     labelStyle: { fill: '#303a35', fontSize: 11, fontWeight: 720 },
@@ -333,15 +365,148 @@ function membershipAffectedSubgraphIds(
   return affected;
 }
 
+function absolutePosition(
+  node: GraphNode,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+) {
+  const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
+  return parent
+    ? { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y }
+    : node.position;
+}
+
+function nodeProposalState(
+  nodeId: string,
+  diff: GraphProposal['diff'] | undefined,
+): ProposalVisualState | undefined {
+  const membershipChangedNodeIds = diff?.membershipChangedNodeIds ?? [];
+  if (diff?.addedNodeIds.includes(nodeId)) return 'added';
+  if (diff?.removedNodeIds.includes(nodeId)) return 'removed';
+  if (diff?.updatedNodeIds.includes(nodeId) || membershipChangedNodeIds.includes(nodeId)) {
+    return 'updated';
+  }
+  return undefined;
+}
+
+function sendTemplateData(
+  node: GraphNode,
+  edges: readonly GraphEdge[],
+) {
+  if (node.kind !== 'step') return undefined;
+  const send = edges
+    .filter((edge) => edge.mode === 'send' && edge.target === node.id)
+    .sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (!send) return undefined;
+  return {
+    edgeId: send.id,
+    payloadLabel: send.send?.payloadLabel ?? '',
+    mergeNodeId: send.send?.mergeNodeId ?? '',
+  };
+}
+
+function projectDomainNode(
+  node: GraphNode,
+  preview: WorkflowGraph,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+  diff: GraphProposal['diff'] | undefined,
+  validationIssues: ReturnType<typeof validateGraph>,
+  runtimeHiddenNodeIds: ReadonlySet<string>,
+): CanvasFlowNode {
+  const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
+  const proposalState = nodeProposalState(node.id, diff);
+  const outsideSubgraph =
+    proposalState !== 'removed' && isUnparentedNodeInsideExpandedSubgraph(node, preview.subgraphs);
+  const parentProperties = node.parentId
+    ? {
+        parentId: node.parentId,
+        extent: 'parent' as const,
+        expandParent: false,
+        zIndex: 1,
+      }
+    : {};
+  const invalid = isNodeInvalid(node.id, preview, validationIssues);
+  const frozen = preview.status === 'frozen';
+  const hidden = Boolean(parent?.collapsed) || runtimeHiddenNodeIds.has(node.id);
+
+  if (node.kind === 'merge') {
+    return {
+      id: node.id,
+      type: 'mergeJunction',
+      position: node.position,
+      initialWidth: CONTRACT_NODE_WIDTH,
+      initialHeight: CONTRACT_NODE_HEIGHT,
+      hidden,
+      selectable: proposalState !== 'removed',
+      draggable: proposalState !== 'removed',
+      focusable: proposalState !== 'removed',
+      ariaLabel: `${node.label} Merge junction, reducer ${node.merge.reducer.name || 'unset'}, ${
+        node.merge.waitingForDynamicInputs ? 'waiting for dynamic inputs' : 'invalid waiting policy'
+      }${invalid ? ', invalid' : ''}${frozen ? ', frozen' : ''}`,
+      ...parentProperties,
+      data: { ...node, proposalState, invalid, frozen, outsideSubgraph },
+    };
+  }
+
+  const template = sendTemplateData(node, preview.edges);
+  return {
+    id: node.id,
+    type: 'contractNode',
+    position: node.position,
+    initialWidth: CONTRACT_NODE_WIDTH,
+    initialHeight: CONTRACT_NODE_HEIGHT,
+    hidden,
+    selectable: proposalState !== 'removed',
+    draggable: proposalState !== 'removed',
+    focusable: proposalState !== 'removed',
+    ariaLabel: `${node.label} ${node.kind}${template ? ', dynamic worker template ×N' : ''}${
+      invalid ? ', invalid' : ''
+    }${frozen ? ', frozen' : ''}`,
+    ...parentProperties,
+    data: {
+      ...node,
+      proposalState,
+      outsideSubgraph,
+      invalid,
+      frozen,
+      ...(template ? { sendTemplate: template } : {}),
+    },
+  };
+}
+
 export function projectGraphToCanvas(
   graph: WorkflowGraph,
   proposal: GraphProposal | null,
+  options: CanvasProjectionOptions = {},
 ): { nodes: CanvasFlowNode[]; edges: CanvasFlowEdge[] } {
   const visibleProposal =
     proposal?.status === 'pending' || proposal?.status === 'invalid' ? proposal : null;
   const preview = visibleProposal
     ? applyGraphOperations(graph, visibleProposal.operations).graph
     : graph;
+  const runtime =
+    options.mode === 'runtime' && !visibleProposal
+      ? runtimeProjectionAvailability(graph, options.runtimeFixture)
+      : null;
+  const runtimeTemplateNodeIds = new Set(
+    runtime?.available ? runtime.fixture.instances.map((instance) => instance.templateNodeId) : [],
+  );
+  const runtimeReplacedEdgeIds = new Set<string>();
+  if (runtime?.available) {
+    for (const instance of runtime.fixture.instances) {
+      const send = preview.edges.find((edge) => edge.id === instance.sendEdgeId);
+      if (!send || send.mode !== 'send' || !send.send) continue;
+      runtimeReplacedEdgeIds.add(send.id);
+      for (const candidate of preview.edges) {
+        if (
+          candidate.mode === 'normal' &&
+          candidate.source === send.target &&
+          candidate.target === send.send.mergeNodeId
+        ) {
+          runtimeReplacedEdgeIds.add(candidate.id);
+        }
+      }
+    }
+  }
   const diff = visibleProposal?.diff;
   const membershipAffectedSubgraphs = visibleProposal
     ? membershipAffectedSubgraphIds(graph, visibleProposal.operations)
@@ -377,49 +542,23 @@ export function projectGraphToCanvas(
   const validationIssues = validateGraph(preview);
   const nodes: CanvasFlowNode[] = [
     ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(subgraph, subgraphProposalState(subgraph.id))),
-    ...sourceNodes.map((node) => {
-      const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
-      const membershipChangedNodeIds = diff?.membershipChangedNodeIds ?? [];
-      const proposalState = diff?.addedNodeIds.includes(node.id)
-        ? 'added'
-        : diff?.removedNodeIds.includes(node.id)
-          ? 'removed'
-          : diff?.updatedNodeIds.includes(node.id) || membershipChangedNodeIds.includes(node.id)
-            ? 'updated'
-            : undefined;
-      const outsideSubgraph =
-        proposalState !== 'removed' && isUnparentedNodeInsideExpandedSubgraph(node, preview.subgraphs);
-      return {
-        id: node.id,
-        type: 'contractNode',
-        position: node.position,
-        initialWidth: CONTRACT_NODE_WIDTH,
-        initialHeight: CONTRACT_NODE_HEIGHT,
-        ...(node.parentId
-          ? {
-              parentId: node.parentId,
-              extent: 'parent' as const,
-              expandParent: false,
-              zIndex: 1,
-            }
-          : {}),
-        hidden: Boolean(parent?.collapsed),
-        data: {
-          ...node,
-          proposalState,
-          outsideSubgraph,
-          invalid: isNodeInvalid(node.id, preview, validationIssues),
-          frozen: preview.status === 'frozen',
-        },
-      };
-    }),
+    ...sourceNodes.map((node) =>
+      projectDomainNode(
+        node,
+        preview,
+        subgraphsById,
+        diff,
+        validationIssues,
+        runtimeTemplateNodeIds,
+      ),
+    ),
   ];
 
   const previewEdgeIds = new Set(preview.edges.map((edge) => edge.id));
   const sourceEdges = [
     ...preview.edges,
     ...graph.edges.filter((edge) => !previewEdgeIds.has(edge.id)),
-  ];
+  ].filter((edge) => !runtimeReplacedEdgeIds.has(edge.id));
   const loopEdgeIds = topologyDerivedLoopEdgeIds({ ...preview, edges: sourceEdges });
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
     const sourceParent = subgraphsById.get(
@@ -483,6 +622,113 @@ export function projectGraphToCanvas(
         edgePresentation(first.edge, groupedEdges.map(({ edge }) => edge)),
       ),
     );
+  }
+
+  // Runtime evidence can only add ephemeral canvas elements. It never changes
+  // the accepted graph, proposal diff, selection store, or persisted layout.
+  if (runtime?.available) {
+    const visibleEndpoint = (nodeId: string) => {
+      const node = preview.nodes.find((candidate) => candidate.id === nodeId);
+      const parent = node?.parentId ? subgraphsById.get(node.parentId) : undefined;
+      return parent?.collapsed ? parent.id : nodeId;
+    };
+    const instancesByTemplate = new Map<string, typeof runtime.fixture.instances>();
+    for (const instance of runtime.fixture.instances) {
+      instancesByTemplate.set(instance.templateNodeId, [
+        ...(instancesByTemplate.get(instance.templateNodeId) ?? []),
+        instance,
+      ]);
+    }
+    const instanceOffsetByTemplate = new Map<string, number>();
+    for (const instance of [...runtime.fixture.instances].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    )) {
+      const send = preview.edges.find((edge) => edge.id === instance.sendEdgeId);
+      const template = preview.nodes.find((node) => node.id === instance.templateNodeId);
+      if (!send || !template || send.mode !== 'send' || !send.send) continue;
+
+      const offset = instanceOffsetByTemplate.get(template.id) ?? 0;
+      instanceOffsetByTemplate.set(template.id, offset + 1);
+      const templatePosition = absolutePosition(template, subgraphsById);
+      const templateInstances = instancesByTemplate.get(template.id) ?? [];
+      const runtimeNodeId = `runtime:${instance.id}`;
+      const templateLabel = template.label || template.id;
+      const mergeId = send.send.mergeNodeId;
+      nodes.push({
+        id: runtimeNodeId,
+        type: 'runtimeInstance',
+        position: {
+          x: templatePosition.x,
+          y:
+            templatePosition.y +
+            offset * (RUNTIME_INSTANCE_HEIGHT + RUNTIME_INSTANCE_VERTICAL_GAP) -
+            ((templateInstances.length - 1) * (RUNTIME_INSTANCE_HEIGHT + RUNTIME_INSTANCE_VERTICAL_GAP)) / 2,
+        },
+        width: RUNTIME_INSTANCE_WIDTH,
+        height: RUNTIME_INSTANCE_HEIGHT,
+        initialWidth: RUNTIME_INSTANCE_WIDTH,
+        initialHeight: RUNTIME_INSTANCE_HEIGHT,
+        selectable: true,
+        draggable: false,
+        connectable: false,
+        deletable: false,
+        focusable: true,
+        ariaLabel: `Observed runtime instance ${instance.ordinal}: ${
+          instance.label?.trim() || templateLabel
+        }. Read-only projection of template ${templateLabel}.`,
+        data: {
+          runtimeId: instance.id,
+          sendEdgeId: send.id,
+          templateNodeId: template.id,
+          label: instance.label?.trim() || `${templateLabel} #${instance.ordinal}`,
+          ordinal: instance.ordinal,
+        },
+      });
+      edges.push(
+        projectEdge(
+          {
+            edge: send,
+            source: visibleEndpoint(send.source),
+            target: runtimeNodeId,
+          },
+          false,
+          [],
+          'runtime-instance',
+          {
+            mode: 'send',
+            loop: false,
+            invalid: false,
+            frozen: true,
+            runtimeInstance: true,
+          },
+        ),
+      );
+      const runtimeConnector: GraphEdge = {
+        id: `runtime-connector:${instance.id}`,
+        source: runtimeNodeId,
+        target: visibleEndpoint(mergeId),
+        mode: 'normal',
+      };
+      edges.push(
+        projectEdge(
+          {
+            edge: runtimeConnector,
+            source: runtimeNodeId,
+            target: visibleEndpoint(mergeId),
+          },
+          false,
+          [],
+          'runtime-instance',
+          {
+            mode: 'normal',
+            loop: false,
+            invalid: false,
+            frozen: true,
+            runtimeInstance: true,
+          },
+        ),
+      );
+    }
   }
 
   return { nodes, edges };

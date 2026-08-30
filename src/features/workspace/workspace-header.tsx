@@ -33,6 +33,9 @@ type WorkspaceHeaderProps = {
   canDuplicate: boolean;
   canDelete: boolean;
   canFreeze: boolean;
+  viewMode: 'design' | 'runtime';
+  runtimeAvailable: boolean;
+  runtimeUnavailableReason?: string;
   onTogglePalette: () => void;
   onToggleInspector: () => void;
   onUndo: () => void;
@@ -43,6 +46,7 @@ type WorkspaceHeaderProps = {
   onReset: () => void;
   onFreeze: () => void;
   onUnfreeze: () => void;
+  onViewModeChange: (mode: 'design' | 'runtime') => void;
 };
 
 export function WorkspaceHeader({
@@ -60,6 +64,9 @@ export function WorkspaceHeader({
   canDuplicate,
   canDelete,
   canFreeze,
+  viewMode,
+  runtimeAvailable,
+  runtimeUnavailableReason,
   onTogglePalette,
   onToggleInspector,
   onUndo,
@@ -70,6 +77,7 @@ export function WorkspaceHeader({
   onReset,
   onFreeze,
   onUnfreeze,
+  onViewModeChange,
 }: WorkspaceHeaderProps) {
   const contractState = proposalPending
     ? 'Proposal awaiting review'
@@ -110,6 +118,34 @@ export function WorkspaceHeader({
           <HeaderIconButton label={inspectorOpen ? 'Hide inspector' : 'Show inspector'} icon={SidebarSimple} active={inspectorOpen} mirrored onClick={onToggleInspector} />
         </div>
         <div className="workspace-command-divider workspace-edit-command-divider" />
+        <div className="workspace-command-group workspace-view-command-group" role="radiogroup" aria-label="Canvas projection">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={viewMode === 'design'}
+            className={`workspace-view-button ${viewMode === 'design' ? 'is-active' : ''}`}
+            onClick={() => onViewModeChange('design')}
+          >
+            Design
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={viewMode === 'runtime'}
+            aria-label={
+              runtimeAvailable
+                ? 'Runtime'
+                : `Runtime unavailable: ${runtimeUnavailableReason ?? 'No runtime trace or fixture is available.'}`
+            }
+            className={`workspace-view-button ${viewMode === 'runtime' ? 'is-active' : ''}`}
+            disabled={!runtimeAvailable}
+            title={runtimeAvailable ? 'Show observed runtime instances' : runtimeUnavailableReason}
+            onClick={() => onViewModeChange('runtime')}
+          >
+            Runtime
+          </button>
+        </div>
+        <div className="workspace-command-divider workspace-view-command-divider" />
         <div className="workspace-command-group workspace-edit-command-group" role="group" aria-label="Edit controls">
           <HeaderIconButton label="Duplicate selection" icon={Copy} disabled={!canDuplicate} onClick={onDuplicate} />
           <HeaderIconButton label="Delete selection" icon={Trash} disabled={!canDelete} tone="danger" onClick={onDelete} />
