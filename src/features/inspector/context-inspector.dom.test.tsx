@@ -61,7 +61,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ContextInspector routing details', () => {
-  it('edits graph capabilities, scoped overrides, and canonical Step durability without drawing topology', () => {
+  it('edits graph capabilities without drawing topology', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     renderInspector();
 
@@ -76,8 +76,10 @@ describe('ContextInspector routing details', () => {
       store: { available: true, namespace: 'preferences' },
       runtimeMode: { mode: 'voice', input: 'audio' },
     });
+  });
 
-    cleanup();
+  it('edits canonical Step durability without drawing topology', () => {
+    useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     selectNode('billing');
     renderInspector();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Direct Store read' }));
@@ -89,8 +91,9 @@ describe('ContextInspector routing details', () => {
       retry: { maxAttempts: 2, backoff: { strategy: 'fixed', initialDelayMs: 0 } },
     });
     expect(screen.getByText(/does not add a route, an edge, or a topology loop/)).toBeTruthy();
+  });
 
-    cleanup();
+  it('edits scoped capability overrides without drawing topology', () => {
     const scoped = structuredClone(researchSupervisorGraph);
     scoped.capabilities.store = { available: true };
     useGraphStore.setState({ graph: scoped });
