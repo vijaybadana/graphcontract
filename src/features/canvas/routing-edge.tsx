@@ -103,7 +103,10 @@ function semanticName(presentation: CanvasEdgePresentation): string {
 }
 
 function provenanceName(presentation: CanvasEdgePresentation): string | undefined {
-  if (presentation.provenance === 'declared') return undefined;
+  // Pre-schema-v6 canvas projections do not carry provenance. Treat them as
+  // declared edges so legacy fixtures and persisted workspace previews do not
+  // gain a misleading badge or crash while rendering.
+  if (!presentation.provenance || presentation.provenance === 'declared') return undefined;
   return presentation.provenance.replace('-', ' ');
 }
 

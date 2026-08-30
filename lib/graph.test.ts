@@ -5,6 +5,7 @@ import {
   createProposal,
   enumerateScenarios,
   GraphOperation,
+  normalizeWorkflowGraph,
   proposalDiff,
   proposalInputSchema,
   researchSupervisorGraph,
@@ -181,7 +182,7 @@ describe('proposals and scenarios', () => {
       position: { x: 480, y: 160 },
     });
     expect(applied.graph.nodes.find((node) => node.id === 'review-agent')).not.toHaveProperty('parentId');
-    expect(applied.graph.edges).toEqual(before.edges);
+    expect(applied.graph.edges).toEqual(normalizeWorkflowGraph(before).edges);
     expect(graph).toEqual(before);
   });
 

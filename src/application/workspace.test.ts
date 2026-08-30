@@ -223,12 +223,13 @@ describe('workspace application service', () => {
 
     const approved = service.approveProposal(proposed.state);
     expect(approved.result?.ok).toBe(true);
-    expect(approved.state.graph.edges).toContainEqual({
+    expect(approved.state.graph.edges).toContainEqual(expect.objectContaining({
       id: 'billing-classifier-return',
       source: 'billing',
       target: 'classifier',
       mode: 'normal',
-    });
+      provenance: { representation: 'declared' },
+    }));
   });
 
   it('approves a valid subgraph proposal through the human path and reflows its relative geometry', () => {
