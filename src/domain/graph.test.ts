@@ -591,6 +591,35 @@ describe('routing edge semantics', () => {
       ]),
     );
 
+    const multipleTemplates = structuredClone(graph);
+    multipleTemplates.nodes.splice(3, 0, {
+      id: 'worker-two',
+      kind: 'step',
+      executor: 'tool',
+      label: 'Second worker template',
+      position: { x: 320, y: 160 },
+    });
+    multipleTemplates.edges.push(
+      {
+        id: 'dispatch-worker-two',
+        source: 'dispatch',
+        target: 'worker-two',
+        mode: 'send',
+        send: {
+          destinationTemplateId: 'worker-two',
+          multiplicity: 'dynamic',
+          payloadLabel: 'research task',
+          mergeNodeId: 'merge',
+        },
+      },
+      { id: 'worker-two-merge', source: 'worker-two', target: 'merge', mode: 'normal' },
+    );
+    expect(validateGraph(multipleTemplates)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'SEND_EDGE_COUNT', path: 'nodes.dispatch' }),
+      ]),
+    );
+
     const looping = structuredClone(graph);
     const mergeEnd = looping.edges.find((edge) => edge.id === 'merge-end')!;
     mergeEnd.target = 'after-merge';

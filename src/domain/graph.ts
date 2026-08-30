@@ -1893,6 +1893,15 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     } else if (send.length > 0) {
       // One or more Send/map relationships are the source's complete control
       // family. They are static templates, never concrete worker instances.
+      if (send.length !== 1) {
+        issues.push(
+          issue(
+            'SEND_EDGE_COUNT',
+            `“${node.label}” must have exactly one Send/map relationship to one worker template.`,
+            `nodes.${node.id}`,
+          ),
+        );
+      }
     } else if (normal.length > 0 && (conditional.length > 0 || command.length > 0 || fallback.length > 0)) {
       issues.push(
         issue('MIXED_ROUTING', `“${node.label}” cannot mix normal and routed edges.`, `nodes.${node.id}`),
