@@ -7,15 +7,17 @@ import {
   researchIntakeRoutingGraph,
   sampleGraph,
   validateGraph,
+  WorkflowGraphV1,
+  WorkflowGraphV3,
 } from '@/src/domain';
-import { migrateWorkspaceV3 } from './migrate-workspace';
+import { migrateWorkspaceV5 } from './migrate-workspace';
 
 const service = createWorkspaceService({
   now: () => '2026-08-28T12:00:00.000Z',
   makeId: (prefix) => `${prefix}-generated`,
 });
 
-const legacyV1Graph = () => {
+const legacyV1Graph = (): WorkflowGraphV1 => {
   const graph = structuredClone(sampleGraph);
   const legacyKinds: Record<string, string> = {
     classifier: 'agent',
@@ -35,7 +37,7 @@ const legacyV1Graph = () => {
       delete legacy.modifiers;
       return { ...legacy, kind: legacyKinds[node.id] ?? node.kind };
     }),
-  };
+  } as unknown as WorkflowGraphV1;
 };
 
 describe('workspace persistence migration', () => {
@@ -61,14 +63,14 @@ describe('workspace persistence migration', () => {
       collapsed: false,
     });
 
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph: invalid, proposal: null, scenarios: [] },
       service.createInitial,
     );
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '3',
+      schemaVersion: '4',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'unfinished-agent', kind: 'step', executor: 'ai' }),
       ]),
@@ -87,7 +89,7 @@ describe('workspace persistence migration', () => {
   });
 
   it('falls back only when the saved graph shape cannot be parsed', () => {
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph: { ...legacyV1Graph(), nodes: 'corrupt' }, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -104,7 +106,7 @@ describe('workspace persistence migration', () => {
     graph.nodes.find((node) => node.id === 'diagnostic')!.label = 'New Action';
     graph.nodes.find((node) => node.id === 'diagnostic')!.description = 'Keep this exact detail.';
 
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -125,7 +127,7 @@ describe('workspace persistence migration', () => {
     classifier.config = { tools: ['lookup'] };
     diagnostic.hitl = { enabled: true, timing: 'before', inputType: 'approval' };
 
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph: legacy, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -182,7 +184,7 @@ describe('workspace persistence migration', () => {
       ],
     };
 
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph: legacy, proposal, scenarios: [] },
       service.createInitial,
     );
@@ -221,14 +223,14 @@ describe('workspace persistence migration', () => {
     const proposal = proposalResult.proposal!;
     const scenarios = enumerateScenarios(sampleGraph);
 
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph: legacy, proposal, scenarios },
       service.createInitial,
     );
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '3',
+      schemaVersion: '4',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'classifier', kind: 'step', executor: 'ai' }),
         expect.objectContaining({ id: 'diagnostic', kind: 'step', executor: 'deterministic' }),
@@ -247,7 +249,7 @@ describe('workspace persistence migration', () => {
   });
 
   it('keeps a persisted Command graph with a topology-derived loop', () => {
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph: structuredClone(researchIntakeRoutingGraph), proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -264,6 +266,38 @@ describe('workspace persistence migration', () => {
         }),
       ]),
     });
+  });
+
+  it('advances v3 to v4 without changing ordinary topology, policies, or pending proposal meaning', () => {
+    const graph = {
+      ...structuredClone(sampleGraph),
+      schemaVersion: '3' as const,
+    } as unknown as WorkflowGraphV3;
+    const proposal = createProposal(sampleGraph, {
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'billing',
+          patch: { description: 'Persist this review draft.' },
+        },
+      ],
+      rationale: 'Persist this review draft.',
+    }).proposal!;
+
+    const migrated = migrateWorkspaceV5(
+      { graph, proposal, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph).toMatchObject({
+      schemaVersion: '4',
+      id: graph.id,
+      name: graph.name,
+      nodes: graph.nodes,
+      edges: graph.edges,
+      updatedAt: graph.updatedAt,
+    });
+    expect(migrated.proposal).toEqual(proposal);
   });
 
   it('migrates v2 HITL, sensitive policy, and pending proposal data without replacing incomplete drafts', () => {
@@ -325,7 +359,7 @@ describe('workspace persistence migration', () => {
       ],
     };
 
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph, proposal, scenarios: [] },
       service.createInitial,
     );
@@ -358,7 +392,7 @@ describe('workspace persistence migration', () => {
       modifiers: { guardrail: true },
     });
     expect(migratedClassifier).not.toMatchObject({ modifiers: { sensitiveSideEffect: true } });
-    expect(migrated.graph?.schemaVersion).toBe('3');
+    expect(migrated.graph?.schemaVersion).toBe('4');
     const operations = (migrated.proposal as unknown as { operations: Array<{ patch: Record<string, unknown> }> }).operations;
     expect(operations[0]?.patch).toMatchObject({
       hitl: {
@@ -391,7 +425,7 @@ describe('workspace persistence migration', () => {
     legacy.edges.find((edge) => edge.id === 'clarify-write-brief')!.label = ' ready ';
     legacy.edges.find((edge) => edge.id === 'clarify-write-brief')!.condition = '   ';
 
-    const migrated = migrateWorkspaceV3(
+    const migrated = migrateWorkspaceV5(
       { graph: legacy, proposal: null, scenarios: [] },
       service.createInitial,
     );

@@ -8,6 +8,8 @@ import {
   researchIntakeRoutingGraph,
   sampleGraph,
   validateGraph,
+  validateRuntimeProjectionFixture,
+  WorkflowGraph,
   workflowGraphSchema,
 } from './graph';
 import {
@@ -15,6 +17,51 @@ import {
   buildGraphScenariosDownload,
   buildPythonTestsDownload,
 } from '../adapters/exports/downloads';
+
+const sendMergeGraph = (): WorkflowGraph => ({
+  schemaVersion: '4',
+  id: 'dynamic-send-merge',
+  name: 'Dynamic Send and Merge',
+  status: 'draft',
+  updatedAt: '2026-08-30T00:00:00.000Z',
+  nodes: [
+    { id: 'start', kind: 'start', label: 'Start', position: { x: 0, y: 0 } },
+    { id: 'dispatch', kind: 'step', executor: 'ai', label: 'Dispatch', position: { x: 160, y: 0 } },
+    { id: 'worker', kind: 'step', executor: 'tool', label: 'Worker template', position: { x: 320, y: 0 } },
+    {
+      id: 'merge',
+      kind: 'merge',
+      label: 'Collect worker results',
+      position: { x: 480, y: 0 },
+      merge: {
+        reducer: { name: 'collect_results', aggregateState: 'state.results' },
+        completion: { mode: 'all' },
+        continuation: { mode: 'once' },
+        waitingForDynamicInputs: true,
+      },
+    },
+    { id: 'end', kind: 'end', label: 'End', position: { x: 640, y: 0 } },
+  ],
+  edges: [
+    { id: 'start-dispatch', source: 'start', target: 'dispatch', mode: 'normal' },
+    {
+      id: 'dispatch-worker',
+      source: 'dispatch',
+      target: 'worker',
+      mode: 'send',
+      send: {
+        destinationTemplateId: 'worker',
+        multiplicity: 'dynamic',
+        payloadLabel: 'research task',
+        payloadSchemaRef: 'schemas/research-task.json',
+        mergeNodeId: 'merge',
+      },
+    },
+    { id: 'worker-merge', source: 'worker', target: 'merge', mode: 'normal' },
+    { id: 'merge-end', source: 'merge', target: 'end', mode: 'normal' },
+  ],
+  subgraphs: [],
+});
 
 describe('routing edge semantics', () => {
   it('models executor ownership separately from internal tools, HITL, and modifier summaries', () => {
@@ -472,5 +519,136 @@ describe('routing edge semantics', () => {
       hitl: classifier.hitl,
     });
     expect(buildPythonTestsDownload(graph, scenarios).content).toContain('"human_outcomes"');
+  });
+
+  it('keeps Send and Merge as strict design-time semantics with bounded loop paths and retained exports', () => {
+    const graph = sendMergeGraph();
+
+    expect(workflowGraphSchema.safeParse(graph).success).toBe(true);
+    expect(validateGraph(graph)).toEqual([]);
+    const scenarios = enumerateScenarios(graph);
+    expect(scenarios).toEqual(enumerateScenarios(graph));
+    expect(scenarios).toHaveLength(1);
+    expect(scenarios[0]).toMatchObject({
+      orderedPath: ['start', 'dispatch', 'worker', 'merge', 'end'],
+      dynamicSends: [
+        {
+          edgeId: 'dispatch-worker',
+          templateNodeId: 'worker',
+          destinationTemplateId: 'worker',
+          multiplicity: 'dynamic',
+          payloadLabel: 'research task',
+          mergeNodeId: 'merge',
+        },
+      ],
+      merges: [
+        {
+          nodeId: 'merge',
+          reducer: { name: 'collect_results', aggregateState: 'state.results' },
+          completion: { mode: 'all' },
+          continuation: { mode: 'once' },
+        },
+      ],
+    });
+
+    const contract = JSON.parse(buildGraphContractDownload(graph).content);
+    expect(contract.edges.find((edge: { id: string }) => edge.id === 'dispatch-worker')).toMatchObject({
+      mode: 'send',
+      send: { payloadLabel: 'research task', multiplicity: 'dynamic' },
+    });
+    const scenarioExport = JSON.parse(buildGraphScenariosDownload(graph, scenarios).content);
+    expect(scenarioExport.scenarios[0].dynamicSends[0]).toMatchObject({
+      payloadSchemaRef: 'schemas/research-task.json',
+    });
+    expect(scenarioExport.scenarios[0].merges[0]).toMatchObject({
+      reducer: { aggregateState: 'state.results' },
+    });
+    const python = buildPythonTestsDownload(graph, scenarios).content;
+    expect(python).toContain('"dynamic_sends"');
+    expect(python).toContain('"payload_schema_ref"');
+    expect(python).toContain('"merges"');
+
+    const invalidSend = structuredClone(graph) as unknown as {
+      edges: Array<Record<string, unknown>>;
+    };
+    invalidSend.edges.find((edge) => edge.id === 'dispatch-worker')!.condition = 'not allowed';
+    expect(workflowGraphSchema.safeParse(invalidSend).success).toBe(false);
+    expect(validateGraph(invalidSend as unknown as WorkflowGraph)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'INVALID_SCHEMA', path: 'edges.dispatch-worker.condition' }),
+      ]),
+    );
+
+    const invalidMerge = structuredClone(graph);
+    const merge = invalidMerge.nodes.find((node) => node.id === 'merge');
+    if (!merge || merge.kind !== 'merge') throw new Error('Expected a Merge fixture.');
+    merge.merge.completion = { mode: 'quorum' };
+    invalidMerge.edges.find((edge) => edge.id === 'worker-merge')!.target = 'end';
+    expect(validateGraph(invalidMerge)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'SEND_TEMPLATE_CONTINUATION_REQUIRED', path: 'edges.dispatch-worker.send.mergeNodeId' }),
+        expect.objectContaining({ code: 'MERGE_QUORUM_REQUIRED', path: 'nodes.merge.merge.completion.quorum' }),
+      ]),
+    );
+
+    const looping = structuredClone(graph);
+    const mergeEnd = looping.edges.find((edge) => edge.id === 'merge-end')!;
+    mergeEnd.target = 'after-merge';
+    looping.nodes.splice(4, 0, {
+      id: 'after-merge',
+      kind: 'step',
+      executor: 'deterministic',
+      label: 'Evaluate retry',
+      position: { x: 640, y: 0 },
+    });
+    looping.edges.push(
+      { id: 'after-end', source: 'after-merge', target: 'end', mode: 'conditional', label: 'complete' },
+      { id: 'after-retry', source: 'after-merge', target: 'dispatch', mode: 'conditional', label: 'retry' },
+    );
+    expect(validateGraph(looping)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'SEND_LOOP_CAP_REQUIRED', path: 'edges.after-retry.loopCap' }),
+      ]),
+    );
+    looping.edges.find((edge) => edge.id === 'after-retry')!.loopCap = 2;
+    expect(validateGraph(looping)).toEqual([]);
+    expect(enumerateScenarios(looping)).toHaveLength(3);
+  });
+
+  it('validates runtime projection fixtures without admitting them into the canonical graph', () => {
+    const graph = sendMergeGraph();
+    expect(
+      validateRuntimeProjectionFixture(
+        {
+          graphId: graph.id,
+          graphUpdatedAt: graph.updatedAt,
+          instances: [
+            { id: 'runtime-1', sendEdgeId: 'dispatch-worker', templateNodeId: 'worker', ordinal: 0 },
+            { id: 'runtime-2', sendEdgeId: 'dispatch-worker', templateNodeId: 'worker', ordinal: 1 },
+          ],
+        },
+        graph,
+      ),
+    ).toEqual([]);
+    expect(
+      validateRuntimeProjectionFixture(
+        {
+          graphId: graph.id,
+          graphUpdatedAt: 'stale',
+          instances: [
+            { id: 'runtime-1', sendEdgeId: 'missing', templateNodeId: 'not-worker', ordinal: 0 },
+            { id: 'runtime-1', sendEdgeId: 'dispatch-worker', templateNodeId: 'wrong', ordinal: 1 },
+          ],
+        },
+        graph,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'RUNTIME_GRAPH_VERSION_MISMATCH', path: 'graphUpdatedAt' }),
+        expect.objectContaining({ code: 'RUNTIME_SEND_EDGE_INVALID', path: 'instances.runtime-1.sendEdgeId' }),
+        expect.objectContaining({ code: 'RUNTIME_INSTANCE_ID_DUPLICATE', path: 'instances.runtime-1' }),
+        expect.objectContaining({ code: 'RUNTIME_TEMPLATE_MISMATCH', path: 'instances.runtime-1.templateNodeId' }),
+      ]),
+    );
   });
 });

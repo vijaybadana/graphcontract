@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const nodeKinds = [
   'start',
   'step',
+  'merge',
   'end',
 ] as const;
 
@@ -12,7 +13,8 @@ export const legacyNodeKinds = ['agent', 'action', 'tool', 'human_input'] as con
 export type LegacyNodeKind = (typeof legacyNodeKinds)[number];
 const v1NodeKinds = ['start', ...legacyNodeKinds, 'end'] as const;
 type V1NodeKind = (typeof v1NodeKinds)[number];
-export type EdgeMode = 'normal' | 'conditional' | 'command' | 'fallback';
+export type RoutingEdgeMode = 'normal' | 'conditional' | 'command' | 'fallback';
+export type EdgeMode = RoutingEdgeMode | 'send';
 export type StepExecutor = 'deterministic' | 'ai' | 'tool' | 'human';
 
 export type HitlTiming = 'before' | 'inside' | 'after';
@@ -122,8 +124,24 @@ export type StepGraphNode = GraphNodeBase & {
   modifiers?: StepModifierSummary;
 };
 
+export type MergeConfig = {
+  reducer: { name: string; aggregateState: string };
+  completion: { mode: 'all' | 'any' | 'quorum'; quorum?: number };
+  continuation: { mode: 'once' | 'per_batch' };
+  waitingForDynamicInputs: true;
+};
+
+/** A Merge is a structural junction, never a work Step or palette preset. */
+export type MergeGraphNode = GraphNodeBase & {
+  kind: 'merge';
+  merge: MergeConfig;
+};
+
+/** v3 persistence nodes remain input-only after Package 3. */
+export type GraphNodeV3 = StructuralGraphNode | StepGraphNode;
+
 /** The active, serialized node model. Agent/Action/Tool/Human are presets, not kinds. */
-export type GraphNode = StructuralGraphNode | StepGraphNode;
+export type GraphNode = GraphNodeV3 | MergeGraphNode;
 
 export type StepGraphNodeV2 = Omit<StepGraphNode, 'hitl' | 'sensitive' | 'modifiers'> & {
   hitl?: HitlConfigV2;
@@ -137,14 +155,46 @@ export type LegacyGraphNodeV1 = GraphNodeBase & {
   hitl?: HitlConfigV2;
 };
 
-export type GraphEdge = {
+export type SendMapConfig = {
+  /** The one canonical template worker; must equal the edge target. */
+  destinationTemplateId: string;
+  multiplicity: 'dynamic';
+  payloadLabel: string;
+  mergeNodeId: string;
+  payloadSchemaRef?: string;
+};
+
+type GraphEdgeIdentity = {
   id: string;
   source: string;
   target: string;
-  mode: EdgeMode;
   label?: string;
+};
+
+type RoutingGraphEdgeBase = GraphEdgeIdentity & {
+  mode: RoutingEdgeMode;
   condition?: string;
 };
+
+export type RoutingGraphEdge = RoutingGraphEdgeBase & {
+  send?: never;
+  /** A cap only has meaning on a topology-derived return edge. */
+  loopCap?: number;
+};
+
+export type SendGraphEdge = GraphEdgeIdentity & {
+  mode: 'send';
+  condition?: never;
+  send: SendMapConfig;
+  /** A cap only has meaning on a topology-derived return edge. */
+  loopCap?: number;
+};
+
+/** Active v4 edge. Send and routing modes are mutually exclusive by type. */
+export type GraphEdge = RoutingGraphEdge | SendGraphEdge;
+
+/** v3 edge shape accepted only by the persistence migration. */
+export type GraphEdgeV3 = RoutingGraphEdgeBase;
 
 const normalizedRouteText = (value: string | undefined) => value?.trim();
 
@@ -153,53 +203,83 @@ const normalizedRouteText = (value: string | undefined) => value?.trim();
  * one canonical boundary used by editor writes, proposals, persistence, and
  * exports; presentation code must not merely hide incompatible fields.
  */
-export function normalizeRoutingEdge(edge: GraphEdge): GraphEdge {
-  const { mode, label, condition, ...identity } = edge;
+export function normalizeRoutingEdge<T extends GraphEdge | GraphEdgeV3>(edge: T): T {
+  const { mode, label, condition, send, loopCap, ...identity } = edge as GraphEdge;
   const normalizedLabel = normalizedRouteText(label);
+  const normalizedLoopCap = loopCap === undefined ? {} : { loopCap };
+
+  if (mode === 'send') {
+    return {
+      ...identity,
+      mode,
+      ...(normalizedLabel ? { label: normalizedLabel } : {}),
+      ...normalizedLoopCap,
+      ...(send
+        ? {
+            send: {
+              ...send,
+              destinationTemplateId: send.destinationTemplateId.trim(),
+              payloadLabel: send.payloadLabel.trim(),
+              mergeNodeId: send.mergeNodeId.trim(),
+              ...(send.payloadSchemaRef !== undefined
+                ? { payloadSchemaRef: send.payloadSchemaRef.trim() }
+                : {}),
+            },
+          }
+        : {}),
+    } as T;
+  }
 
   if (mode === 'normal') {
-    return { ...identity, mode, ...(normalizedLabel ? { label: normalizedLabel } : {}) };
+    return { ...identity, mode, ...normalizedLoopCap, ...(normalizedLabel ? { label: normalizedLabel } : {}) } as T;
   }
   if (mode === 'fallback') {
-    return { ...identity, mode, label: 'fallback' };
+    return { ...identity, mode, ...normalizedLoopCap, label: 'fallback' } as T;
   }
 
   return {
     ...identity,
     mode,
+    ...normalizedLoopCap,
     ...(normalizedLabel !== undefined ? { label: normalizedLabel } : {}),
     ...(condition !== undefined ? { condition: normalizedRouteText(condition) } : {}),
-  };
+  } as T;
 }
 
 /** Returns a graph copy whose route semantics are safe to persist or export. */
-export function normalizeWorkflowGraphRouting<T extends { edges: GraphEdge[] }>(graph: T): T {
+export function normalizeWorkflowGraphRouting<T extends { edges: Array<GraphEdge | GraphEdgeV3> }>(graph: T): T {
   return { ...graph, edges: graph.edges.map(normalizeRoutingEdge) };
 }
 
-type WorkflowGraphBase = {
+type WorkflowGraphBase<Edge extends GraphEdge | GraphEdgeV3 = GraphEdge> = {
   id: string;
   name: string;
-  edges: GraphEdge[];
+  edges: Edge[];
   subgraphs: GraphSubgraph[];
   status: 'draft' | 'frozen';
   updatedAt: string;
 };
 
-/** The active, serialized schema. All new writes use v3. */
+/** The active, serialized schema. All new writes use v4. */
 export type WorkflowGraph = WorkflowGraphBase & {
-  schemaVersion: '3';
+  schemaVersion: '4';
   nodes: GraphNode[];
 };
 
-/** v2 is persistence input only and is normalized before it reaches v3. */
-export type WorkflowGraphV2 = WorkflowGraphBase & {
+/** v3 is persistence input only and is normalized before it reaches v4. */
+export type WorkflowGraphV3 = WorkflowGraphBase<GraphEdgeV3> & {
+  schemaVersion: '3';
+  nodes: GraphNodeV3[];
+};
+
+/** v2 is persistence input only and is normalized before it reaches v4. */
+export type WorkflowGraphV2 = WorkflowGraphBase<GraphEdgeV3> & {
   schemaVersion: '2';
   nodes: GraphNodeV2[];
 };
 
 /** The v1 persistence-only graph shape accepted by the ordinary migration. */
-export type WorkflowGraphV1 = WorkflowGraphBase & {
+export type WorkflowGraphV1 = WorkflowGraphBase<GraphEdgeV3> & {
   schemaVersion: '1';
   nodes: LegacyGraphNodeV1[];
 };
@@ -213,8 +293,20 @@ export type GraphNodePatch = Partial<
     executor: StepExecutor;
     participation: StepParticipation;
     modifiers: StepModifierSummary;
+    merge: MergeConfig;
   }
 >;
+
+/** Patch shape stays explicit because GraphEdge is a discriminated union. */
+export type GraphEdgePatch = {
+  source?: string;
+  target?: string;
+  mode?: EdgeMode;
+  label?: string;
+  condition?: string;
+  send?: SendMapConfig;
+  loopCap?: number;
+};
 
 const legacyExecutorByKind: Record<LegacyNodeKind, StepExecutor> = {
   agent: 'ai',
@@ -242,7 +334,7 @@ export function normalizeLegacyWorkNodeKind(
 
 /** Converts one v1 node into its v2-normalized Step identity. */
 export function migrateLegacyGraphNodeV1(node: LegacyGraphNodeV1): GraphNodeV2 {
-  if (node.kind === 'start' || node.kind === 'end') return { ...node };
+  if (node.kind === 'start' || node.kind === 'end') return { ...node } as StructuralGraphNode;
 
   const { kind, ...step } = node;
   return { ...step, ...normalizeLegacyWorkNodeKind(kind, step.config) };
@@ -307,7 +399,7 @@ export const legacySensitiveEffectPolicy: SensitiveEffectPolicy = {
 };
 
 /** Migrates a v2 node without discarding incomplete draft configuration. */
-export function migrateGraphNodeV2(node: GraphNodeV2, graph: WorkflowGraphV2): GraphNode {
+export function migrateGraphNodeV2(node: GraphNodeV2, graph: WorkflowGraphV2): GraphNodeV3 {
   if (node.kind !== 'step') return { ...node };
   const { hitl, modifiers, ...step } = node;
   const { sensitiveSideEffect, ...remainingModifiers } = modifiers ?? {};
@@ -321,10 +413,10 @@ export function migrateGraphNodeV2(node: GraphNodeV2, graph: WorkflowGraphV2): G
 }
 
 /**
- * Converts a v2 graph into active v3. It intentionally does not validate
+ * Converts a v2 graph into v3 input shape. It intentionally does not validate
  * topology, so parseable partial drafts retain their authored state.
  */
-export function migrateWorkflowGraphV2(graph: WorkflowGraphV2): WorkflowGraph {
+export function migrateWorkflowGraphV2ToV3(graph: WorkflowGraphV2): WorkflowGraphV3 {
   return normalizeWorkflowGraphRouting({
     ...graph,
     schemaVersion: '3',
@@ -332,10 +424,30 @@ export function migrateWorkflowGraphV2(graph: WorkflowGraphV2): WorkflowGraph {
   });
 }
 
+/**
+ * Advances a valid v3 graph without changing existing topology, labels,
+ * positions, policies, or proposal meaning. Package 3 features are opt-in.
+ */
+export function migrateWorkflowGraphV3(graph: WorkflowGraphV3): WorkflowGraph {
+  return normalizeWorkflowGraphRouting({
+    ...graph,
+    schemaVersion: '4',
+    nodes: graph.nodes.map((node) => ({ ...node })),
+  });
+}
+
+/** Converts v2 persistence input directly into the active v4 graph. */
+export function migrateWorkflowGraphV2(graph: WorkflowGraphV2): WorkflowGraph {
+  return migrateWorkflowGraphV3(migrateWorkflowGraphV2ToV3(graph));
+}
+
 /** Convenience migration for callers that receive an original v1 payload. */
-export function migrateWorkflowGraphV1ToV3(graph: WorkflowGraphV1): WorkflowGraph {
+export function migrateWorkflowGraphV1ToV4(graph: WorkflowGraphV1): WorkflowGraph {
   return migrateWorkflowGraphV2(migrateWorkflowGraphV1(graph));
 }
+
+/** Compatibility name retained for Package 2 callers; its result is active v4. */
+export const migrateWorkflowGraphV1ToV3 = migrateWorkflowGraphV1ToV4;
 
 export type ValidationIssue = {
   code: string;
@@ -364,7 +476,7 @@ export type GraphOperation =
   | {
       type: 'update_edge';
       edgeId: string;
-      patch: Partial<Omit<GraphEdge, 'id'>>;
+      patch: GraphEdgePatch;
     }
   | { type: 'remove_edge'; edgeId: string };
 
@@ -421,6 +533,27 @@ export type ScenarioHumanOutcome = {
   resumeNodeId: string;
 };
 
+/** One design-time traversal of a dynamic map relationship; never N workers. */
+export type ScenarioDynamicSend = {
+  edgeId: string;
+  sourceNodeId: string;
+  templateNodeId: string;
+  destinationTemplateId: string;
+  multiplicity: 'dynamic';
+  payloadLabel: string;
+  mergeNodeId: string;
+  payloadSchemaRef?: string;
+};
+
+/** Reducer metadata reached by a design-time scenario path. */
+export type ScenarioMerge = {
+  nodeId: string;
+  reducer: MergeConfig['reducer'];
+  completion: MergeConfig['completion'];
+  continuation: MergeConfig['continuation'];
+  waitingForDynamicInputs: true;
+};
+
 export type BranchScenario = {
   id: string;
   name: string;
@@ -429,9 +562,28 @@ export type BranchScenario = {
   humanOutcomes: ScenarioHumanOutcome[];
   /** Ordered edges retain the authored routing data needed by scenario exports. */
   traversedEdges: ScenarioEdge[];
+  /** Ordered dynamic maps are annotations, never fabricated worker paths. */
+  dynamicSends: ScenarioDynamicSend[];
+  /** Ordered Merge metadata follows the template path. */
+  merges: ScenarioMerge[];
   orderedPath: string[];
   expectedNodes: string[];
   expectedTerminalNode: string;
+};
+
+export type RuntimeProjectionInstance = {
+  id: string;
+  sendEdgeId: string;
+  templateNodeId: string;
+  label?: string;
+  ordinal: number;
+};
+
+/** Runtime evidence is projection-only and never part of WorkflowGraph. */
+export type RuntimeProjectionFixture = {
+  graphId: string;
+  graphUpdatedAt: string;
+  instances: RuntimeProjectionInstance[];
 };
 
 const positionSchema = z.object({ x: z.number(), y: z.number() });
@@ -516,7 +668,41 @@ export const sensitiveEffectPolicySchema = z
   })
   .strict();
 
+export const mergeConfigSchema = z
+  .object({
+    reducer: z
+      .object({
+        name: z.string().min(1),
+        aggregateState: z.string().min(1),
+      })
+      .strict(),
+    completion: z
+      .object({
+        mode: z.enum(['all', 'any', 'quorum']),
+        quorum: z.number().int().positive().optional(),
+      })
+      .strict(),
+    continuation: z.object({ mode: z.enum(['once', 'per_batch']) }).strict(),
+    waitingForDynamicInputs: z.literal(true),
+  })
+  .strict();
+
 export const graphNodeSchema = z.discriminatedUnion('kind', [
+  graphNodeBaseSchema.extend({ kind: z.literal('start') }).strict(),
+  graphNodeBaseSchema.extend({
+    kind: z.literal('step'),
+    executor: stepExecutorSchema,
+    hitl: hitlSchema.optional(),
+    sensitive: sensitiveEffectPolicySchema.optional(),
+    participation: stepParticipationSchema.optional(),
+    modifiers: stepModifierSummarySchema.optional(),
+  }).strict(),
+  graphNodeBaseSchema.extend({ kind: z.literal('merge'), merge: mergeConfigSchema }).strict(),
+  graphNodeBaseSchema.extend({ kind: z.literal('end') }).strict(),
+]);
+
+/** v3 input-only nodes deliberately omit Package 3 Merge. */
+export const graphNodeV3Schema = z.discriminatedUnion('kind', [
   graphNodeBaseSchema.extend({ kind: z.literal('start') }),
   graphNodeBaseSchema.extend({
     kind: z.literal('step'),
@@ -556,21 +742,47 @@ export const graphSubgraphSchema = z.object({
   collapsed: z.boolean(),
 });
 
-export const graphEdgeSchema = z.object({
+const graphEdgeBaseSchema = z.object({
   id: z.string().min(1),
   source: z.string().min(1),
   target: z.string().min(1),
-  mode: z.enum(['normal', 'conditional', 'command', 'fallback']),
   label: z.string().optional(),
   condition: z.string().optional(),
+  loopCap: z.number().int().min(1).max(10).optional(),
 });
 
-export const workflowGraphSchema = z.object({
-  schemaVersion: z.literal('3'),
+export const sendMapConfigSchema = z
+  .object({
+    destinationTemplateId: z.string().min(1),
+    multiplicity: z.literal('dynamic'),
+    payloadLabel: z.string().min(1),
+    mergeNodeId: z.string().min(1),
+    payloadSchemaRef: z.string().min(1).optional(),
+  })
+  .strict();
+
+const routingGraphEdgeSchema = (mode: RoutingEdgeMode) =>
+  graphEdgeBaseSchema.extend({ mode: z.literal(mode), send: z.never().optional() }).strict();
+
+export const graphEdgeSchema = z.discriminatedUnion('mode', [
+  routingGraphEdgeSchema('normal'),
+  routingGraphEdgeSchema('conditional'),
+  routingGraphEdgeSchema('command'),
+  routingGraphEdgeSchema('fallback'),
+  graphEdgeBaseSchema
+    .omit({ condition: true })
+    .extend({ mode: z.literal('send'), send: sendMapConfigSchema })
+    .strict(),
+]);
+
+/** v3 input-only edges deliberately omit Send and loop caps. */
+export const graphEdgeV3Schema = graphEdgeBaseSchema
+  .omit({ loopCap: true })
+  .extend({ mode: z.enum(['normal', 'conditional', 'command', 'fallback']) });
+
+const workflowGraphBaseSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  nodes: z.array(graphNodeSchema),
-  edges: z.array(graphEdgeSchema),
   // A default keeps every pre-subgraph persisted graph readable without
   // changing its node positions, topology, or other authored data.
   subgraphs: z.array(graphSubgraphSchema).default([]),
@@ -578,8 +790,21 @@ export const workflowGraphSchema = z.object({
   updatedAt: z.string().min(1),
 });
 
+export const workflowGraphSchema = workflowGraphBaseSchema.extend({
+  schemaVersion: z.literal('4'),
+  nodes: z.array(graphNodeSchema),
+  edges: z.array(graphEdgeSchema),
+});
+
+/** v3 compatibility input only; successful parsing must be followed by migration. */
+export const workflowGraphV3Schema = workflowGraphBaseSchema.extend({
+  schemaVersion: z.literal('3'),
+  nodes: z.array(graphNodeV3Schema),
+  edges: z.array(graphEdgeV3Schema),
+});
+
 /** v2 compatibility input only; successful parsing must be followed by migration. */
-export const workflowGraphV2Schema = workflowGraphSchema
+export const workflowGraphV2Schema = workflowGraphV3Schema
   .omit({ schemaVersion: true, nodes: true })
   .extend({
     schemaVersion: z.literal('2'),
@@ -605,6 +830,37 @@ export const graphNodePatchSchema = z
     executor: stepExecutorSchema.optional(),
     participation: stepParticipationSchema.optional(),
     modifiers: stepModifierSummarySchema.optional(),
+    merge: mergeConfigSchema.optional(),
+  })
+  .strict();
+
+export const graphEdgePatchSchema = z
+  .object({
+    source: z.string().min(1).optional(),
+    target: z.string().min(1).optional(),
+    mode: z.enum(['normal', 'conditional', 'command', 'fallback', 'send']).optional(),
+    label: z.string().optional(),
+    condition: z.string().optional(),
+    send: sendMapConfigSchema.optional(),
+    loopCap: z.number().int().min(1).max(10).optional(),
+  })
+  .strict();
+
+export const runtimeProjectionFixtureSchema = z
+  .object({
+    graphId: z.string().min(1),
+    graphUpdatedAt: z.string().min(1),
+    instances: z.array(
+      z
+        .object({
+          id: z.string().min(1),
+          sendEdgeId: z.string().min(1),
+          templateNodeId: z.string().min(1),
+          label: z.string().min(1).optional(),
+          ordinal: z.number().int().nonnegative(),
+        })
+        .strict(),
+    ),
   })
   .strict();
 
@@ -636,7 +892,7 @@ export const graphOperationSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('update_edge'),
     edgeId: z.string().min(1),
-    patch: graphEdgeSchema.omit({ id: true }).partial(),
+    patch: graphEdgePatchSchema,
   }),
   z.object({ type: z.literal('remove_edge'), edgeId: z.string().min(1) }),
 ]);
@@ -648,7 +904,7 @@ export const proposalInputSchema = z.object({
 });
 
 export const sampleGraph: WorkflowGraph = {
-  schemaVersion: '3',
+  schemaVersion: '4',
   id: 'customer-support-contract',
   name: 'Customer Support Workflow',
   status: 'draft',
@@ -728,7 +984,7 @@ export const sampleGraph: WorkflowGraph = {
  * canonical topology. It is intentionally a design-time preview fixture: no
  * runtime response, resume, or side effect is executed by loading it. */
 export const humanControlHitlDemoGraph: WorkflowGraph = {
-  schemaVersion: '3',
+  schemaVersion: '4',
   id: 'human-control-hitl-demo',
   name: 'Human Control · Deploy Change',
   status: 'draft',
@@ -824,7 +1080,7 @@ export const humanControlHitlDemoGraph: WorkflowGraph = {
 
 /** A compact valid fixture for the first-class subgraph interaction. */
 export const researchSupervisorGraph: WorkflowGraph = {
-  schemaVersion: '3',
+  schemaVersion: '4',
   id: 'research-supervisor-demo',
   name: 'Research Supervisor Workflow',
   status: 'draft',
@@ -923,7 +1179,7 @@ export const researchSupervisorGraph: WorkflowGraph = {
 /** The canonical routing-semantics fixture. A return edge is normal topology,
  * so loop presentation can be derived without persisting a separate mode. */
 export const researchIntakeRoutingGraph: WorkflowGraph = {
-  schemaVersion: '3',
+  schemaVersion: '4',
   id: 'research-intake-routing-demo',
   name: 'Research Intake Routing',
   status: 'draft',
@@ -1046,11 +1302,84 @@ const issue = (code: string, message: string, path?: string): ValidationIssue =>
   path,
 });
 
+/** Converts Zod's array offsets into the stable domain IDs used by the canvas. */
+function stableSchemaIssuePath(graph: unknown, path: PropertyKey[]): string {
+  const [collection, index, ...rest] = path;
+  if (
+    (collection === 'nodes' || collection === 'edges') &&
+    typeof index === 'number' &&
+    graph &&
+    typeof graph === 'object'
+  ) {
+    const records = (graph as Record<string, unknown>)[collection];
+    const candidate = Array.isArray(records) ? records[index] : undefined;
+    if (candidate && typeof candidate === 'object' && typeof (candidate as { id?: unknown }).id === 'string') {
+      return [collection, (candidate as { id: string }).id, ...rest].join('.');
+    }
+  }
+  return path.join('.');
+}
+
+const compareEdges = (a: GraphEdge, b: GraphEdge) =>
+  [a.source, a.target, a.mode, a.label ?? '', a.condition ?? '', a.id]
+    .join('\u0000')
+    .localeCompare([b.source, b.target, b.mode, b.label ?? '', b.condition ?? '', b.id].join('\u0000'));
+
+type TopologyLoop = {
+  /** The return edge discovered by deterministic depth-first traversal. */
+  loopEdgeId: string;
+  /** Every edge in the corresponding directed cycle, in traversal order. */
+  edgeIds: string[];
+};
+
+function deriveTopologyLoops(
+  startId: string,
+  outgoing: ReadonlyMap<string, readonly GraphEdge[]>,
+): TopologyLoop[] {
+  const loops: TopologyLoop[] = [];
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const nodeStack: string[] = [];
+  const edgeStack: GraphEdge[] = [];
+
+  const visit = (nodeId: string) => {
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId);
+    nodeStack.push(nodeId);
+    for (const edge of [...(outgoing.get(nodeId) ?? [])].sort(compareEdges)) {
+      if (visiting.has(edge.target)) {
+        const cycleStart = nodeStack.indexOf(edge.target);
+        loops.push({
+          loopEdgeId: edge.id,
+          edgeIds: [...edgeStack.slice(cycleStart).map((candidate) => candidate.id), edge.id],
+        });
+      } else {
+        edgeStack.push(edge);
+        visit(edge.target);
+        edgeStack.pop();
+      }
+    }
+    nodeStack.pop();
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  };
+
+  visit(startId);
+  return loops;
+}
+
 export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   const parsed = workflowGraphSchema.safeParse(graph);
   if (!parsed.success) {
     return parsed.error.issues.map((entry) =>
-      issue('INVALID_SCHEMA', entry.message, entry.path.join('.')),
+      issue(
+        'INVALID_SCHEMA',
+        entry.message,
+        stableSchemaIssuePath(
+          graph,
+          entry.code === 'unrecognized_keys' ? [...entry.path, ...entry.keys] : entry.path,
+        ),
+      ),
     );
   }
 
@@ -1095,7 +1424,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
         ),
       );
     }
-    if (node.kind !== 'step' && 'hitl' in node && node.hitl?.enabled) {
+    if (node.kind !== 'step' && (node as { hitl?: HitlConfig }).hitl?.enabled) {
       issues.push(
         issue(
           'INVALID_HITL_NODE',
@@ -1162,6 +1491,162 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   for (const edge of normalized.edges) {
     outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
     incoming.set(edge.target, [...(incoming.get(edge.target) ?? []), edge]);
+  }
+
+  const sendEdges = normalized.edges.filter((edge) => edge.mode === 'send');
+  for (const edge of sendEdges) {
+    const send = edge.send;
+    const source = nodeById.get(edge.source);
+    const template = nodeById.get(edge.target);
+    if (!send) {
+      issues.push(
+        issue('SEND_CONFIGURATION_REQUIRED', `Send edge “${edge.id}” needs its map configuration.`, `edges.${edge.id}.send`),
+      );
+      continue;
+    }
+    if (!send.destinationTemplateId.trim()) {
+      issues.push(
+        issue(
+          'SEND_TEMPLATE_REQUIRED',
+          `Send edge “${edge.id}” needs a readable destination template ID.`,
+          `edges.${edge.id}.send.destinationTemplateId`,
+        ),
+      );
+    }
+    if (!send.payloadLabel.trim()) {
+      issues.push(
+        issue(
+          'SEND_PAYLOAD_LABEL_REQUIRED',
+          `Send edge “${edge.id}” needs a readable payload label.`,
+          `edges.${edge.id}.send.payloadLabel`,
+        ),
+      );
+    }
+    if (!send.mergeNodeId.trim()) {
+      issues.push(
+        issue(
+          'SEND_MERGE_REQUIRED',
+          `Send edge “${edge.id}” needs a Merge junction ID.`,
+          `edges.${edge.id}.send.mergeNodeId`,
+        ),
+      );
+    }
+    if (send.payloadSchemaRef !== undefined && !send.payloadSchemaRef.trim()) {
+      issues.push(
+        issue(
+          'SEND_PAYLOAD_SCHEMA_REF_REQUIRED',
+          `Send edge “${edge.id}” needs a readable payload schema reference when supplied.`,
+          `edges.${edge.id}.send.payloadSchemaRef`,
+        ),
+      );
+    }
+    if (source?.kind !== 'step') {
+      issues.push(
+        issue('SEND_SOURCE_STEP_REQUIRED', `Send edge “${edge.id}” must start at a Step.`, `edges.${edge.id}.source`),
+      );
+    }
+    if (template?.kind !== 'step') {
+      issues.push(
+        issue('SEND_TEMPLATE_STEP_REQUIRED', `Send edge “${edge.id}” must target a Step template.`, `edges.${edge.id}.target`),
+      );
+    }
+    if (send.destinationTemplateId !== edge.target) {
+      issues.push(
+        issue(
+          'SEND_TEMPLATE_TARGET_MISMATCH',
+          `Send destination template must equal edge target “${edge.target}”.`,
+          `edges.${edge.id}.send.destinationTemplateId`,
+        ),
+      );
+    }
+    if (source && template && source.parentId !== template.parentId) {
+      issues.push(
+        issue(
+          'SEND_SCOPE_INVALID',
+          `Send edge “${edge.id}” cannot cross a subgraph boundary.`,
+          `edges.${edge.id}`,
+        ),
+      );
+    }
+
+    const merge = nodeById.get(send.mergeNodeId);
+    if (merge?.kind !== 'merge') {
+      issues.push(
+        issue(
+          'SEND_MERGE_REQUIRED',
+          `Send edge “${edge.id}” must reference a Merge junction.`,
+          `edges.${edge.id}.send.mergeNodeId`,
+        ),
+      );
+      continue;
+    }
+    if (
+      source?.parentId !== merge.parentId ||
+      template?.parentId !== merge.parentId
+    ) {
+      issues.push(
+        issue(
+          'SEND_MERGE_SCOPE_INVALID',
+          `Send edge “${edge.id}”, its template, and Merge must share one scope.`,
+          `edges.${edge.id}.send.mergeNodeId`,
+        ),
+      );
+    }
+    const templateContinuations = (outgoing.get(edge.target) ?? []).filter(
+      (candidate) => candidate.mode === 'normal' && candidate.target === merge.id,
+    );
+    if (templateContinuations.length !== 1) {
+      issues.push(
+        issue(
+          'SEND_TEMPLATE_CONTINUATION_REQUIRED',
+          `Send template “${edge.target}” needs one normal edge directly to Merge “${merge.id}”.`,
+          `edges.${edge.id}.send.mergeNodeId`,
+        ),
+      );
+    }
+  }
+
+  for (const node of normalized.nodes) {
+    if (node.kind !== 'merge') continue;
+    const nodeOutgoing = outgoing.get(node.id) ?? [];
+    const normalContinuations = nodeOutgoing.filter((edge) => edge.mode === 'normal');
+    const dynamicInputs = sendEdges.filter((edge) => edge.send?.mergeNodeId === node.id);
+    if (dynamicInputs.length === 0) {
+      issues.push(
+        issue(
+          'MERGE_DYNAMIC_INPUT_REQUIRED',
+          `Merge “${node.label}” needs a dynamic Send input.`,
+          `nodes.${node.id}.merge`,
+        ),
+      );
+    }
+    if (normalContinuations.length !== 1 || nodeOutgoing.length !== 1) {
+      issues.push(
+        issue(
+          'MERGE_CONTINUATION_REQUIRED',
+          `Merge “${node.label}” needs exactly one normal continuation.`,
+          `nodes.${node.id}.merge.continuation`,
+        ),
+      );
+    }
+    if (node.merge.completion.mode === 'quorum' && !node.merge.completion.quorum) {
+      issues.push(
+        issue(
+          'MERGE_QUORUM_REQUIRED',
+          `Merge “${node.label}” needs a positive quorum completion value.`,
+          `nodes.${node.id}.merge.completion.quorum`,
+        ),
+      );
+    }
+    if (node.merge.completion.mode !== 'quorum' && node.merge.completion.quorum !== undefined) {
+      issues.push(
+        issue(
+          'MERGE_QUORUM_UNEXPECTED',
+          `Only quorum completion may define a quorum value.`,
+          `nodes.${node.id}.merge.completion.quorum`,
+        ),
+      );
+    }
   }
 
   for (const node of normalized.nodes) {
@@ -1374,8 +1859,20 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     const conditional = nodeOutgoing.filter((edge) => edge.mode === 'conditional');
     const command = nodeOutgoing.filter((edge) => edge.mode === 'command');
     const fallback = nodeOutgoing.filter((edge) => edge.mode === 'fallback');
+    const send = nodeOutgoing.filter((edge) => edge.mode === 'send');
 
-    if (normal.length > 0 && (conditional.length > 0 || command.length > 0 || fallback.length > 0)) {
+    if (send.length > 0 && (normal.length > 0 || conditional.length > 0 || command.length > 0 || fallback.length > 0)) {
+      issues.push(
+        issue(
+          'SEND_MIXED_ROUTING',
+          `“${node.label}” cannot mix Send with normal or routed edges.`,
+          `nodes.${node.id}`,
+        ),
+      );
+    } else if (send.length > 0) {
+      // One or more Send/map relationships are the source's complete control
+      // family. They are static templates, never concrete worker instances.
+    } else if (normal.length > 0 && (conditional.length > 0 || command.length > 0 || fallback.length > 0)) {
       issues.push(
         issue('MIXED_ROUTING', `“${node.label}” cannot mix normal and routed edges.`, `nodes.${node.id}`),
       );
@@ -1474,6 +1971,36 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   }
 
   if (starts[0]) {
+    const topologyLoops = deriveTopologyLoops(starts[0].id, outgoing);
+    const loopEdgeIds = new Set(topologyLoops.map((loop) => loop.loopEdgeId));
+    const edgeById = new Map(normalized.edges.map((edge) => [edge.id, edge]));
+    for (const edge of normalized.edges) {
+      if (edge.loopCap !== undefined && !loopEdgeIds.has(edge.id)) {
+        issues.push(
+          issue(
+            'LOOP_CAP_REQUIRES_TOPOLOGY_LOOP',
+            `Loop cap on “${edge.id}” requires a topology-derived return edge.`,
+            `edges.${edge.id}.loopCap`,
+          ),
+        );
+      }
+    }
+    for (const loop of topologyLoops) {
+      const containsSend = loop.edgeIds.some((edgeId) => edgeById.get(edgeId)?.mode === 'send');
+      const returnEdge = edgeById.get(loop.loopEdgeId);
+      if (containsSend && returnEdge?.loopCap === undefined) {
+        issues.push(
+          issue(
+            'SEND_LOOP_CAP_REQUIRED',
+            'A topology cycle containing Send needs an explicit bounded loop cap on its return edge.',
+            `edges.${loop.loopEdgeId}.loopCap`,
+          ),
+        );
+      }
+    }
+  }
+
+  if (starts[0]) {
     const visited = new Set<string>();
 
     const visit = (nodeId: string) => {
@@ -1521,6 +2048,64 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   return issues;
 }
 
+/**
+ * Runtime evidence is intentionally validated beside, rather than inside, the
+ * canonical graph. Callers may project it read-only only after this succeeds.
+ */
+export function validateRuntimeProjectionFixture(
+  fixture: RuntimeProjectionFixture,
+  graph: WorkflowGraph,
+): ValidationIssue[] {
+  const parsed = runtimeProjectionFixtureSchema.safeParse(fixture);
+  if (!parsed.success) {
+    return parsed.error.issues.map((entry) =>
+      issue('INVALID_RUNTIME_FIXTURE', entry.message, entry.path.join('.')),
+    );
+  }
+
+  const issues: ValidationIssue[] = [];
+  if (parsed.data.graphId !== graph.id) {
+    issues.push(
+      issue('RUNTIME_GRAPH_ID_MISMATCH', 'Runtime fixture graph ID does not match the accepted graph.', 'graphId'),
+    );
+  }
+  if (parsed.data.graphUpdatedAt !== graph.updatedAt) {
+    issues.push(
+      issue(
+        'RUNTIME_GRAPH_VERSION_MISMATCH',
+        'Runtime fixture graph version does not match the accepted graph.',
+        'graphUpdatedAt',
+      ),
+    );
+  }
+  const sendById = new Map(
+    graph.edges.filter((edge) => edge.mode === 'send').map((edge) => [edge.id, edge]),
+  );
+  const instanceIds = new Set<string>();
+  for (const instance of parsed.data.instances) {
+    const path = `instances.${instance.id}`;
+    if (instanceIds.has(instance.id)) {
+      issues.push(issue('RUNTIME_INSTANCE_ID_DUPLICATE', `Runtime instance “${instance.id}” is duplicated.`, path));
+    }
+    instanceIds.add(instance.id);
+    const send = sendById.get(instance.sendEdgeId);
+    if (!send) {
+      issues.push(
+        issue('RUNTIME_SEND_EDGE_INVALID', `Runtime instance “${instance.id}” references no Send edge.`, `${path}.sendEdgeId`),
+      );
+    } else if (instance.templateNodeId !== send.target) {
+      issues.push(
+        issue(
+          'RUNTIME_TEMPLATE_MISMATCH',
+          `Runtime instance “${instance.id}” must use Send template “${send.target}”.`,
+          `${path}.templateNodeId`,
+        ),
+      );
+    }
+  }
+  return issues;
+}
+
 export function applyGraphOperations(
   graph: WorkflowGraph,
   operations: GraphOperation[],
@@ -1545,6 +2130,7 @@ export function applyGraphOperations(
   const uniqueNodeIds = (nodeIds: string[]) => [...new Set(nodeIds)];
   const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
     ['executor', 'participation', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
+  const hasMergePatchFields = (patch: GraphNodePatch) => 'merge' in patch;
   const missingNodes = (nodeIds: string[], operationIndex: number) => {
     const missing = uniqueNodeIds(nodeIds).filter((nodeId) => !findNode(nodeId));
     for (const nodeId of missing) {
@@ -1577,14 +2163,26 @@ export function applyGraphOperations(
             `operations.${index}`,
           ),
         );
+      } else if (
+        next.nodes[nodeIndex].kind !== 'merge' &&
+        hasMergePatchFields(operation.patch)
+      ) {
+        errors.push(
+          issue(
+            'MERGE_FIELDS_REQUIRE_MERGE',
+            `Merge configuration can only update Merge node “${operation.nodeId}”.`,
+            `operations.${index}`,
+          ),
+        );
       } else {
         const patch = structuredClone(operation.patch);
         if (next.nodes[nodeIndex].kind === 'step' && patch.sensitive === null) {
-          const updated = { ...next.nodes[nodeIndex], ...patch };
+          const { sensitive: _, ...withoutSensitive } = patch;
+          const updated = { ...next.nodes[nodeIndex], ...withoutSensitive } as StepGraphNode;
           delete updated.sensitive;
           next.nodes[nodeIndex] = updated;
         } else {
-          next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...patch };
+          next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...patch } as GraphNode;
         }
       }
     } else if (operation.type === 'remove_node') {
@@ -1675,7 +2273,7 @@ export function applyGraphOperations(
         const updated = normalizeRoutingEdge({
           ...next.edges[edgeIndex],
           ...structuredClone(operation.patch),
-        });
+        } as GraphEdge);
         if (!findNode(updated.source) || !findNode(updated.target)) {
           errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edgeId}” references a node that was not found.`, `operations.${index}`));
         } else {
@@ -1797,33 +2395,10 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
   }
   for (const edges of outgoing.values()) {
-    edges.sort((a, b) =>
-      [a.source, a.target, a.mode, a.label ?? '', a.condition ?? '', a.id]
-        .join('\u0000')
-        .localeCompare([b.source, b.target, b.mode, b.label ?? '', b.condition ?? '', b.id].join('\u0000')),
-    );
+    edges.sort(compareEdges);
   }
 
-  // A loop is derived from topology, rather than from a stored edge mode. A
-  // depth-first back edge is sufficient to break every reachable directed
-  // cycle, and the sorted outgoing order makes the derived set stable.
-  const loopEdgeIds = new Set<string>();
-  const visited = new Set<string>();
-  const visiting = new Set<string>();
-  const findLoopEdges = (nodeId: string) => {
-    if (visited.has(nodeId)) return;
-    visiting.add(nodeId);
-    for (const edge of outgoing.get(nodeId) ?? []) {
-      if (visiting.has(edge.target)) {
-        loopEdgeIds.add(edge.id);
-      } else {
-        findLoopEdges(edge.target);
-      }
-    }
-    visiting.delete(nodeId);
-    visited.add(nodeId);
-  };
-  findLoopEdges(start.id);
+  const loopEdgeIds = new Set(deriveTopologyLoops(start.id, outgoing).map((loop) => loop.loopEdgeId));
 
   const scenarios: BranchScenario[] = [];
   const walk = (
@@ -1832,11 +2407,26 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     conditions: BranchCondition[],
     humanOutcomes: ScenarioHumanOutcome[],
     traversedEdges: ScenarioEdge[],
-    traversedLoopEdgeIds: ReadonlySet<string>,
+    dynamicSends: ScenarioDynamicSend[],
+    merges: ScenarioMerge[],
+    traversedLoopCounts: ReadonlyMap<string, number>,
   ) => {
     const node = nodeMap.get(nodeId);
     if (!node) return;
     const nextPath = [...path, nodeId];
+    const nextMerges =
+      node.kind === 'merge'
+        ? [
+            ...merges,
+            {
+              nodeId: node.id,
+              reducer: node.merge.reducer,
+              completion: node.merge.completion,
+              continuation: node.merge.continuation,
+              waitingForDynamicInputs: true as const,
+            },
+          ]
+        : merges;
     if (node.kind === 'end' && !node.parentId) {
       const number = scenarios.length + 1;
       const humanOutcomeSuffix = humanOutcomes.length
@@ -1848,6 +2438,8 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
         triggeringConditions: conditions,
         humanOutcomes,
         traversedEdges,
+        dynamicSends,
+        merges: nextMerges,
         orderedPath: nextPath,
         expectedNodes: nextPath,
         expectedTerminalNode: nodeId,
@@ -1855,7 +2447,9 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
       return;
     }
 
-    const response = node.kind === 'step' && node.hitl?.enabled ? node.hitl.response : undefined;
+    const response = node.kind === 'step' && (node as StepGraphNode).hitl?.enabled
+      ? (node as StepGraphNode).hitl?.response
+      : undefined;
     const choices = response
       ? response.allowedOutcomes
           .slice()
@@ -1869,14 +2463,16 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
 
     for (const { edge, outcome } of choices) {
       const isLoop = loopEdgeIds.has(edge.id);
-      if (isLoop && traversedLoopEdgeIds.has(edge.id)) continue;
+      const loopCap = edge.loopCap ?? 1;
+      const loopCount = traversedLoopCounts.get(edge.id) ?? 0;
+      if (isLoop && loopCount >= loopCap) continue;
       const scenarioEdge: ScenarioEdge = {
         ...edge,
         isLoop: isLoop || undefined,
         isFallback: edge.mode === 'fallback' || undefined,
       };
       const branch =
-        edge.mode === 'normal'
+        edge.mode === 'normal' || edge.mode === 'send'
           ? conditions
           : [
               ...conditions,
@@ -1890,9 +2486,9 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
                 isFallback: edge.mode === 'fallback' || undefined,
               },
             ];
-      const nextTraversedLoopEdgeIds = isLoop
-        ? new Set([...traversedLoopEdgeIds, edge.id])
-        : traversedLoopEdgeIds;
+      const nextTraversedLoopCounts = isLoop
+        ? new Map([...traversedLoopCounts, [edge.id, loopCount + 1]])
+        : traversedLoopCounts;
       const nextHumanOutcomes =
         outcome && response
           ? [
@@ -1900,7 +2496,7 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
               {
                 nodeId,
                 nodeLabel: node.label,
-                timing: node.hitl!.timing!,
+                timing: (node as StepGraphNode).hitl!.timing!,
                 responseType: response.type,
                 outcomeId: outcome.id,
                 outcomeLabel: outcome.label,
@@ -1908,18 +2504,36 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
               },
             ]
           : humanOutcomes;
+      const nextDynamicSends =
+        edge.mode === 'send' && edge.send
+          ? [
+              ...dynamicSends,
+              {
+                edgeId: edge.id,
+                sourceNodeId: edge.source,
+                templateNodeId: edge.target,
+                destinationTemplateId: edge.send.destinationTemplateId,
+                multiplicity: edge.send.multiplicity,
+                payloadLabel: edge.send.payloadLabel,
+                mergeNodeId: edge.send.mergeNodeId,
+                ...(edge.send.payloadSchemaRef ? { payloadSchemaRef: edge.send.payloadSchemaRef } : {}),
+              },
+            ]
+          : dynamicSends;
       walk(
         edge.target,
         nextPath,
         branch,
         nextHumanOutcomes,
         [...traversedEdges, scenarioEdge],
-        nextTraversedLoopEdgeIds,
+        nextDynamicSends,
+        nextMerges,
+        nextTraversedLoopCounts,
       );
     }
   };
 
-  walk(start.id, [], [], [], [], new Set());
+  walk(start.id, [], [], [], [], [], [], new Map());
   return scenarios;
 }
 
@@ -1949,6 +2563,21 @@ SCENARIOS = ${JSON.stringify(
         node_id: outcome.nodeId,
         outcome_id: outcome.outcomeId,
         resume_node_id: outcome.resumeNodeId,
+      })),
+      dynamic_sends: scenario.dynamicSends.map((send) => ({
+        edge_id: send.edgeId,
+        template_node_id: send.templateNodeId,
+        destination_template_id: send.destinationTemplateId,
+        multiplicity: send.multiplicity,
+        payload_label: send.payloadLabel,
+        payload_schema_ref: send.payloadSchemaRef ?? null,
+        merge_node_id: send.mergeNodeId,
+      })),
+      merges: scenario.merges.map((merge) => ({
+        node_id: merge.nodeId,
+        reducer: merge.reducer,
+        completion: merge.completion,
+        continuation: merge.continuation,
       })),
     })),
     null,

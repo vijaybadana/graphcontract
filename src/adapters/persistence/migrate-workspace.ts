@@ -1,6 +1,6 @@
 import { WorkspaceCore } from '@/src/application/workspace';
 import {
-  graphEdgeSchema,
+  graphEdgeV3Schema,
   graphNodeV2Schema,
   hitlV2Schema,
   legacyGraphNodeV1Schema,
@@ -11,9 +11,11 @@ import {
   migrateLegacyGraphNodeV1,
   migrateWorkflowGraphV1,
   migrateWorkflowGraphV2,
+  migrateWorkflowGraphV3,
   normalizeLegacyWorkNodeKind,
   normalizeWorkflowGraphRouting,
   workflowGraphSchema,
+  workflowGraphV3Schema,
   workflowGraphV2Schema,
   workflowGraphV1Schema,
   WorkflowGraphV2,
@@ -93,7 +95,7 @@ function migrateV2Proposal(proposal: unknown, graph: WorkflowGraphV2): unknown {
       ...graph.edges,
       ...v1Normalized.operations.flatMap((operation) => {
         if (!isRecord(operation) || operation.type !== 'add_edge') return [];
-        const edge = graphEdgeSchema.safeParse(operation.edge);
+        const edge = graphEdgeV3Schema.safeParse(operation.edge);
         return edge.success ? [edge.data] : [];
       }),
     ],
@@ -111,7 +113,7 @@ function migrateV2Proposal(proposal: unknown, graph: WorkflowGraphV2): unknown {
 
       if (operation.type !== 'update_node' || !isRecord(operation.patch)) return operation;
       const patch = { ...operation.patch };
-      if ('hitl' in patch) {
+      if ('hitl' in patch && typeof operation.nodeId === 'string') {
         const hitl = hitlV2Schema.safeParse(patch.hitl);
         if (hitl.success) patch.hitl = migrateHitlConfigV2(hitl.data, operation.nodeId, proposalGraph);
       }
@@ -128,7 +130,7 @@ function migrateV2Proposal(proposal: unknown, graph: WorkflowGraphV2): unknown {
 
 /** Repairs the hackathon demo snapshot without mixing persistence concerns into
  * domain validation or deleting valid user-authored workflows. */
-export function migrateWorkspaceV4(
+export function migrateWorkspaceV5(
   persistedState: unknown,
   createInitial: () => WorkspaceCore,
 ): PersistedWorkspace {
@@ -145,6 +147,14 @@ export function migrateWorkspaceV4(
     return {
       ...persisted,
       graph: normalizeWorkflowGraphRouting(parsed.data),
+    };
+  }
+
+  const v3 = workflowGraphV3Schema.safeParse(persisted.graph);
+  if (v3.success) {
+    return {
+      ...persisted,
+      graph: migrateWorkflowGraphV3(v3.data),
     };
   }
 
@@ -169,5 +179,6 @@ export function migrateWorkspaceV4(
 }
 
 /** Compatibility aliases for callers that imported the Package 1 migration. */
-export const migrateWorkspaceV3 = migrateWorkspaceV4;
-export const migrateWorkspaceV2 = migrateWorkspaceV4;
+export const migrateWorkspaceV4 = migrateWorkspaceV5;
+export const migrateWorkspaceV3 = migrateWorkspaceV5;
+export const migrateWorkspaceV2 = migrateWorkspaceV5;
