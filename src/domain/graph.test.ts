@@ -7,6 +7,7 @@ import {
   enumerateScenarios,
   graphOperationSchema,
   graphNodePatchSchema,
+  normalizeWorkflowGraph,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   resolveEffectiveCapabilities,
@@ -25,7 +26,7 @@ import {
 } from '../adapters/exports/downloads';
 
 const sendMergeGraph = (): WorkflowGraph => ({
-  schemaVersion: '5',
+  schemaVersion: '6',
   id: 'dynamic-send-merge',
   name: 'Dynamic Send and Merge',
   status: 'draft',
@@ -68,6 +69,7 @@ const sendMergeGraph = (): WorkflowGraph => ({
     { id: 'merge-end', source: 'merge', target: 'end', mode: 'normal' },
   ],
   subgraphs: [],
+  relationships: [],
 });
 
 describe('routing edge semantics', () => {
@@ -264,8 +266,9 @@ describe('routing edge semantics', () => {
   });
 
   it('keeps v4 persistence parsing isolated from v5 durability fields and overrides', () => {
-    const { capabilities, ...v4Graph } = structuredClone(sampleGraph);
+    const { capabilities, relationships, ...v4Graph } = structuredClone(sampleGraph);
     void capabilities;
+    void relationships;
     const v4 = { ...v4Graph, schemaVersion: '4' as const };
     expect(workflowGraphV4Schema.safeParse(v4).success).toBe(true);
 
@@ -347,7 +350,7 @@ describe('routing edge semantics', () => {
         patch: { condition: 'state.shouldContinue === true', label: ' continue ' },
       },
     ]).graph.edges.find((edge) => edge.id === 'researcher-continue');
-    expect(normal).toEqual({
+    expect(normal).toMatchObject({
       id: 'researcher-continue',
       source: 'researcher',
       target: 'research-supervisor',
@@ -362,7 +365,7 @@ describe('routing edge semantics', () => {
         patch: { label: 'otherwise', condition: 'state.unhandled === true' },
       },
     ]).graph.edges.find((edge) => edge.id === 'supervisor-human-review');
-    expect(fallback).toEqual({
+    expect(fallback).toMatchObject({
       id: 'supervisor-human-review',
       source: 'research-supervisor',
       target: 'human-review',
@@ -406,7 +409,7 @@ describe('routing edge semantics', () => {
     expect(applied.errors).toEqual([
       expect.objectContaining({ code: 'STEP_FIELDS_REQUIRE_STEP', path: 'operations.0' }),
     ]);
-    expect(applied.graph).toEqual(original);
+    expect(applied.graph).toEqual(normalizeWorkflowGraph(original));
   });
 
   it('uses null as an operation-only request to remove an existing sensitive policy', () => {
@@ -765,12 +768,12 @@ describe('routing edge semantics', () => {
     staleExport.edges.find((edge) => edge.id === 'supervisor-human-review')!.condition =
       'state.unhandled === true';
     expect(JSON.parse(buildGraphContractDownload(staleExport).content).edges).toEqual(
-      researchIntakeRoutingGraph.edges,
+      normalizeWorkflowGraph(researchIntakeRoutingGraph).edges,
     );
     const scenarioDownload = JSON.parse(buildGraphScenariosDownload(researchIntakeRoutingGraph, scenarios).content);
     expect(scenarioDownload.scenarios).toEqual(scenarios);
     expect(scenarioDownload).toMatchObject({
-      graphSchemaVersion: '5',
+      graphSchemaVersion: '6',
       graphCapabilities: researchIntakeRoutingGraph.capabilities,
       subgraphCapabilityOverrides: [],
     });
@@ -868,7 +871,7 @@ describe('routing edge semantics', () => {
     expect(python).toContain('"payload_schema_ref"');
     expect(python).toContain('"merges"');
     expect(python).toContain('GRAPH_METADATA');
-    expect(python).toContain('"schema_version":"5"');
+    expect(python).toContain('"schema_version":"6"');
 
     const invalidSend = structuredClone(graph) as unknown as {
       edges: Array<Record<string, unknown>>;
@@ -981,5 +984,122 @@ describe('routing edge semantics', () => {
         expect.objectContaining({ code: 'RUNTIME_TEMPLATE_MISMATCH', path: 'instances.runtime-1.templateNodeId' }),
       ]),
     );
+  });
+
+  it('keeps v6 provenance, opaque metadata, and boundary relationships out of native routing', () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected a Step fixture.');
+
+    const evidence = {
+      source: 'runtime/worker-trace.json',
+      evidenceClass: 'runtime-inspection',
+      confidence: 'high' as const,
+      details: 'Observed factory boundary during a completed run.',
+      timestamp: '2026-08-31T00:00:00.000Z',
+    };
+    classifier.provenance = { representation: 'runtime-generated', evidence };
+    classifier.readiness = { state: 'degraded', detail: 'Falls back to a deterministic classifier.' };
+    classifier.opaque = {
+      factoryLabel: 'create_support_classifier',
+      inputPorts: [{ name: 'request' }],
+      outputPorts: [{ name: 'route' }],
+      runtimeInspection: { available: true, evidence },
+    };
+    graph.edges[0].provenance = {
+      representation: 'derived-semantic',
+      evidence: { ...evidence, evidenceClass: 'verified-routing-behavior' },
+    };
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    graph.relationships = [
+      {
+        id: 'classifier-thread',
+        kind: 'spawned-thread',
+        source: { kind: 'node', nodeId: 'classifier' },
+        target: { kind: 'external', externalId: 'support-thread', label: 'Support thread' },
+        provenance: { representation: 'declared' },
+      },
+      {
+        id: 'external-reentry',
+        kind: 'external-orchestration',
+        source: { kind: 'external', externalId: 'background-runner', label: 'Background runner' },
+        target: { kind: 'node', nodeId: 'human' },
+        provenance: { representation: 'external-orchestration' },
+      },
+    ];
+
+    expect(validateGraph(graph)).toEqual([]);
+    const scenarios = enumerateScenarios(graph);
+    expect(scenarios).not.toHaveLength(0);
+    expect(scenarios.some((scenario) => scenario.orderedPath.includes('support-thread'))).toBe(false);
+    expect(scenarios.some((scenario) =>
+      scenario.relationshipAnnotations.some((annotation) =>
+        annotation.family === 'spawned' && annotation.relationshipId === 'classifier-thread'),
+    )).toBe(true);
+    expect(scenarios.some((scenario) =>
+      scenario.relationshipAnnotations.some((annotation) =>
+        annotation.family === 'external-orchestration' && annotation.relationshipId === 'external-reentry'),
+    )).toBe(true);
+    expect(scenarios[0]?.relationshipAnnotations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ family: 'native-control', edgeId: 'start-classifier' })]),
+    );
+    expect(scenarios[0]?.expectedTerminalOutcome).toEqual({ kind: 'completed' });
+
+    const contract = JSON.parse(buildGraphContractDownload(graph).content);
+    const scenarioExport = JSON.parse(buildGraphScenariosDownload(graph, scenarios).content);
+    expect(contract.relationships).toEqual(graph.relationships);
+    expect(scenarioExport.graphRelationships).toEqual(graph.relationships);
+    expect(scenarioExport.scenarios[0].relationshipAnnotations).toEqual(scenarios[0]?.relationshipAnnotations);
+    expect(buildPythonTestsDownload(graph, scenarios).content).toContain('relationship_annotations');
+  });
+
+  it('keeps relationship proposal operations progressive and rejects unsupported evidence claims atomically', () => {
+    const graph = structuredClone(sampleGraph);
+    const relationship = {
+      id: 'spawn-review-thread',
+      kind: 'spawned-thread' as const,
+      source: { kind: 'node' as const, nodeId: 'classifier' },
+      target: { kind: 'external' as const, externalId: 'review-thread', label: 'Review thread' },
+      provenance: { representation: 'declared' as const },
+    };
+    const operations: GraphOperation[] = [
+      { type: 'add_relationship', relationship },
+    ];
+    const applied = applyGraphOperations(graph, operations);
+    expect(applied.errors).toEqual([]);
+    expect(applied.graph.edges.map((edge) => edge.id)).toEqual(graph.edges.map((edge) => edge.id));
+    expect(applied.graph.relationships).toEqual([relationship]);
+
+    const proposal = createProposal(graph, {
+      operations,
+      rationale: 'Expose the spawned review-thread portal without treating it as control flow.',
+    }).proposal;
+    expect(proposal).toMatchObject({ status: 'pending', diff: { addedRelationshipIds: ['spawn-review-thread'] } });
+    expect(graph.relationships).toEqual([]);
+
+    const invalid = createProposal(graph, {
+      operations: [
+        {
+          type: 'add_relationship',
+          relationship: {
+            id: 'unsupported-runtime-claim',
+            kind: 'external-orchestration',
+            source: { kind: 'node', nodeId: 'classifier' },
+            target: { kind: 'external', externalId: 'runner', label: 'Runner' },
+            provenance: { representation: 'runtime-generated' },
+          },
+        },
+      ],
+      rationale: 'Attempt a runtime claim without evidence.',
+    }).proposal;
+    expect(invalid).toMatchObject({ status: 'invalid' });
+    expect(invalid?.validationErrors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'PROVENANCE_EVIDENCE_REQUIRED', path: 'relationships.unsupported-runtime-claim.provenance.evidence' }),
+        expect.objectContaining({ code: 'EXTERNAL_RELATIONSHIP_PROVENANCE_REQUIRED', path: 'relationships.unsupported-runtime-claim.provenance.representation' }),
+        expect.objectContaining({ code: 'EXTERNAL_ORCHESTRATION_CAPABILITY_REQUIRED', path: 'capabilities.provenance.externalOrchestrationAvailable' }),
+      ]),
+    );
+    expect(graph.relationships).toEqual([]);
   });
 });

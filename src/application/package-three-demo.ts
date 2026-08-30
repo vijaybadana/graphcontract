@@ -2,7 +2,7 @@ import { createDefaultGraphCapabilities, type RuntimeProjectionFixture, type Wor
 
 /** An authored Package 3 contract; concrete workers live only in its fixture. */
 export const dynamicParallelismDemoGraph: WorkflowGraph = {
-  schemaVersion: '5',
+  schemaVersion: '6',
   id: 'dynamic-parallelism-merge-demo',
   name: 'Parallel research · Send ×N',
   status: 'draft',
@@ -67,6 +67,7 @@ export const dynamicParallelismDemoGraph: WorkflowGraph = {
     { id: 'parallel-reflect-end', source: 'reflect', target: 'parallel-end', mode: 'normal' },
   ],
   subgraphs: [],
+  relationships: [],
 };
 
 /** Bound to the currently accepted demo revision at projection time. */

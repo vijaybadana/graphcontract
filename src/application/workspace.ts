@@ -167,7 +167,7 @@ const dropParentForNode = (
 
 export function createWorkspaceService(dependencies: WorkspaceDependencies) {
   const createInitial = (): WorkspaceCore => ({
-    graph: { ...clone(sampleGraph), updatedAt: dependencies.now() },
+    graph: normalizeWorkflowGraph({ ...clone(sampleGraph), updatedAt: dependencies.now() }),
     proposal: null,
     scenarios: [],
   });

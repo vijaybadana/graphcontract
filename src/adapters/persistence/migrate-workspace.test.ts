@@ -19,8 +19,9 @@ const service = createWorkspaceService({
 
 const legacyV1Graph = (): WorkflowGraphV1 => {
   const graph = structuredClone(sampleGraph);
-  const { capabilities, ...legacyGraph } = graph;
+  const { capabilities, relationships, ...legacyGraph } = graph;
   void capabilities;
+  void relationships;
   const legacyKinds: Record<string, string> = {
     classifier: 'agent',
     billing: 'agent',
@@ -72,7 +73,7 @@ describe('workspace persistence migration', () => {
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '5',
+      schemaVersion: '6',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'unfinished-agent', kind: 'step', executor: 'ai' }),
       ]),
@@ -99,6 +100,7 @@ describe('workspace persistence migration', () => {
     };
     legacy.schemaVersion = '4';
     delete legacy.capabilities;
+    delete (legacy as { relationships?: unknown }).relationships;
     legacy.nodes.find((node) => node.id === 'classifier')!.modifiers = {
       storeRead: true,
       storeWrite: true,
@@ -112,7 +114,7 @@ describe('workspace persistence migration', () => {
     const classifier = migrated.graph?.nodes.find((node) => node.id === 'classifier');
 
     expect(migrated.graph).toMatchObject({
-      schemaVersion: '5',
+      schemaVersion: '6',
       capabilities: { store: { available: true }, runtimeMode: { mode: 'unspecified' } },
       edges: legacy.edges,
     });
@@ -293,7 +295,7 @@ describe('workspace persistence migration', () => {
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '5',
+      schemaVersion: '6',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'classifier', kind: 'step', executor: 'ai' }),
         expect.objectContaining({ id: 'diagnostic', kind: 'step', executor: 'deterministic' }),
@@ -331,9 +333,10 @@ describe('workspace persistence migration', () => {
     });
   });
 
-  it('advances v3 to v5 without changing ordinary topology, policies, or pending proposal meaning', () => {
-    const { capabilities, ...legacyGraph } = structuredClone(sampleGraph);
+  it('advances v3 to v6 without changing ordinary topology, policies, or pending proposal meaning', () => {
+    const { capabilities, relationships, ...legacyGraph } = structuredClone(sampleGraph);
     void capabilities;
+    void relationships;
     const graph = {
       ...legacyGraph,
       schemaVersion: '3' as const,
@@ -355,7 +358,7 @@ describe('workspace persistence migration', () => {
     );
 
     expect(migrated.graph).toMatchObject({
-      schemaVersion: '5',
+      schemaVersion: '6',
       id: graph.id,
       name: graph.name,
       nodes: graph.nodes,
@@ -429,6 +432,7 @@ describe('workspace persistence migration', () => {
     };
     graph.schemaVersion = '2';
     delete graph.capabilities;
+    delete (graph as { relationships?: unknown }).relationships;
     const classifier = graph.nodes.find((node) => node.id === 'classifier')!;
     classifier.hitl = {
       enabled: true,
@@ -514,7 +518,7 @@ describe('workspace persistence migration', () => {
       modifiers: { guardrail: true },
     });
     expect(migratedClassifier).not.toMatchObject({ modifiers: { sensitiveSideEffect: true } });
-    expect(migrated.graph?.schemaVersion).toBe('5');
+    expect(migrated.graph?.schemaVersion).toBe('6');
     const operations = (migrated.proposal as unknown as { operations: Array<{ patch: Record<string, unknown> }> }).operations;
     expect(operations[0]?.patch).toMatchObject({
       hitl: {
@@ -537,6 +541,46 @@ describe('workspace persistence migration', () => {
     });
   });
 
+  it('migrates v5 elements to declared v6 records without inventing evidence or relationships', () => {
+    const graph = structuredClone(sampleGraph) as unknown as Record<string, unknown>;
+    const capabilities = graph.capabilities as Record<string, unknown>;
+    const { provenance, ...v5Capabilities } = capabilities;
+    void provenance;
+    graph.schemaVersion = '5';
+    graph.capabilities = v5Capabilities;
+    delete graph.relationships;
+    const nodes = graph.nodes as Array<Record<string, unknown>>;
+    nodes.find((node) => node.id === 'classifier')!.modifiers = { readiness: 'degraded' };
+    const end = nodes.find((node) => node.id === 'end')!;
+    end.label = 'Awaiting reply';
+
+    const migrated = migrateWorkspaceV6(
+      { graph, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+    const classifier = migrated.graph?.nodes.find((node) => node.id === 'classifier');
+    const migratedEnd = migrated.graph?.nodes.find((node) => node.id === 'end');
+
+    expect(migrated.graph).toMatchObject({
+      schemaVersion: '6',
+      relationships: [],
+      capabilities: {
+        provenance: {
+          evidenceOverlayAvailable: true,
+          externalOrchestrationAvailable: false,
+        },
+      },
+    });
+    expect(classifier).toMatchObject({
+      provenance: { representation: 'declared' },
+      readiness: { state: 'degraded' },
+    });
+    expect(classifier?.provenance?.evidence).toBeUndefined();
+    expect(migratedEnd).toMatchObject({ outcome: { kind: 'awaiting-reply' } });
+    expect(migrated.graph?.edges[0]).toMatchObject({ provenance: { representation: 'declared' } });
+    expect(migrated.graph?.edges[0].provenance?.evidence).toBeUndefined();
+  });
+
   it('normalizes stale route fields while preserving the persisted graph', () => {
     const legacy = structuredClone(researchIntakeRoutingGraph);
     legacy.edges.find((edge) => edge.id === 'researcher-continue')!.condition =
@@ -552,14 +596,14 @@ describe('workspace persistence migration', () => {
       service.createInitial,
     );
 
-    expect(migrated.graph?.edges.find((edge) => edge.id === 'researcher-continue')).toEqual({
+    expect(migrated.graph?.edges.find((edge) => edge.id === 'researcher-continue')).toMatchObject({
       id: 'researcher-continue',
       source: 'researcher',
       target: 'research-supervisor',
       mode: 'normal',
       label: 'continue',
     });
-    expect(migrated.graph?.edges.find((edge) => edge.id === 'supervisor-human-review')).toEqual({
+    expect(migrated.graph?.edges.find((edge) => edge.id === 'supervisor-human-review')).toMatchObject({
       id: 'supervisor-human-review',
       source: 'research-supervisor',
       target: 'human-review',

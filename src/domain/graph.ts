@@ -59,6 +59,36 @@ export type HitlConfigV2 = {
 export type GraphPosition = { x: number; y: number };
 export type GraphDimensions = { width: number; height: number };
 
+/** Provenance is display and inspector data, never native routing semantics. */
+export const provenanceRepresentations = [
+  'declared',
+  'runtime-generated',
+  'derived-semantic',
+  'external-orchestration',
+] as const;
+export type ProvenanceRepresentation = (typeof provenanceRepresentations)[number];
+export type EvidenceConfidence = 'low' | 'medium' | 'high';
+
+/** Evidence values are validated as untrusted, display-only text. */
+export type ProvenanceEvidence = {
+  source: string;
+  evidenceClass: string;
+  confidence: EvidenceConfidence;
+  details?: string;
+  timestamp?: string;
+};
+
+export type Provenance = {
+  representation: ProvenanceRepresentation;
+  evidence?: ProvenanceEvidence;
+};
+
+/** Visibility stays UI-only; this only records whether the capability exists. */
+export type ProvenanceCapabilities = {
+  evidenceOverlayAvailable: boolean;
+  externalOrchestrationAvailable: boolean;
+};
+
 /** Per-run state remains separate from checkpointing and cross-thread Store. */
 export type WorkingStateCapability = {
   enabled: boolean;
@@ -92,6 +122,7 @@ export type GraphCapabilities = {
   checkpointer: CheckpointerCapability;
   store: LongTermStoreCapability;
   runtimeMode: RuntimeModeCapability;
+  provenance: ProvenanceCapabilities;
 };
 
 /** Only State, Checkpointer, and Store have meaningful subgraph scope. */
@@ -139,6 +170,8 @@ type GraphNodeBase = {
   position: GraphPosition;
   parentId?: string;
   config?: Record<string, unknown>;
+  /** Defaults to declared during v5 migration without inventing evidence. */
+  provenance?: Provenance;
 };
 
 export type StepModifierSummary = {
@@ -154,6 +187,45 @@ export type StepModifierSummary = {
   opaque?: true;
   /** Omit when ready; degraded and unimplemented need an explicit status. */
   readiness?: 'degraded' | 'unimplemented';
+};
+
+export type StepReadiness = {
+  state: 'ready' | 'degraded' | 'unimplemented';
+  /** Optional operator-safe explanation; it is never executable instruction text. */
+  detail?: string;
+};
+
+export type OpaqueInterfacePort = {
+  name: string;
+  description?: string;
+};
+
+export type RuntimeInspectionAvailability = {
+  available: boolean;
+  /** An available inspection must carry supplied evidence; migration never fabricates it. */
+  evidence?: ProvenanceEvidence;
+};
+
+/** A prebuilt Step declares only its known boundary, never child topology. */
+export type OpaqueStepMetadata = {
+  factoryLabel: string;
+  inputPorts: OpaqueInterfacePort[];
+  outputPorts: OpaqueInterfacePort[];
+  runtimeInspection: RuntimeInspectionAvailability;
+};
+
+export type EndOutcomeKind =
+  | 'completed'
+  | 'awaiting-reply'
+  | 'failure'
+  | 'partial-result'
+  | 'cancelled'
+  | 'domain-specific';
+
+export type EndOutcome = {
+  kind: EndOutcomeKind;
+  /** Required only when the product needs a domain-specific terminal result. */
+  detail?: string;
 };
 
 /** Direct Store use is a Step capability, never an implied graph edge. */
@@ -191,9 +263,9 @@ export type SensitiveEffectPolicy = {
   idempotency: string;
 };
 
-export type StructuralGraphNode = GraphNodeBase & {
-  kind: 'start' | 'end';
-};
+export type StructuralGraphNode =
+  | (GraphNodeBase & { kind: 'start' })
+  | (GraphNodeBase & { kind: 'end'; outcome?: EndOutcome });
 
 export type StepGraphNode = GraphNodeBase & {
   kind: 'step';
@@ -207,6 +279,10 @@ export type StepGraphNode = GraphNodeBase & {
   storeAccess?: StepStoreAccess;
   /** Canonical v5 retry policy; it never creates a routing edge. */
   retry?: RetryPolicy;
+  /** Canonical v6 readiness; modifier summaries remain compatibility projections. */
+  readiness?: StepReadiness;
+  /** Declared prebuilt boundary only; it never contains inferred children. */
+  opaque?: OpaqueStepMetadata;
   modifiers?: StepModifierSummary;
 };
 
@@ -262,6 +338,7 @@ type GraphEdgeIdentity = {
   source: string;
   target: string;
   label?: string;
+  provenance?: Provenance;
 };
 
 type RoutingGraphEdgeBase = GraphEdgeIdentity & {
@@ -288,6 +365,34 @@ export type GraphEdge = RoutingGraphEdge | SendGraphEdge;
 
 /** v3 edge shape accepted only by the persistence migration. */
 export type GraphEdgeV3 = RoutingGraphEdgeBase;
+
+export type RelationshipEndpoint =
+  | { kind: 'node'; nodeId: string }
+  | { kind: 'external'; externalId: string; label: string };
+
+export type NonNativeRelationshipKind =
+  | 'spawned-run'
+  | 'spawned-thread'
+  | 'external-orchestration';
+
+/**
+ * A system boundary relationship is intentionally not a GraphEdge. It can
+ * leave the compiled graph or re-enter it but is excluded from every native
+ * routing, proxy, reachability, loop, and DFS operation.
+ */
+export type NonNativeRelationship = {
+  id: string;
+  kind: NonNativeRelationshipKind;
+  source: RelationshipEndpoint;
+  target: RelationshipEndpoint;
+  label?: string;
+  provenance: Provenance;
+};
+
+/** Native-edge truth is derived from the collection/type, never persisted. */
+export const isNativeControlEdge = (
+  relationship: GraphEdge | NonNativeRelationship,
+): relationship is GraphEdge => 'mode' in relationship;
 
 const normalizedRouteText = (value: string | undefined) => value?.trim();
 
@@ -351,6 +456,10 @@ export function createDefaultGraphCapabilities(): GraphCapabilities {
     checkpointer: { enabled: false, durableThread: { required: false } },
     store: { available: false },
     runtimeMode: { mode: 'unspecified' },
+    provenance: {
+      evidenceOverlayAvailable: true,
+      externalOrchestrationAvailable: false,
+    },
   };
 }
 
@@ -365,7 +474,14 @@ const legacyRetryPolicy = (): RetryPolicy => ({
  * canonical data so existing presentation consumers remain compatible.
  */
 export function normalizeStepDurability(node: StepGraphNode): StepGraphNode {
-  const { storeRead, storeWrite, retryFallback, ...remainingModifiers } = node.modifiers ?? {};
+  const {
+    storeRead,
+    storeWrite,
+    retryFallback,
+    opaque: legacyOpaque,
+    readiness: legacyReadiness,
+    ...remainingModifiers
+  } = node.modifiers ?? {};
   const storeAccess = node.storeAccess ?? {
     ...(storeRead ? { read: {} } : {}),
     ...(storeWrite ? { write: {} } : {}),
@@ -376,12 +492,18 @@ export function normalizeStepDurability(node: StepGraphNode): StepGraphNode {
     ...(storeAccess.read ? { storeRead: true as const } : {}),
     ...(storeAccess.write ? { storeWrite: true as const } : {}),
     ...(retry ? { retryFallback: true as const } : {}),
+    ...(node.opaque || legacyOpaque ? { opaque: true as const } : {}),
+    ...((node.readiness?.state ?? legacyReadiness) &&
+    (node.readiness?.state ?? legacyReadiness) !== 'ready'
+      ? { readiness: (node.readiness?.state ?? legacyReadiness) as 'degraded' | 'unimplemented' }
+      : {}),
   };
 
   return {
     ...node,
     ...(node.storeAccess !== undefined || storeAccess.read || storeAccess.write ? { storeAccess } : {}),
     ...(retry ? { retry } : {}),
+    readiness: node.readiness ?? { state: legacyReadiness ?? 'ready' },
     ...(Object.keys(modifiers).length > 0 ? { modifiers } : {}),
   };
 }
@@ -398,11 +520,22 @@ type WorkflowGraphBase<
   updatedAt: string;
 };
 
-/** The active, serialized schema. All new writes use v5. */
-export type WorkflowGraph = WorkflowGraphBase & {
+/** v5 is persistence input only and predates provenance relationships. */
+export type GraphCapabilitiesV5 = Omit<GraphCapabilities, 'provenance'>;
+
+export type WorkflowGraphV5 = WorkflowGraphBase & {
   schemaVersion: '5';
   nodes: GraphNode[];
+  capabilities: GraphCapabilitiesV5;
+};
+
+/** The active, serialized schema. All new writes use v6. */
+export type WorkflowGraph = WorkflowGraphBase & {
+  schemaVersion: '6';
+  nodes: GraphNode[];
   capabilities: GraphCapabilities;
+  /** Separate from edges so system boundaries can never become native control. */
+  relationships: NonNativeRelationship[];
 };
 
 /** v4 is persistence input only and is normalized before it reaches v5. */
@@ -454,13 +587,45 @@ export function resolveEffectiveCapabilities(
   };
 }
 
-/** Canonicalizes route fields and v5 compatibility summaries for writes. */
+export function normalizeLegacyEndOutcome(label: string): EndOutcome {
+  const normalized = label.trim().toLocaleLowerCase();
+  if (/(await|reply|response|input|end of turn|turn complete)/u.test(normalized)) {
+    return { kind: 'awaiting-reply' };
+  }
+  if (/(fail|error|reject|declin|dead.?letter|dlq)/u.test(normalized)) {
+    return { kind: 'failure' };
+  }
+  if (/(partial|incomplete)/u.test(normalized)) return { kind: 'partial-result' };
+  if (/(cancel|abort|stop)/u.test(normalized)) return { kind: 'cancelled' };
+  return { kind: 'completed' };
+}
+
+const declaredProvenance = (): Provenance => ({ representation: 'declared' });
+
+/** Canonicalizes route fields and v5/v6 compatibility summaries for writes. */
 export function normalizeWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
   return normalizeWorkflowGraphRouting({
     ...graph,
+    capabilities: {
+      ...graph.capabilities,
+      provenance: graph.capabilities.provenance ?? createDefaultGraphCapabilities().provenance,
+    },
     nodes: graph.nodes.map((node) =>
-      node.kind === 'step' ? normalizeStepDurability(node) : { ...node },
+      node.kind === 'step'
+        ? { ...normalizeStepDurability(node), provenance: node.provenance ?? declaredProvenance() }
+        : node.kind === 'end'
+          ? {
+              ...node,
+              outcome: node.outcome ?? normalizeLegacyEndOutcome(node.label),
+              provenance: node.provenance ?? declaredProvenance(),
+            }
+          : { ...node, provenance: node.provenance ?? declaredProvenance() },
     ),
+    edges: graph.edges.map((edge) => ({ ...edge, provenance: edge.provenance ?? declaredProvenance() })),
+    relationships: (graph.relationships ?? []).map((relationship) => ({
+      ...relationship,
+      provenance: relationship.provenance ?? declaredProvenance(),
+    })),
   });
 }
 
@@ -476,6 +641,10 @@ export type GraphNodePatch = Partial<
     storeAccess: StepStoreAccess | null;
     /** `null` removes the internal retry policy from a Step. */
     retry: RetryPolicy | null;
+    readiness: StepReadiness;
+    /** `null` removes an opaque/prebuilt declaration from a Step. */
+    opaque: OpaqueStepMetadata | null;
+    outcome: EndOutcome;
     modifiers: StepModifierSummary;
     merge: MergeConfig;
   }
@@ -490,7 +659,12 @@ export type GraphEdgePatch = {
   condition?: string;
   send?: SendMapConfig;
   loopCap?: number;
+  provenance?: Provenance;
 };
+
+export type NonNativeRelationshipPatch = Partial<
+  Pick<NonNativeRelationship, 'kind' | 'source' | 'target' | 'label' | 'provenance'>
+>;
 
 const legacyExecutorByKind: Record<LegacyNodeKind, StepExecutor> = {
   agent: 'ai',
@@ -620,13 +794,15 @@ export function migrateWorkflowGraphV3ToV4(graph: WorkflowGraphV3): WorkflowGrap
   });
 }
 
-/**
- * Adds the explicit v5 capability records to a parseable v4 graph. Legacy
- * Store summary flags prove direct access existed, so migration enables the
- * graph Store without inventing any edge or position.
- */
-export function migrateWorkflowGraphV4(graph: WorkflowGraphV4): WorkflowGraph {
-  const capabilities = createDefaultGraphCapabilities();
+/** Adds v5 capability records without changing legacy topology. */
+export function migrateWorkflowGraphV4ToV5(graph: WorkflowGraphV4): WorkflowGraphV5 {
+  const defaults = createDefaultGraphCapabilities();
+  const capabilities: GraphCapabilitiesV5 = {
+    state: defaults.state,
+    checkpointer: defaults.checkpointer,
+    store: defaults.store,
+    runtimeMode: defaults.runtimeMode,
+  };
   if (
     graph.nodes.some(
       (node) =>
@@ -636,32 +812,79 @@ export function migrateWorkflowGraphV4(graph: WorkflowGraphV4): WorkflowGraph {
   ) {
     capabilities.store.available = true;
   }
-  return normalizeWorkflowGraph({
+  return normalizeWorkflowGraphRouting({
     ...graph,
     schemaVersion: '5',
     capabilities,
-    nodes: graph.nodes.map((node) => ({ ...node })),
+    nodes: graph.nodes.map((node) =>
+      node.kind === 'step' ? normalizeStepDurability({ ...node }) : { ...node },
+    ),
   });
 }
 
-/** Converts v3 persistence input directly into the active v5 graph. */
+/**
+ * v5 authored elements become declared v6 elements. This transition does not
+ * invent evidence, runtime inspection, relationships, or confidence claims.
+ */
+export function migrateGraphNodeV5(node: GraphNode): GraphNode {
+  if (node.kind === 'step') {
+    return {
+      ...normalizeStepDurability(node),
+      provenance: node.provenance ?? declaredProvenance(),
+    };
+  }
+  if (node.kind === 'end') {
+    return {
+      ...node,
+      outcome: node.outcome ?? normalizeLegacyEndOutcome(node.label),
+      provenance: node.provenance ?? declaredProvenance(),
+    };
+  }
+  return { ...node, provenance: node.provenance ?? declaredProvenance() };
+}
+
+export function migrateGraphEdgeV5(edge: GraphEdge): GraphEdge {
+  return { ...edge, provenance: edge.provenance ?? declaredProvenance() };
+}
+
+export function migrateWorkflowGraphV5(graph: WorkflowGraphV5): WorkflowGraph {
+  return normalizeWorkflowGraph({
+    ...graph,
+    schemaVersion: '6',
+    capabilities: {
+      ...graph.capabilities,
+      provenance: createDefaultGraphCapabilities().provenance,
+    },
+    nodes: graph.nodes.map(migrateGraphNodeV5),
+    edges: graph.edges.map(migrateGraphEdgeV5),
+    relationships: [],
+  });
+}
+
+/** Converts v4 persistence input directly into the active v6 graph. */
+export function migrateWorkflowGraphV4(graph: WorkflowGraphV4): WorkflowGraph {
+  return migrateWorkflowGraphV5(migrateWorkflowGraphV4ToV5(graph));
+}
+
+/** Converts v3 persistence input directly into the active v6 graph. */
 export function migrateWorkflowGraphV3(graph: WorkflowGraphV3): WorkflowGraph {
   return migrateWorkflowGraphV4(migrateWorkflowGraphV3ToV4(graph));
 }
 
-/** Converts v2 persistence input directly into the active v5 graph. */
+/** Converts v2 persistence input directly into the active v6 graph. */
 export function migrateWorkflowGraphV2(graph: WorkflowGraphV2): WorkflowGraph {
   return migrateWorkflowGraphV3(migrateWorkflowGraphV2ToV3(graph));
 }
 
 /** Convenience migration for callers that receive an original v1 payload. */
-export function migrateWorkflowGraphV1ToV5(graph: WorkflowGraphV1): WorkflowGraph {
+export function migrateWorkflowGraphV1ToV6(graph: WorkflowGraphV1): WorkflowGraph {
   return migrateWorkflowGraphV2(migrateWorkflowGraphV1(graph));
 }
 
 /** Compatibility names retained for callers from prior package revisions. */
-export const migrateWorkflowGraphV1ToV4 = migrateWorkflowGraphV1ToV5;
-export const migrateWorkflowGraphV1ToV3 = migrateWorkflowGraphV1ToV5;
+export const migrateWorkflowGraphV1ToV5 = migrateWorkflowGraphV1ToV6;
+export const migrateWorkflowGraphV1ToV4 = migrateWorkflowGraphV1ToV6;
+export const migrateWorkflowGraphV1ToV3 = migrateWorkflowGraphV1ToV6;
 
 export type ValidationIssue = {
   code: string;
@@ -704,7 +927,14 @@ export type GraphOperation =
       edgeId: string;
       patch: GraphEdgePatch;
     }
-  | { type: 'remove_edge'; edgeId: string };
+  | { type: 'remove_edge'; edgeId: string }
+  | { type: 'add_relationship'; relationship: NonNativeRelationship }
+  | {
+      type: 'update_relationship';
+      relationshipId: string;
+      patch: NonNativeRelationshipPatch;
+    }
+  | { type: 'remove_relationship'; relationshipId: string };
 
 export type ProposalDiff = {
   addedNodeIds: string[];
@@ -717,8 +947,16 @@ export type ProposalDiff = {
   addedEdgeIds: string[];
   updatedEdgeIds: string[];
   removedEdgeIds: string[];
+  addedRelationshipIds: string[];
+  updatedRelationshipIds: string[];
+  removedRelationshipIds: string[];
   /** Stable canonical paths for durability-scope changes. */
   changedCapabilityPaths: string[];
+  /** Stable canonical paths for evidence/provenance changes. */
+  changedProvenancePaths: string[];
+  changedReadinessNodeIds: string[];
+  changedOpaqueNodeIds: string[];
+  changedEndOutcomeNodeIds: string[];
 };
 
 export type GraphProposal = {
@@ -782,6 +1020,24 @@ export type ScenarioMerge = {
   waitingForDynamicInputs: true;
 };
 
+export type ScenarioRelationshipAnnotation =
+  | {
+      family: 'native-control';
+      edgeId: string;
+      source: string;
+      target: string;
+      mode: EdgeMode;
+      provenance: Provenance;
+    }
+  | {
+      family: 'spawned' | 'external-orchestration';
+      relationshipId: string;
+      kind: NonNativeRelationshipKind;
+      source: RelationshipEndpoint;
+      target: RelationshipEndpoint;
+      provenance: Provenance;
+    };
+
 export type BranchScenario = {
   id: string;
   name: string;
@@ -794,9 +1050,12 @@ export type BranchScenario = {
   dynamicSends: ScenarioDynamicSend[];
   /** Ordered Merge metadata follows the template path. */
   merges: ScenarioMerge[];
+  /** Native paths plus related non-native boundary records; annotations never execute relationships. */
+  relationshipAnnotations: ScenarioRelationshipAnnotation[];
   orderedPath: string[];
   expectedNodes: string[];
   expectedTerminalNode: string;
+  expectedTerminalOutcome: EndOutcome;
 };
 
 export type RuntimeProjectionInstance = {
@@ -864,7 +1123,26 @@ const graphNodeBaseSchema = z.object({
   position: positionSchema,
   parentId: z.string().min(1).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
+  provenance: z
+    .object({
+      representation: z.enum(provenanceRepresentations),
+      evidence: z
+        .object({
+          source: z.string().min(1).max(512),
+          evidenceClass: z.string().min(1).max(160),
+          confidence: z.enum(['low', 'medium', 'high']),
+          details: z.string().min(1).max(4_000).optional(),
+          timestamp: z.string().datetime({ offset: true }).optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .optional(),
 });
+
+export const provenanceEvidenceSchema = graphNodeBaseSchema.shape.provenance.unwrap().shape.evidence.unwrap();
+export const provenanceSchema = graphNodeBaseSchema.shape.provenance.unwrap();
 
 export const stepModifierSummarySchema = z
   .object({
@@ -874,6 +1152,44 @@ export const stepModifierSummarySchema = z
     retryFallback: z.literal(true).optional(),
     opaque: z.literal(true).optional(),
     readiness: z.enum(['degraded', 'unimplemented']).optional(),
+  })
+  .strict();
+
+export const stepReadinessSchema = z
+  .object({
+    state: z.enum(['ready', 'degraded', 'unimplemented']),
+    detail: z.string().max(2_000).optional(),
+  })
+  .strict();
+
+export const opaqueInterfacePortSchema = z
+  .object({ name: z.string().min(1).max(160), description: z.string().max(1_000).optional() })
+  .strict();
+
+export const runtimeInspectionAvailabilitySchema = z
+  .object({ available: z.boolean(), evidence: provenanceEvidenceSchema.optional() })
+  .strict();
+
+export const opaqueStepMetadataSchema = z
+  .object({
+    factoryLabel: z.string().min(1).max(240),
+    inputPorts: z.array(opaqueInterfacePortSchema).max(64),
+    outputPorts: z.array(opaqueInterfacePortSchema).max(64),
+    runtimeInspection: runtimeInspectionAvailabilitySchema,
+  })
+  .strict();
+
+export const endOutcomeSchema = z
+  .object({
+    kind: z.enum([
+      'completed',
+      'awaiting-reply',
+      'failure',
+      'partial-result',
+      'cancelled',
+      'domain-specific',
+    ]),
+    detail: z.string().max(2_000).optional(),
   })
   .strict();
 
@@ -905,16 +1221,37 @@ export const runtimeModeCapabilitySchema = z
   .object({ mode: z.enum(['unspecified', 'text', 'voice']), input: z.enum(['text', 'audio']).optional() })
   .strict();
 
+export const provenanceCapabilitiesSchema = z
+  .object({
+    evidenceOverlayAvailable: z.boolean(),
+    externalOrchestrationAvailable: z.boolean(),
+  })
+  .strict();
+
 export const graphCapabilitiesSchema = z
   .object({
     state: workingStateCapabilitySchema,
     checkpointer: checkpointerCapabilitySchema,
     store: longTermStoreCapabilitySchema,
     runtimeMode: runtimeModeCapabilitySchema,
+    provenance: provenanceCapabilitiesSchema.default({
+      evidenceOverlayAvailable: true,
+      externalOrchestrationAvailable: false,
+    }),
   })
   .strict();
 
-export const graphCapabilitiesPatchSchema = graphCapabilitiesSchema.partial().strict();
+export const graphCapabilitiesV5Schema = graphCapabilitiesSchema.omit({ provenance: true });
+
+export const graphCapabilitiesPatchSchema = z
+  .object({
+    state: workingStateCapabilitySchema.optional(),
+    checkpointer: checkpointerCapabilitySchema.optional(),
+    store: longTermStoreCapabilitySchema.optional(),
+    runtimeMode: runtimeModeCapabilitySchema.optional(),
+    provenance: provenanceCapabilitiesSchema.optional(),
+  })
+  .strict();
 
 export const graphCapabilityOverridesSchema = graphCapabilitiesSchema
   .pick({ state: true, checkpointer: true, store: true })
@@ -1000,10 +1337,12 @@ export const graphNodeSchema = z.discriminatedUnion('kind', [
     participation: stepParticipationSchema.optional(),
     storeAccess: stepStoreAccessSchema.optional(),
     retry: retryPolicySchema.optional(),
+    readiness: stepReadinessSchema.optional(),
+    opaque: opaqueStepMetadataSchema.optional(),
     modifiers: stepModifierSummarySchema.optional(),
   }).strict(),
   graphNodeBaseSchema.extend({ kind: z.literal('merge'), merge: mergeConfigSchema }).strict(),
-  graphNodeBaseSchema.extend({ kind: z.literal('end') }).strict(),
+  graphNodeBaseSchema.extend({ kind: z.literal('end'), outcome: endOutcomeSchema.optional() }).strict(),
 ]);
 
 /** v4 input-only nodes deliberately omit v5 Step durability fields. */
@@ -1071,6 +1410,7 @@ const graphEdgeBaseSchema = z.object({
   label: z.string().optional(),
   condition: z.string().optional(),
   loopCap: z.number().int().min(1).max(10).optional(),
+  provenance: provenanceSchema.optional(),
 });
 
 export const sendMapConfigSchema = z
@@ -1100,8 +1440,30 @@ export const graphEdgeSchema = z.discriminatedUnion('mode', [
 
 /** v3 input-only edges deliberately omit Send and loop caps. */
 export const graphEdgeV3Schema = graphEdgeBaseSchema
-  .omit({ loopCap: true })
+  .omit({ loopCap: true, provenance: true })
   .extend({ mode: z.enum(['normal', 'conditional', 'command', 'fallback']) });
+
+export const relationshipEndpointSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('node'), nodeId: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal('external'),
+      externalId: z.string().min(1).max(240),
+      label: z.string().min(1).max(240),
+    })
+    .strict(),
+]);
+
+export const nonNativeRelationshipSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(['spawned-run', 'spawned-thread', 'external-orchestration']),
+    source: relationshipEndpointSchema,
+    target: relationshipEndpointSchema,
+    label: z.string().max(512).optional(),
+    provenance: provenanceSchema,
+  })
+  .strict();
 
 const workflowGraphCoreSchema = z.object({
   id: z.string().min(1),
@@ -1121,10 +1483,19 @@ const workflowGraphV4BaseSchema = workflowGraphCoreSchema.extend({
 }).strict();
 
 export const workflowGraphSchema = workflowGraphV5BaseSchema.extend({
-  schemaVersion: z.literal('5'),
+  schemaVersion: z.literal('6'),
   nodes: z.array(graphNodeSchema),
   edges: z.array(graphEdgeSchema),
   capabilities: graphCapabilitiesSchema,
+  relationships: z.array(nonNativeRelationshipSchema).default([]),
+}).strict();
+
+/** v5 compatibility input only; successful parsing must be followed by migration. */
+export const workflowGraphV5Schema = workflowGraphV5BaseSchema.extend({
+  schemaVersion: z.literal('5'),
+  nodes: z.array(graphNodeSchema),
+  edges: z.array(graphEdgeSchema),
+  capabilities: graphCapabilitiesV5Schema,
 }).strict();
 
 /** v4 compatibility input only; successful parsing must be followed by migration. */
@@ -1171,8 +1542,12 @@ export const graphNodePatchSchema = z
     participation: stepParticipationSchema.optional(),
     storeAccess: stepStoreAccessSchema.nullable().optional(),
     retry: retryPolicySchema.nullable().optional(),
+    readiness: stepReadinessSchema.optional(),
+    opaque: opaqueStepMetadataSchema.nullable().optional(),
+    outcome: endOutcomeSchema.optional(),
     modifiers: stepModifierSummarySchema.optional(),
     merge: mergeConfigSchema.optional(),
+    provenance: provenanceSchema.optional(),
   })
   .strict();
 
@@ -1185,7 +1560,13 @@ export const graphEdgePatchSchema = z
     condition: z.string().optional(),
     send: sendMapConfigSchema.optional(),
     loopCap: z.number().int().min(1).max(10).optional(),
+    provenance: provenanceSchema.optional(),
   })
+  .strict();
+
+export const nonNativeRelationshipPatchSchema = nonNativeRelationshipSchema
+  .omit({ id: true })
+  .partial()
   .strict();
 
 export const runtimeProjectionFixtureSchema = z
@@ -1251,6 +1632,13 @@ export const graphOperationSchema = z.discriminatedUnion('type', [
     patch: graphEdgePatchSchema,
   }),
   z.object({ type: z.literal('remove_edge'), edgeId: z.string().min(1) }),
+  z.object({ type: z.literal('add_relationship'), relationship: nonNativeRelationshipSchema }),
+  z.object({
+    type: z.literal('update_relationship'),
+    relationshipId: z.string().min(1),
+    patch: nonNativeRelationshipPatchSchema,
+  }),
+  z.object({ type: z.literal('remove_relationship'), relationshipId: z.string().min(1) }),
 ]);
 
 export const proposalInputSchema = z.object({
@@ -1260,7 +1648,7 @@ export const proposalInputSchema = z.object({
 });
 
 export const sampleGraph: WorkflowGraph = {
-  schemaVersion: '5',
+  schemaVersion: '6',
   id: 'customer-support-contract',
   name: 'Customer Support Workflow',
   status: 'draft',
@@ -1335,13 +1723,14 @@ export const sampleGraph: WorkflowGraph = {
     { id: 'human-end', source: 'human', target: 'end', mode: 'normal' },
   ],
   subgraphs: [],
+  relationships: [],
 };
 
 /** A compact authored contract used to demonstrate that human outcomes follow
  * canonical topology. It is intentionally a design-time preview fixture: no
  * runtime response, resume, or side effect is executed by loading it. */
 export const humanControlHitlDemoGraph: WorkflowGraph = {
-  schemaVersion: '5',
+  schemaVersion: '6',
   id: 'human-control-hitl-demo',
   name: 'Human Control · Deploy Change',
   status: 'draft',
@@ -1434,11 +1823,12 @@ export const humanControlHitlDemoGraph: WorkflowGraph = {
     },
   ],
   subgraphs: [],
+  relationships: [],
 };
 
 /** A compact valid fixture for the first-class subgraph interaction. */
 export const researchSupervisorGraph: WorkflowGraph = {
-  schemaVersion: '5',
+  schemaVersion: '6',
   id: 'research-supervisor-demo',
   name: 'Research Supervisor Workflow',
   status: 'draft',
@@ -1533,12 +1923,13 @@ export const researchSupervisorGraph: WorkflowGraph = {
       collapsed: false,
     },
   ],
+  relationships: [],
 };
 
 /** The canonical routing-semantics fixture. A return edge is normal topology,
  * so loop presentation can be derived without persisting a separate mode. */
 export const researchIntakeRoutingGraph: WorkflowGraph = {
-  schemaVersion: '5',
+  schemaVersion: '6',
   id: 'research-intake-routing-demo',
   name: 'Research Intake Routing',
   status: 'draft',
@@ -1654,6 +2045,7 @@ export const researchIntakeRoutingGraph: WorkflowGraph = {
     },
   ],
   subgraphs: [],
+  relationships: [],
 };
 
 const issue = (code: string, message: string, path?: string): ValidationIssue => ({
@@ -1666,7 +2058,7 @@ const issue = (code: string, message: string, path?: string): ValidationIssue =>
 function stableSchemaIssuePath(graph: unknown, path: PropertyKey[]): string {
   const [collection, index, ...rest] = path;
   if (
-    (collection === 'nodes' || collection === 'edges') &&
+    (collection === 'nodes' || collection === 'edges' || collection === 'relationships') &&
     typeof index === 'number' &&
     graph &&
     typeof graph === 'object'
@@ -1750,6 +2142,23 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   const subgraphIds = new Set<string>();
   const nodeById = new Map<string, GraphNode>();
   const edgesByConnection = new Map<string, GraphEdge[]>();
+  const relationshipIds = new Set<string>();
+
+  const validateProvenance = (provenance: Provenance, path: string) => {
+    if (
+      (provenance.representation === 'runtime-generated' ||
+        provenance.representation === 'derived-semantic') &&
+      !provenance.evidence
+    ) {
+      issues.push(
+        issue(
+          'PROVENANCE_EVIDENCE_REQUIRED',
+          `${provenance.representation} claims require explicit evidence.`,
+          `${path}.evidence`,
+        ),
+      );
+    }
+  };
 
   const validateStateCapability = (state: WorkingStateCapability, path: string) => {
     for (const [index, field] of state.schema.fields.entries()) {
@@ -1835,6 +2244,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     }
     nodeIds.add(node.id);
     nodeById.set(node.id, node);
+    validateProvenance(node.provenance!, `nodes.${node.id}.provenance`);
     if (subgraphIds.has(node.id)) {
       issues.push(
         issue(
@@ -1862,6 +2272,15 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
         ),
       );
     }
+    if (node.kind === 'end' && node.outcome?.kind === 'domain-specific' && !node.outcome.detail?.trim()) {
+      issues.push(
+        issue(
+          'END_OUTCOME_DETAIL_REQUIRED',
+          `Domain-specific End outcome on “${node.label}” needs a readable detail.`,
+          `nodes.${node.id}.outcome.detail`,
+        ),
+      );
+    }
   }
 
   for (const edge of normalized.edges) {
@@ -1869,6 +2288,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
       issues.push(issue('DUPLICATE_EDGE_ID', `Edge ID “${edge.id}” is duplicated.`, `edges.${edge.id}`));
     }
     edgeIds.add(edge.id);
+    validateProvenance(edge.provenance!, `edges.${edge.id}.provenance`);
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
       issues.push(
         issue(
@@ -1912,6 +2332,71 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
           ),
         );
       }
+    }
+  }
+
+  for (const relationship of normalized.relationships) {
+    if (relationshipIds.has(relationship.id) || edgeIds.has(relationship.id)) {
+      issues.push(
+        issue(
+          'DUPLICATE_RELATIONSHIP_ID',
+          `Relationship ID “${relationship.id}” conflicts with another relationship or native edge.`,
+          `relationships.${relationship.id}`,
+        ),
+      );
+    }
+    relationshipIds.add(relationship.id);
+    validateProvenance(relationship.provenance, `relationships.${relationship.id}.provenance`);
+
+    const endpoints = [relationship.source, relationship.target];
+    const nodeEndpointCount = endpoints.filter((endpoint) => endpoint.kind === 'node').length;
+    const externalEndpointCount = endpoints.filter((endpoint) => endpoint.kind === 'external').length;
+    if (nodeEndpointCount !== 1 || externalEndpointCount !== 1) {
+      issues.push(
+        issue(
+          'RELATIONSHIP_BOUNDARY_ENDPOINTS_REQUIRED',
+          `Relationship “${relationship.id}” must cross exactly one graph boundary.`,
+          `relationships.${relationship.id}`,
+        ),
+      );
+    }
+    for (const [endpointName, endpoint] of [
+      ['source', relationship.source],
+      ['target', relationship.target],
+    ] as const) {
+      if (endpoint.kind === 'node' && !nodeIds.has(endpoint.nodeId)) {
+        issues.push(
+          issue(
+            'RELATIONSHIP_MISSING_NODE',
+            `Relationship “${relationship.id}” references a node that does not exist.`,
+            `relationships.${relationship.id}.${endpointName}.nodeId`,
+          ),
+        );
+      }
+    }
+    if (
+      relationship.kind === 'external-orchestration' &&
+      relationship.provenance.representation !== 'external-orchestration'
+    ) {
+      issues.push(
+        issue(
+          'EXTERNAL_RELATIONSHIP_PROVENANCE_REQUIRED',
+          'External orchestration relationships require external-orchestration provenance.',
+          `relationships.${relationship.id}.provenance.representation`,
+        ),
+      );
+    }
+    if (
+      relationship.kind === 'external-orchestration' &&
+      !normalized.capabilities.provenance.externalOrchestrationAvailable
+    ) {
+      issues.push(
+        issue(
+          'EXTERNAL_ORCHESTRATION_CAPABILITY_REQUIRED',
+          'External orchestration relationships require the graph capability to be available.',
+          'capabilities.provenance.externalOrchestrationAvailable',
+        ),
+      );
     }
   }
 
@@ -2102,6 +2587,63 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     const nodeOutgoing = outgoing.get(node.id) ?? [];
     const storeAccess = node.storeAccess;
     const effectiveCapabilities = resolveEffectiveCapabilities(normalized, node.parentId);
+
+    if (node.readiness?.detail !== undefined && !node.readiness.detail.trim()) {
+      issues.push(
+        issue(
+          'READINESS_DETAIL_REQUIRED',
+          `Readiness detail on “${node.label}” must be readable when supplied.`,
+          `nodes.${node.id}.readiness.detail`,
+        ),
+      );
+    }
+    if (node.opaque) {
+      if (!node.opaque.factoryLabel.trim()) {
+        issues.push(
+          issue(
+            'OPAQUE_FACTORY_LABEL_REQUIRED',
+            `Opaque Step “${node.label}” needs a readable factory label.`,
+            `nodes.${node.id}.opaque.factoryLabel`,
+          ),
+        );
+      }
+      for (const [portKind, ports] of [
+        ['inputPorts', node.opaque.inputPorts],
+        ['outputPorts', node.opaque.outputPorts],
+      ] as const) {
+        const names = ports.map((port) => port.name.trim()).filter(Boolean);
+        if (names.length !== ports.length) {
+          issues.push(
+            issue(
+              'OPAQUE_INTERFACE_PORT_NAME_REQUIRED',
+              `Opaque Step “${node.label}” needs readable ${portKind}.`,
+              `nodes.${node.id}.opaque.${portKind}`,
+            ),
+          );
+        }
+        if (new Set(names).size !== names.length) {
+          issues.push(
+            issue(
+              'OPAQUE_INTERFACE_PORT_NAME_DUPLICATE',
+              `Opaque Step “${node.label}” has duplicate ${portKind}.`,
+              `nodes.${node.id}.opaque.${portKind}`,
+            ),
+          );
+        }
+      }
+      if (
+        node.opaque.runtimeInspection.available &&
+        !node.opaque.runtimeInspection.evidence
+      ) {
+        issues.push(
+          issue(
+            'OPAQUE_RUNTIME_INSPECTION_EVIDENCE_REQUIRED',
+            `Runtime inspection on “${node.label}” requires supplied evidence.`,
+            `nodes.${node.id}.opaque.runtimeInspection.evidence`,
+          ),
+        );
+      }
+    }
 
     if (storeAccess?.read) {
       if (!effectiveCapabilities.store.value.available) {
@@ -2647,6 +3189,7 @@ export function applyGraphOperations(
   // Proposals may be replayed against data loaded before subgraphs existed.
   // Keep that accepted data canonical even outside the persistence adapter.
   next.subgraphs ??= [];
+  next.relationships ??= [];
   const errors: ValidationIssue[] = [];
 
   const hasSubgraph = (subgraphId: string) =>
@@ -2662,12 +3205,32 @@ export function applyGraphOperations(
   };
   const uniqueNodeIds = (nodeIds: string[]) => [...new Set(nodeIds)];
   const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
-    ['executor', 'participation', 'storeAccess', 'retry', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
+    ['executor', 'participation', 'storeAccess', 'retry', 'readiness', 'opaque', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
   const hasMergePatchFields = (patch: GraphNodePatch) => 'merge' in patch;
+  const hasEndOnlyPatchFields = (patch: GraphNodePatch) => 'outcome' in patch;
   const missingNodes = (nodeIds: string[], operationIndex: number) => {
     const missing = uniqueNodeIds(nodeIds).filter((nodeId) => !findNode(nodeId));
     for (const nodeId of missing) {
       errors.push(issue('OPERATION_NOT_FOUND', `Node “${nodeId}” was not found.`, `operations.${operationIndex}`));
+    }
+    return missing.length > 0;
+  };
+  const relationshipReferencesMissingNode = (
+    relationship: Pick<NonNativeRelationship, 'source' | 'target'>,
+    operationIndex: number,
+  ) => {
+    const missing = [relationship.source, relationship.target].filter(
+      (endpoint): endpoint is Extract<RelationshipEndpoint, { kind: 'node' }> =>
+        endpoint.kind === 'node' && !findNode(endpoint.nodeId),
+    );
+    for (const endpoint of missing) {
+      errors.push(
+        issue(
+          'OPERATION_NOT_FOUND',
+          `Relationship node “${endpoint.nodeId}” was not found.`,
+          `operations.${operationIndex}`,
+        ),
+      );
     }
     return missing.length > 0;
   };
@@ -2707,6 +3270,17 @@ export function applyGraphOperations(
             `operations.${index}`,
           ),
         );
+      } else if (
+        next.nodes[nodeIndex].kind !== 'end' &&
+        hasEndOnlyPatchFields(operation.patch)
+      ) {
+        errors.push(
+          issue(
+            'END_OUTCOME_REQUIRES_END',
+            `End outcome can only update End node “${operation.nodeId}”.`,
+            `operations.${index}`,
+          ),
+        );
       } else {
         const patch = structuredClone(operation.patch);
         if (next.nodes[nodeIndex].kind === 'step') {
@@ -2731,6 +3305,15 @@ export function applyGraphOperations(
               else delete updated.modifiers;
             }
           }
+          if (patch.opaque === null) {
+            delete updated.opaque;
+            if (updated.modifiers) {
+              const remainingModifiers = { ...updated.modifiers };
+              delete remainingModifiers.opaque;
+              if (Object.keys(remainingModifiers).length > 0) updated.modifiers = remainingModifiers;
+              else delete updated.modifiers;
+            }
+          }
           next.nodes[nodeIndex] = updated;
         } else {
           next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...patch } as GraphNode;
@@ -2743,6 +3326,13 @@ export function applyGraphOperations(
         next.nodes = next.nodes.filter((node) => node.id !== operation.nodeId);
         next.edges = next.edges.filter(
           (edge) => edge.source !== operation.nodeId && edge.target !== operation.nodeId,
+        );
+        next.relationships = next.relationships.filter(
+          (relationship) =>
+            !(
+              (relationship.source.kind === 'node' && relationship.source.nodeId === operation.nodeId) ||
+              (relationship.target.kind === 'node' && relationship.target.nodeId === operation.nodeId)
+            ),
         );
       }
     } else if (operation.type === 'add_subgraph') {
@@ -2850,7 +3440,10 @@ export function applyGraphOperations(
         next.subgraphs = next.subgraphs.filter((subgraph) => subgraph.id !== operation.subgraphId);
       }
     } else if (operation.type === 'add_edge') {
-      if (next.edges.some((edge) => edge.id === operation.edge.id)) {
+      if (
+        next.edges.some((edge) => edge.id === operation.edge.id) ||
+        next.relationships.some((relationship) => relationship.id === operation.edge.id)
+      ) {
         errors.push(issue('OPERATION_CONFLICT', `Edge “${operation.edge.id}” already exists.`, `operations.${index}`));
       } else if (!findNode(operation.edge.source) || !findNode(operation.edge.target)) {
         errors.push(issue('OPERATION_NOT_FOUND', `Edge “${operation.edge.id}” references a node that was not found.`, `operations.${index}`));
@@ -2878,6 +3471,40 @@ export function applyGraphOperations(
       } else {
         next.edges = next.edges.filter((edge) => edge.id !== operation.edgeId);
       }
+    } else if (operation.type === 'add_relationship') {
+      if (
+        next.relationships.some((relationship) => relationship.id === operation.relationship.id) ||
+        next.edges.some((edge) => edge.id === operation.relationship.id)
+      ) {
+        errors.push(issue('OPERATION_CONFLICT', `Relationship “${operation.relationship.id}” already exists.`, `operations.${index}`));
+      } else if (relationshipReferencesMissingNode(operation.relationship, index)) {
+        // Relationship endpoints resolve progressively but never become edges.
+      } else {
+        next.relationships.push(structuredClone(operation.relationship));
+      }
+    } else if (operation.type === 'update_relationship') {
+      const relationshipIndex = next.relationships.findIndex(
+        (relationship) => relationship.id === operation.relationshipId,
+      );
+      if (relationshipIndex < 0) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Relationship “${operation.relationshipId}” was not found.`, `operations.${index}`));
+      } else {
+        const updated = {
+          ...next.relationships[relationshipIndex],
+          ...structuredClone(operation.patch),
+        };
+        if (!relationshipReferencesMissingNode(updated, index)) {
+          next.relationships[relationshipIndex] = updated;
+        }
+      }
+    } else if (operation.type === 'remove_relationship') {
+      if (!next.relationships.some((relationship) => relationship.id === operation.relationshipId)) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Relationship “${operation.relationshipId}” was not found.`, `operations.${index}`));
+      } else {
+        next.relationships = next.relationships.filter(
+          (relationship) => relationship.id !== operation.relationshipId,
+        );
+      }
     }
   }
 
@@ -2896,12 +3523,20 @@ export function proposalDiff(operations: GraphOperation[], baseGraph?: WorkflowG
     addedEdgeIds: [],
     updatedEdgeIds: [],
     removedEdgeIds: [],
+    addedRelationshipIds: [],
+    updatedRelationshipIds: [],
+    removedRelationshipIds: [],
     changedCapabilityPaths: [],
+    changedProvenancePaths: [],
+    changedReadinessNodeIds: [],
+    changedOpaqueNodeIds: [],
+    changedEndOutcomeNodeIds: [],
   };
   const add = (values: string[], value: string) => {
     if (!values.includes(value)) values.push(value);
   };
   const addCapabilityPath = (value: string) => add(diff.changedCapabilityPaths, value);
+  const addProvenancePath = (value: string) => add(diff.changedProvenancePaths, value);
   let candidate = baseGraph ? structuredClone(baseGraph) : undefined;
 
   for (const operation of operations) {
@@ -2909,13 +3544,20 @@ export function proposalDiff(operations: GraphOperation[], baseGraph?: WorkflowG
       add(diff.addedNodeIds, operation.node.id);
       if (operation.node.parentId) add(diff.membershipChangedNodeIds, operation.node.id);
     }
-    if (operation.type === 'update_node') add(diff.updatedNodeIds, operation.nodeId);
+    if (operation.type === 'update_node') {
+      add(diff.updatedNodeIds, operation.nodeId);
+      if ('provenance' in operation.patch) addProvenancePath(`nodes.${operation.nodeId}.provenance`);
+      if ('readiness' in operation.patch) add(diff.changedReadinessNodeIds, operation.nodeId);
+      if ('opaque' in operation.patch) add(diff.changedOpaqueNodeIds, operation.nodeId);
+      if ('outcome' in operation.patch) add(diff.changedEndOutcomeNodeIds, operation.nodeId);
+    }
     if (operation.type === 'remove_node') add(diff.removedNodeIds, operation.nodeId);
     if (operation.type === 'add_subgraph') add(diff.addedSubgraphIds, operation.subgraph.id);
     if (operation.type === 'update_subgraph') add(diff.updatedSubgraphIds, operation.subgraphId);
     if (operation.type === 'update_graph_capabilities') {
       for (const capability of Object.keys(operation.patch) as Array<keyof GraphCapabilities>) {
         addCapabilityPath(`capabilities.${capability}`);
+        if (capability === 'provenance') addProvenancePath('capabilities.provenance');
       }
     }
     if (operation.type === 'set_subgraph_capability_override') {
@@ -2938,8 +3580,22 @@ export function proposalDiff(operations: GraphOperation[], baseGraph?: WorkflowG
       for (const nodeId of operation.nodeIds) add(diff.membershipChangedNodeIds, nodeId);
     }
     if (operation.type === 'add_edge') add(diff.addedEdgeIds, operation.edge.id);
-    if (operation.type === 'update_edge') add(diff.updatedEdgeIds, operation.edgeId);
+    if (operation.type === 'update_edge') {
+      add(diff.updatedEdgeIds, operation.edgeId);
+      if ('provenance' in operation.patch) addProvenancePath(`edges.${operation.edgeId}.provenance`);
+    }
     if (operation.type === 'remove_edge') add(diff.removedEdgeIds, operation.edgeId);
+    if (operation.type === 'add_relationship') {
+      add(diff.addedRelationshipIds, operation.relationship.id);
+      addProvenancePath(`relationships.${operation.relationship.id}.provenance`);
+    }
+    if (operation.type === 'update_relationship') {
+      add(diff.updatedRelationshipIds, operation.relationshipId);
+      if ('provenance' in operation.patch) {
+        addProvenancePath(`relationships.${operation.relationshipId}.provenance`);
+      }
+    }
+    if (operation.type === 'remove_relationship') add(diff.removedRelationshipIds, operation.relationshipId);
 
     if (candidate) candidate = applyGraphOperations(candidate, [operation]).graph;
   }
@@ -3041,6 +3697,36 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
       const humanOutcomeSuffix = humanOutcomes.length
         ? ` [${humanOutcomes.map((outcome) => outcome.outcomeLabel).join(', ')}]`
         : '';
+      const pathNodeIds = new Set(nextPath);
+      const relationshipAnnotations: ScenarioRelationshipAnnotation[] = [
+        ...traversedEdges.map((edge) => ({
+          family: 'native-control' as const,
+          edgeId: edge.id,
+          source: edge.source,
+          target: edge.target,
+          mode: edge.mode,
+          provenance: edge.provenance ?? declaredProvenance(),
+        })),
+        ...normalized.relationships
+          .filter(
+            (relationship) =>
+              (relationship.source.kind === 'node' && pathNodeIds.has(relationship.source.nodeId)) ||
+              (relationship.target.kind === 'node' && pathNodeIds.has(relationship.target.nodeId)),
+          )
+          .slice()
+          .sort((left, right) => left.id.localeCompare(right.id))
+          .map((relationship) => ({
+            family:
+              relationship.kind === 'external-orchestration'
+                ? ('external-orchestration' as const)
+                : ('spawned' as const),
+            relationshipId: relationship.id,
+            kind: relationship.kind,
+            source: structuredClone(relationship.source),
+            target: structuredClone(relationship.target),
+            provenance: structuredClone(relationship.provenance),
+          })),
+      ];
       scenarios.push({
         id: `scenario-${number}`,
         name: `Path ${number}: ${nextPath.map((id) => nodeMap.get(id)?.label ?? id).join(' → ')}${humanOutcomeSuffix}`,
@@ -3049,9 +3735,11 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
         traversedEdges,
         dynamicSends,
         merges: nextMerges,
+        relationshipAnnotations,
         orderedPath: nextPath,
         expectedNodes: nextPath,
         expectedTerminalNode: nodeId,
+        expectedTerminalOutcome: node.outcome ?? normalizeLegacyEndOutcome(node.label),
       });
       return;
     }
@@ -3150,12 +3838,13 @@ export function buildPythonTestSkeleton(
   graph: WorkflowGraph,
   scenarios: BranchScenario[],
 ): string {
+  const normalized = normalizeWorkflowGraph(graph);
   const payload = JSON.stringify(scenarios, null, 2)
     .split('\n')
     .map((line) => `# ${line}`)
     .join('\n');
 
-  return `"""Generated GraphContract path-test skeleton for ${graph.name}."""
+  return `"""Generated GraphContract path-test skeleton for ${normalized.name}."""
 
 import pytest
 
@@ -3165,9 +3854,10 @@ ${payload}
 
 GRAPH_METADATA = ${JSON.stringify(
     {
-      schema_version: graph.schemaVersion,
-      capabilities: graph.capabilities,
-      subgraph_capability_overrides: graph.subgraphs.map((subgraph) => ({
+      schema_version: normalized.schemaVersion,
+      capabilities: normalized.capabilities,
+      relationships: normalized.relationships,
+      subgraph_capability_overrides: normalized.subgraphs.map((subgraph) => ({
         subgraph_id: subgraph.id,
         ...(subgraph.capabilityOverrides
           ? { capability_overrides: subgraph.capabilityOverrides }
@@ -3186,6 +3876,8 @@ SCENARIOS = ${JSON.stringify(
       id: scenario.id,
       path: scenario.orderedPath,
       terminal: scenario.expectedTerminalNode,
+      terminal_outcome: scenario.expectedTerminalOutcome,
+      relationship_annotations: scenario.relationshipAnnotations,
       human_outcomes: scenario.humanOutcomes.map((outcome) => ({
         node_id: outcome.nodeId,
         outcome_id: outcome.outcomeId,

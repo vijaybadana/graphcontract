@@ -1,21 +1,27 @@
 import { WorkspaceCore } from '@/src/application/workspace';
 import {
+  graphEdgeSchema,
   graphEdgeV3Schema,
+  graphNodeSchema,
   graphNodeV2Schema,
   hitlV2Schema,
   legacyGraphNodeV1Schema,
   legacySensitiveEffectPolicy,
   legacyNodeKinds,
   migrateGraphNodeV2,
+  migrateGraphNodeV5,
   migrateHitlConfigV2,
   migrateLegacyGraphNodeV1,
   migrateWorkflowGraphV1,
   migrateWorkflowGraphV2,
   migrateWorkflowGraphV3,
   migrateWorkflowGraphV4,
+  migrateWorkflowGraphV5,
+  migrateGraphEdgeV5,
   normalizeLegacyWorkNodeKind,
   normalizeWorkflowGraph,
   workflowGraphSchema,
+  workflowGraphV5Schema,
   workflowGraphV4Schema,
   workflowGraphV3Schema,
   workflowGraphV2Schema,
@@ -130,9 +136,34 @@ function migrateV2Proposal(proposal: unknown, graph: WorkflowGraphV2): unknown {
   };
 }
 
+/**
+ * Pending v5 proposals remain review-only data. Upgrade recognized element
+ * payloads to declared v6 records without manufacturing evidence, topology,
+ * relationships, or runtime inspection traces.
+ */
+function migrateV5Proposal(proposal: unknown): unknown {
+  if (!isRecord(proposal) || !Array.isArray(proposal.operations)) return proposal;
+
+  return {
+    ...proposal,
+    operations: proposal.operations.map((operation) => {
+      if (!isRecord(operation)) return operation;
+      if (operation.type === 'add_node') {
+        const node = graphNodeSchema.safeParse(operation.node);
+        return node.success ? { ...operation, node: migrateGraphNodeV5(node.data) } : operation;
+      }
+      if (operation.type === 'add_edge') {
+        const edge = graphEdgeSchema.safeParse(operation.edge);
+        return edge.success ? { ...operation, edge: migrateGraphEdgeV5(edge.data) } : operation;
+      }
+      return operation;
+    }),
+  };
+}
+
 /** Repairs the hackathon demo snapshot without mixing persistence concerns into
  * domain validation or deleting valid user-authored workflows. */
-export function migrateWorkspaceV6(
+export function migrateWorkspaceV7(
   persistedState: unknown,
   createInitial: () => WorkspaceCore,
 ): PersistedWorkspace {
@@ -152,11 +183,21 @@ export function migrateWorkspaceV6(
     };
   }
 
+  const v5 = workflowGraphV5Schema.safeParse(persisted.graph);
+  if (v5.success) {
+    return {
+      ...persisted,
+      graph: migrateWorkflowGraphV5(v5.data),
+      proposal: migrateV5Proposal(persisted.proposal) as WorkspaceCore['proposal'],
+    };
+  }
+
   const v4 = workflowGraphV4Schema.safeParse(persisted.graph);
   if (v4.success) {
     return {
       ...persisted,
       graph: migrateWorkflowGraphV4(v4.data),
+      proposal: migrateV5Proposal(persisted.proposal) as WorkspaceCore['proposal'],
     };
   }
 
@@ -165,6 +206,7 @@ export function migrateWorkspaceV6(
     return {
       ...persisted,
       graph: migrateWorkflowGraphV3(v3.data),
+      proposal: migrateV5Proposal(persisted.proposal) as WorkspaceCore['proposal'],
     };
   }
 
@@ -173,7 +215,7 @@ export function migrateWorkspaceV6(
     return {
       ...persisted,
       graph: migrateWorkflowGraphV2(v2.data),
-      proposal: migrateV2Proposal(persisted.proposal, v2.data) as WorkspaceCore['proposal'],
+      proposal: migrateV5Proposal(migrateV2Proposal(persisted.proposal, v2.data)) as WorkspaceCore['proposal'],
     };
   }
 
@@ -184,12 +226,13 @@ export function migrateWorkspaceV6(
   return {
     ...persisted,
     graph: migrateWorkflowGraphV2(v2Graph),
-    proposal: migrateV2Proposal(persisted.proposal, v2Graph) as WorkspaceCore['proposal'],
+    proposal: migrateV5Proposal(migrateV2Proposal(persisted.proposal, v2Graph)) as WorkspaceCore['proposal'],
   };
 }
 
-/** Compatibility aliases for callers that imported the Package 1 migration. */
-export const migrateWorkspaceV5 = migrateWorkspaceV6;
-export const migrateWorkspaceV4 = migrateWorkspaceV6;
-export const migrateWorkspaceV3 = migrateWorkspaceV6;
-export const migrateWorkspaceV2 = migrateWorkspaceV6;
+/** Compatibility aliases retain old import paths while producing active v6 data. */
+export const migrateWorkspaceV6 = migrateWorkspaceV7;
+export const migrateWorkspaceV5 = migrateWorkspaceV7;
+export const migrateWorkspaceV4 = migrateWorkspaceV7;
+export const migrateWorkspaceV3 = migrateWorkspaceV7;
+export const migrateWorkspaceV2 = migrateWorkspaceV7;

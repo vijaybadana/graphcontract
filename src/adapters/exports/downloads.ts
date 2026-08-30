@@ -33,6 +33,7 @@ export function buildGraphScenariosDownload(
         graphUpdatedAt: normalized.updatedAt,
         graphSchemaVersion: normalized.schemaVersion,
         graphCapabilities: normalized.capabilities,
+        graphRelationships: normalized.relationships,
         subgraphCapabilityOverrides: normalized.subgraphs.map((subgraph) => ({
           subgraphId: subgraph.id,
           ...(subgraph.capabilityOverrides ? { capabilityOverrides: subgraph.capabilityOverrides } : {}),

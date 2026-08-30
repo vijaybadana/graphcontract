@@ -60,7 +60,7 @@ const graph = (
   subgraphs: WorkflowGraph['subgraphs'] = [],
   capabilities: GraphCapabilities = createDefaultGraphCapabilities(),
 ): WorkflowGraph => normalizeWorkflowGraph({
-  schemaVersion: '5',
+  schemaVersion: '6',
   id,
   name,
   status: 'draft',
@@ -69,6 +69,7 @@ const graph = (
   nodes,
   edges,
   subgraphs,
+  relationships: [],
 });
 
 /**
