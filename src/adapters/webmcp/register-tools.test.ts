@@ -93,12 +93,18 @@ describe('WebMCP adapter', () => {
     const updateNode = variants.find((variant) => variant.properties?.type?.const === 'update_node');
     const addEdge = variants.find((variant) => variant.properties?.type?.const === 'add_edge');
     const updateEdge = variants.find((variant) => variant.properties?.type?.const === 'update_edge');
-    const edgeModes = (properties?: Record<string, JsonSchema>) => properties?.mode?.enum;
     const addNodeVariants = addNode?.properties?.node?.oneOf ?? [];
     const nodeKind = (variant: JsonSchema) => variant.properties?.kind?.const;
     const startNode = addNodeVariants.find((variant) => nodeKind(variant) === 'start');
     const stepNode = addNodeVariants.find((variant) => nodeKind(variant) === 'step');
+    const mergeNode = addNodeVariants.find((variant) => nodeKind(variant) === 'merge');
     const endNode = addNodeVariants.find((variant) => nodeKind(variant) === 'end');
+    const addEdgeVariants = addEdge?.properties?.edge?.oneOf ?? [];
+    const updateEdgeVariants = updateEdge?.properties?.patch?.oneOf ?? [];
+    const sendEdge = addEdgeVariants.find((variant) => variant.properties?.mode?.const === 'send');
+    const nonSendEdge = addEdgeVariants.find((variant) => variant.properties?.mode?.enum?.includes('normal'));
+    const sendEdgePatch = updateEdgeVariants.find((variant) => variant.properties?.mode?.const === 'send');
+    const nonSendEdgePatch = updateEdgeVariants.find((variant) => variant.properties?.mode?.enum?.includes('normal'));
     const stepOnlyProperties = ['executor', 'participation', 'hitl', 'sensitive', 'modifiers'];
 
     expect(proposalSchema.required).toEqual(['operations', 'rationale']);
@@ -109,10 +115,11 @@ describe('WebMCP adapter', () => {
       'remove_nodes_from_subgraph',
       'dissolve_subgraph',
     ]));
-    expect(addNodeVariants).toHaveLength(3);
-    expect([nodeKind(startNode!), nodeKind(stepNode!), nodeKind(endNode!)]).toEqual([
+    expect(addNodeVariants).toHaveLength(4);
+    expect([nodeKind(startNode!), nodeKind(stepNode!), nodeKind(mergeNode!), nodeKind(endNode!)]).toEqual([
       'start',
       'step',
+      'merge',
       'end',
     ]);
     expect(stepNode?.required).toEqual(['id', 'kind', 'label', 'position', 'executor']);
@@ -158,8 +165,18 @@ describe('WebMCP adapter', () => {
     });
     for (const property of stepOnlyProperties) {
       expect(startNode?.properties).not.toHaveProperty(property);
+      expect(mergeNode?.properties).not.toHaveProperty(property);
       expect(endNode?.properties).not.toHaveProperty(property);
     }
+    expect(mergeNode?.required).toEqual(['id', 'kind', 'label', 'position', 'merge']);
+    expect(mergeNode?.properties?.merge).toMatchObject({
+      required: ['reducer', 'completion', 'continuation', 'waitingForDynamicInputs'],
+      properties: {
+        reducer: { required: ['name', 'aggregateState'] },
+        continuation: { properties: { mode: { enum: ['once', 'per_batch'] } } },
+        waitingForDynamicInputs: { const: true },
+      },
+    });
     expect(updateNode?.properties?.patch?.properties).toMatchObject({
       executor: { enum: ['deterministic', 'ai', 'tool', 'human'] },
       participation: { properties: { internalTools: { const: true } } },
@@ -168,31 +185,40 @@ describe('WebMCP adapter', () => {
         anyOf: [expect.any(Object), { type: 'null' }],
       },
       modifiers: expect.any(Object),
+      merge: expect.any(Object),
     });
-    expect(updateNode?.properties?.patch?.description).toContain('Step-only');
-    expect(proposalTool.description).toContain('Start, Step, or End');
+    expect(updateNode?.properties?.patch?.description).toContain('Merge-only');
+    expect(proposalTool.description).toContain('Start, Step, Merge, or End');
     expect(proposalTool.description).toContain('requires an executor');
+    expect(proposalTool.description).toContain('never creates runtime workers');
+    expect(proposalTool.description).toContain('mutate runtime projections');
     expect(proposalTool.description).toContain('before/inside/after');
     expect(proposalTool.description).toContain('respond, resume, freeze');
-    expect(addEdge?.properties?.edge?.properties).toMatchObject({
+    expect(nonSendEdge?.properties).toMatchObject({
       source: { type: 'string' },
       target: { type: 'string' },
+      loopCap: { type: 'integer', minimum: 1, maximum: 10 },
     });
-    expect(updateEdge?.properties?.patch?.properties).toMatchObject({
-      source: { type: 'string' },
-      target: { type: 'string' },
-    });
-    expect(edgeModes(addEdge?.properties?.edge?.properties)).toEqual([
+    expect(nonSendEdge?.properties?.mode?.enum).toEqual([
       'normal',
       'conditional',
       'command',
       'fallback',
     ]);
-    expect(edgeModes(updateEdge?.properties?.patch?.properties)).toEqual([
-      'normal',
-      'conditional',
-      'command',
-      'fallback',
+    expect(sendEdge?.required).toEqual(['id', 'source', 'target', 'mode', 'send']);
+    expect(sendEdge?.properties).toMatchObject({
+      mode: { const: 'send' },
+      loopCap: { type: 'integer', minimum: 1, maximum: 10 },
+      send: {
+        required: ['destinationTemplateId', 'multiplicity', 'payloadLabel', 'mergeNodeId'],
+        properties: {
+          multiplicity: { const: 'dynamic' },
+        },
+      },
+    });
+    expect(sendEdgePatch?.required).toEqual(['mode', 'send']);
+    expect(nonSendEdgePatch?.properties?.mode?.enum).toEqual([
+      'normal', 'conditional', 'command', 'fallback',
     ]);
   });
 
@@ -264,6 +290,180 @@ describe('WebMCP adapter', () => {
     expect(state.graph).toEqual(before);
     expect(state.graph.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('hitl');
     expect([...registered.keys()]).toHaveLength(3);
+  });
+
+  it('submits a complete v4 Merge and Send candidate only as a pending human review', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-31T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+    const before = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      { registerTool: async (tool: RegisteredTool) => { registered.set(tool.name, tool); } } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const response = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Fan out billing work to one dynamic template and reducer Merge.',
+      expectedGraphUpdatedAt: before.updatedAt,
+      operations: [
+        {
+          type: 'add_node',
+          node: {
+            id: 'billing-worker-template',
+            kind: 'step',
+            executor: 'tool',
+            label: 'Process billing item',
+            position: { x: 670, y: 210 },
+          },
+        },
+        {
+          type: 'add_node',
+          node: {
+            id: 'billing-merge',
+            kind: 'merge',
+            label: 'Aggregate billing results',
+            position: { x: 850, y: 210 },
+            merge: {
+              reducer: { name: 'concatenate', aggregateState: 'billingResults' },
+              completion: { mode: 'all' },
+              continuation: { mode: 'once' },
+              waitingForDynamicInputs: true,
+            },
+          },
+        },
+        {
+          type: 'update_edge',
+          edgeId: 'billing-refund',
+          patch: {
+            target: 'billing-worker-template',
+            mode: 'send',
+            send: {
+              destinationTemplateId: 'billing-worker-template',
+              multiplicity: 'dynamic',
+              payloadLabel: 'billing item',
+              payloadSchemaRef: 'BillingItem',
+              mergeNodeId: 'billing-merge',
+            },
+          },
+        },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'billing-template-merge',
+            source: 'billing-worker-template',
+            target: 'billing-merge',
+            mode: 'normal',
+          },
+        },
+        {
+          type: 'add_edge',
+          edge: {
+            id: 'billing-merge-refund',
+            source: 'billing-merge',
+            target: 'refund',
+            mode: 'normal',
+          },
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(state.proposal).toMatchObject({ status: 'pending' });
+    expect(state.graph).toEqual(before);
+    expect([...registered.keys()]).toEqual([
+      'get_graph',
+      'propose_graph_changes',
+      'get_branch_scenarios',
+    ]);
+  });
+
+  it('keeps invalid or frozen v4 Send proposals out of accepted state', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-31T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+    const beforeInvalid = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      { registerTool: async (tool: RegisteredTool) => { registered.set(tool.name, tool); } } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const invalid = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Attempt an incomplete Send configuration.',
+      operations: [{
+        type: 'update_edge',
+        edgeId: 'billing-refund',
+        patch: {
+          mode: 'send',
+          send: {
+            destinationTemplateId: 'different-template',
+            multiplicity: 'dynamic',
+            payloadLabel: 'billing item',
+            mergeNodeId: 'missing-merge',
+          },
+        },
+      }],
+    });
+
+    expect(invalid).toMatchObject({
+      ok: true,
+      proposal: {
+        status: 'invalid',
+        validationErrors: expect.arrayContaining([
+          expect.objectContaining({ code: 'SEND_TEMPLATE_TARGET_MISMATCH' }),
+          expect.objectContaining({ code: 'SEND_MERGE_REQUIRED' }),
+        ]),
+      },
+    });
+    expect(state.graph).toEqual(beforeInvalid);
+
+    state = service.freezeGraph(service.createInitial()).state;
+    const frozenBefore = structuredClone(state.graph);
+    const frozen = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Attempt a frozen Send proposal.',
+      operations: [{
+        type: 'update_edge',
+        edgeId: 'billing-refund',
+        patch: {
+          mode: 'send',
+          send: {
+            destinationTemplateId: 'different-template',
+            multiplicity: 'dynamic',
+            payloadLabel: 'billing item',
+            mergeNodeId: 'missing-merge',
+          },
+        },
+      }],
+    });
+
+    expect(frozen).toEqual({
+      ok: false,
+      error: { code: 'GRAPH_FROZEN', message: 'Unfreeze the graph before requesting changes.' },
+    });
+    expect(state.graph).toEqual(frozenBefore);
   });
 
   it('keeps invalid approval-required sensitive proposals out of accepted state', async () => {

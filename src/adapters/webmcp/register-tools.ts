@@ -147,6 +147,74 @@ const stepModifierSchema = {
   additionalProperties: false,
 };
 
+const mergeCompletionSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      required: ['mode'],
+      properties: { mode: { const: 'all' } },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['mode'],
+      properties: { mode: { const: 'any' } },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['mode', 'quorum'],
+      properties: {
+        mode: { const: 'quorum' },
+        quorum: { type: 'integer', minimum: 1 },
+      },
+      additionalProperties: false,
+    },
+  ],
+};
+
+const mergeConfigSchema = {
+  type: 'object',
+  description:
+    'First-class Merge configuration. A Merge is a non-work junction: reducer and completion configuration are required and Step-only fields are forbidden.',
+  required: ['reducer', 'completion', 'continuation', 'waitingForDynamicInputs'],
+  properties: {
+    reducer: {
+      type: 'object',
+      required: ['name', 'aggregateState'],
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        aggregateState: { type: 'string', minLength: 1 },
+      },
+      additionalProperties: false,
+    },
+    completion: mergeCompletionSchema,
+    continuation: {
+      type: 'object',
+      required: ['mode'],
+      properties: { mode: { enum: ['once', 'per_batch'] } },
+      additionalProperties: false,
+    },
+    waitingForDynamicInputs: { const: true },
+  },
+  additionalProperties: false,
+};
+
+const sendMapConfigSchema = {
+  type: 'object',
+  description:
+    'Strict design-time Send/map configuration. destinationTemplateId must equal the edge target; it identifies one template Step, never materialized runtime workers.',
+  required: ['destinationTemplateId', 'multiplicity', 'payloadLabel', 'mergeNodeId'],
+  properties: {
+    destinationTemplateId: { type: 'string', minLength: 1 },
+    multiplicity: { const: 'dynamic' },
+    payloadLabel: { type: 'string', minLength: 1 },
+    mergeNodeId: { type: 'string', minLength: 1 },
+    payloadSchemaRef: { type: 'string', minLength: 1 },
+  },
+  additionalProperties: false,
+};
+
 const nodeBaseProperties = {
   label: { type: 'string' },
   description: { type: 'string' },
@@ -167,6 +235,7 @@ const nodePatchSchema = {
   properties: {
     ...nodeBaseProperties,
     ...stepProperties,
+    merge: mergeConfigSchema,
     sensitive: {
       anyOf: [sensitiveEffectPolicySchema, { type: 'null' }],
       description:
@@ -174,7 +243,7 @@ const nodePatchSchema = {
     },
   },
   description:
-    'Updates an existing node. executor, participation, hitl, sensitive, and modifiers are Step-only; Start and End nodes accept only label, description, position, and config changes.',
+    'Updates an existing node. executor, participation, hitl, sensitive, and modifiers are Step-only. merge is Merge-only; Start and End accept only label, description, position, and config changes.',
   // Parent membership is intentionally a dedicated proposal operation.
   additionalProperties: false,
 };
@@ -189,6 +258,18 @@ const addNodeSchema = {
         kind: { const: 'start' },
         ...nodeBaseProperties,
         parentId: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['id', 'kind', 'label', 'position', 'merge'],
+      properties: {
+        id: { type: 'string' },
+        kind: { const: 'merge' },
+        ...nodeBaseProperties,
+        parentId: { type: 'string' },
+        merge: mergeConfigSchema,
       },
       additionalProperties: false,
     },
@@ -228,6 +309,67 @@ const subgraphPatchSchema = {
   },
   additionalProperties: false,
 };
+
+const nonSendEdgeSchema = {
+  type: 'object',
+  required: ['id', 'source', 'target', 'mode'],
+  properties: {
+    id: { type: 'string' },
+    source: { type: 'string' },
+    target: { type: 'string' },
+    mode: { enum: ['normal', 'conditional', 'command', 'fallback'] },
+    label: { type: 'string' },
+    condition: { type: 'string' },
+    loopCap: { type: 'integer', minimum: 1, maximum: 10 },
+  },
+  additionalProperties: false,
+};
+
+const sendEdgeSchema = {
+  type: 'object',
+  required: ['id', 'source', 'target', 'mode', 'send'],
+  properties: {
+    id: { type: 'string' },
+    source: { type: 'string' },
+    target: { type: 'string' },
+    mode: { const: 'send' },
+    label: { type: 'string' },
+    loopCap: { type: 'integer', minimum: 1, maximum: 10 },
+    send: sendMapConfigSchema,
+  },
+  additionalProperties: false,
+};
+
+const edgeSchema = { oneOf: [nonSendEdgeSchema, sendEdgeSchema] };
+
+const nonSendEdgePatchSchema = {
+  type: 'object',
+  properties: {
+    source: { type: 'string' },
+    target: { type: 'string' },
+    mode: { enum: ['normal', 'conditional', 'command', 'fallback'] },
+    label: { type: 'string' },
+    condition: { type: 'string' },
+    loopCap: { type: 'integer', minimum: 1, maximum: 10 },
+  },
+  additionalProperties: false,
+};
+
+const sendEdgePatchSchema = {
+  type: 'object',
+  required: ['mode', 'send'],
+  properties: {
+    source: { type: 'string' },
+    target: { type: 'string' },
+    mode: { const: 'send' },
+    label: { type: 'string' },
+    loopCap: { type: 'integer', minimum: 1, maximum: 10 },
+    send: sendMapConfigSchema,
+  },
+  additionalProperties: false,
+};
+
+const edgePatchSchema = { oneOf: [nonSendEdgePatchSchema, sendEdgePatchSchema] };
 
 const operationSchema = {
   oneOf: [
@@ -290,19 +432,7 @@ const operationSchema = {
       required: ['type', 'edge'],
       properties: {
         type: { const: 'add_edge' },
-        edge: {
-          type: 'object',
-          required: ['id', 'source', 'target', 'mode'],
-          properties: {
-            id: { type: 'string' },
-            source: { type: 'string' },
-            target: { type: 'string' },
-            mode: { type: 'string', enum: ['normal', 'conditional', 'command', 'fallback'] },
-            label: { type: 'string' },
-            condition: { type: 'string' },
-          },
-          additionalProperties: false,
-        },
+        edge: edgeSchema,
       },
     },
     {
@@ -311,17 +441,7 @@ const operationSchema = {
       properties: {
         type: { const: 'update_edge' },
         edgeId: { type: 'string' },
-        patch: {
-          type: 'object',
-          properties: {
-            source: { type: 'string' },
-            target: { type: 'string' },
-            mode: { type: 'string', enum: ['normal', 'conditional', 'command', 'fallback'] },
-            label: { type: 'string' },
-            condition: { type: 'string' },
-          },
-          additionalProperties: false,
-        },
+        patch: edgePatchSchema,
       },
     },
     {
@@ -371,7 +491,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only proposal. Nodes are exactly Start, Step, or End; every added Step requires an executor. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Start and End never accept Step-only fields. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, or directly modify accepted state.',
+          'Creates a review-only proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, mutate runtime projections, or directly modify accepted state.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],
