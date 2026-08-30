@@ -581,6 +581,75 @@ describe('workspace persistence migration', () => {
     expect(migrated.graph?.edges[0].provenance?.evidence).toBeUndefined();
   });
 
+  it('backfills a pending v5 proposal diff without applying its operations to the accepted graph', () => {
+    const graph = structuredClone(sampleGraph) as unknown as Record<string, unknown>;
+    const capabilities = graph.capabilities as Record<string, unknown>;
+    const { provenance, ...v5Capabilities } = capabilities;
+    void provenance;
+    graph.schemaVersion = '5';
+    graph.capabilities = v5Capabilities;
+    delete graph.relationships;
+    const nodes = graph.nodes as Array<Record<string, unknown>>;
+    const acceptedClassifierLabel = nodes.find((node) => node.id === 'classifier')!.label;
+    const operations = [
+      {
+        type: 'update_node',
+        nodeId: 'classifier',
+        patch: { label: 'Pending proposal label' },
+      },
+    ];
+    const oldDiff = {
+      addedNodeIds: [],
+      updatedNodeIds: ['classifier'],
+      removedNodeIds: [],
+      addedSubgraphIds: [],
+      updatedSubgraphIds: [],
+      removedSubgraphIds: [],
+      membershipChangedNodeIds: [],
+      addedEdgeIds: [],
+      updatedEdgeIds: [],
+      removedEdgeIds: [],
+      changedCapabilityPaths: [],
+    };
+
+    const migrated = migrateWorkspaceV6(
+      {
+        graph,
+        proposal: {
+          id: 'pending-v5-proposal',
+          baseGraphId: sampleGraph.id,
+          baseUpdatedAt: sampleGraph.updatedAt,
+          operations,
+          rationale: 'Keep the update under review.',
+          status: 'pending',
+          createdAt: '2026-08-28T12:00:00.000Z',
+          diff: oldDiff,
+        },
+        scenarios: [],
+      },
+      service.createInitial,
+    );
+
+    expect(migrated.proposal).toMatchObject({
+      id: 'pending-v5-proposal',
+      status: 'pending',
+      operations,
+      diff: {
+        ...oldDiff,
+        addedRelationshipIds: [],
+        updatedRelationshipIds: [],
+        removedRelationshipIds: [],
+        changedProvenancePaths: [],
+        changedReadinessNodeIds: [],
+        changedOpaqueNodeIds: [],
+        changedEndOutcomeNodeIds: [],
+      },
+    });
+    expect(migrated.graph?.nodes.find((node) => node.id === 'classifier')?.label).toBe(
+      acceptedClassifierLabel,
+    );
+  });
+
   it('normalizes stale route fields while preserving the persisted graph', () => {
     const legacy = structuredClone(researchIntakeRoutingGraph);
     legacy.edges.find((edge) => edge.id === 'researcher-continue')!.condition =

@@ -20,6 +20,7 @@ import {
   migrateGraphEdgeV5,
   normalizeLegacyWorkNodeKind,
   normalizeWorkflowGraph,
+  ProposalDiff,
   workflowGraphSchema,
   workflowGraphV5Schema,
   workflowGraphV4Schema,
@@ -33,6 +34,47 @@ type PersistedWorkspace = Partial<WorkspaceCore> & Record<string, unknown>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
+
+const proposalDiffArrayKeys = [
+  'addedNodeIds',
+  'updatedNodeIds',
+  'removedNodeIds',
+  'addedSubgraphIds',
+  'updatedSubgraphIds',
+  'removedSubgraphIds',
+  'membershipChangedNodeIds',
+  'addedEdgeIds',
+  'updatedEdgeIds',
+  'removedEdgeIds',
+  'addedRelationshipIds',
+  'updatedRelationshipIds',
+  'removedRelationshipIds',
+  'changedCapabilityPaths',
+  'changedProvenancePaths',
+  'changedReadinessNodeIds',
+  'changedOpaqueNodeIds',
+  'changedEndOutcomeNodeIds',
+] as const satisfies readonly (keyof ProposalDiff)[];
+
+/**
+ * Old persisted proposals have no reliable view of the graph against which
+ * their diff was originally calculated. Preserve known arrays and complete
+ * the active shape rather than deriving potentially stale proposal changes.
+ */
+function normalizeProposalDiff(proposal: Record<string, unknown>): Record<string, unknown> {
+  const persistedDiff = isRecord(proposal.diff) ? proposal.diff : {};
+  const normalizedDiff = Object.fromEntries(
+    proposalDiffArrayKeys.map((key) => [key, Array.isArray(persistedDiff[key]) ? persistedDiff[key] : []]),
+  );
+
+  return {
+    ...proposal,
+    diff: {
+      ...persistedDiff,
+      ...normalizedDiff,
+    },
+  };
+}
 
 /**
  * A pending v1 proposal is part of ordinary restoration state. Normalize only
@@ -143,9 +185,10 @@ function migrateV2Proposal(proposal: unknown, graph: WorkflowGraphV2): unknown {
  */
 function migrateV5Proposal(proposal: unknown): unknown {
   if (!isRecord(proposal) || !Array.isArray(proposal.operations)) return proposal;
+  const normalizedProposal = normalizeProposalDiff(proposal);
 
   return {
-    ...proposal,
+    ...normalizedProposal,
     operations: proposal.operations.map((operation) => {
       if (!isRecord(operation)) return operation;
       if (operation.type === 'add_node') {
