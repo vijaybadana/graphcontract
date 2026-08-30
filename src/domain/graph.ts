@@ -2144,10 +2144,15 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
   const edgesByConnection = new Map<string, GraphEdge[]>();
   const relationshipIds = new Set<string>();
 
-  const validateProvenance = (provenance: Provenance, path: string) => {
+  const validateProvenance = (
+    provenance: Provenance,
+    path: string,
+    surface: 'native-node' | 'native-edge' | 'non-native-relationship',
+  ) => {
     if (
       (provenance.representation === 'runtime-generated' ||
-        provenance.representation === 'derived-semantic') &&
+        provenance.representation === 'derived-semantic' ||
+        provenance.representation === 'external-orchestration') &&
       !provenance.evidence
     ) {
       issues.push(
@@ -2155,6 +2160,18 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
           'PROVENANCE_EVIDENCE_REQUIRED',
           `${provenance.representation} claims require explicit evidence.`,
           `${path}.evidence`,
+        ),
+      );
+    }
+    if (
+      (surface === 'native-node' || surface === 'native-edge') &&
+      provenance.representation === 'external-orchestration'
+    ) {
+      issues.push(
+        issue(
+          'EXTERNAL_ORCHESTRATION_PROVENANCE_REQUIRES_NON_NATIVE_RELATIONSHIP',
+          'External orchestration provenance belongs only to a non-native relationship.',
+          `${path}.representation`,
         ),
       );
     }
@@ -2244,7 +2261,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     }
     nodeIds.add(node.id);
     nodeById.set(node.id, node);
-    validateProvenance(node.provenance!, `nodes.${node.id}.provenance`);
+    validateProvenance(node.provenance!, `nodes.${node.id}.provenance`, 'native-node');
     if (subgraphIds.has(node.id)) {
       issues.push(
         issue(
@@ -2288,7 +2305,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
       issues.push(issue('DUPLICATE_EDGE_ID', `Edge ID “${edge.id}” is duplicated.`, `edges.${edge.id}`));
     }
     edgeIds.add(edge.id);
-    validateProvenance(edge.provenance!, `edges.${edge.id}.provenance`);
+    validateProvenance(edge.provenance!, `edges.${edge.id}.provenance`, 'native-edge');
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
       issues.push(
         issue(
@@ -2346,7 +2363,11 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
       );
     }
     relationshipIds.add(relationship.id);
-    validateProvenance(relationship.provenance, `relationships.${relationship.id}.provenance`);
+    validateProvenance(
+      relationship.provenance,
+      `relationships.${relationship.id}.provenance`,
+      'non-native-relationship',
+    );
 
     const endpoints = [relationship.source, relationship.target];
     const nodeEndpointCount = endpoints.filter((endpoint) => endpoint.kind === 'node').length;
@@ -2382,6 +2403,18 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
         issue(
           'EXTERNAL_RELATIONSHIP_PROVENANCE_REQUIRED',
           'External orchestration relationships require external-orchestration provenance.',
+          `relationships.${relationship.id}.provenance.representation`,
+        ),
+      );
+    }
+    if (
+      relationship.kind !== 'external-orchestration' &&
+      relationship.provenance.representation === 'external-orchestration'
+    ) {
+      issues.push(
+        issue(
+          'EXTERNAL_ORCHESTRATION_PROVENANCE_KIND_MISMATCH',
+          'External orchestration provenance requires an external-orchestration relationship.',
           `relationships.${relationship.id}.provenance.representation`,
         ),
       );

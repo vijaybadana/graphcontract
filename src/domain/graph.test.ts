@@ -1024,7 +1024,10 @@ describe('routing edge semantics', () => {
         kind: 'external-orchestration',
         source: { kind: 'external', externalId: 'background-runner', label: 'Background runner' },
         target: { kind: 'node', nodeId: 'human' },
-        provenance: { representation: 'external-orchestration' },
+        provenance: {
+          representation: 'external-orchestration',
+          evidence: { ...evidence, evidenceClass: 'verified-external-orchestration' },
+        },
       },
     ];
 
@@ -1053,6 +1056,69 @@ describe('routing edge semantics', () => {
     expect(buildPythonTestsDownload(graph, scenarios).content).toContain('relationship_annotations');
   });
 
+  it('limits external orchestration provenance to evidenced external relationships', () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected a Step fixture.');
+
+    const evidence = {
+      source: 'runtime/external-orchestration.json',
+      evidenceClass: 'verified-external-orchestration',
+      confidence: 'high' as const,
+    };
+    classifier.provenance = { representation: 'external-orchestration', evidence };
+    graph.edges[0].provenance = { representation: 'external-orchestration', evidence };
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    graph.relationships = [
+      {
+        id: 'spawned-run-with-external-provenance',
+        kind: 'spawned-run',
+        source: { kind: 'node', nodeId: 'classifier' },
+        target: { kind: 'external', externalId: 'worker-run', label: 'Worker run' },
+        provenance: { representation: 'external-orchestration', evidence },
+      },
+      {
+        id: 'spawned-thread-with-external-provenance',
+        kind: 'spawned-thread',
+        source: { kind: 'node', nodeId: 'classifier' },
+        target: { kind: 'external', externalId: 'worker-thread', label: 'Worker thread' },
+        provenance: { representation: 'external-orchestration', evidence },
+      },
+      {
+        id: 'external-relationship-without-evidence',
+        kind: 'external-orchestration',
+        source: { kind: 'node', nodeId: 'classifier' },
+        target: { kind: 'external', externalId: 'runner', label: 'Runner' },
+        provenance: { representation: 'external-orchestration' },
+      },
+    ];
+
+    expect(validateGraph(graph)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'EXTERNAL_ORCHESTRATION_PROVENANCE_REQUIRES_NON_NATIVE_RELATIONSHIP',
+          path: 'nodes.classifier.provenance.representation',
+        }),
+        expect.objectContaining({
+          code: 'EXTERNAL_ORCHESTRATION_PROVENANCE_REQUIRES_NON_NATIVE_RELATIONSHIP',
+          path: 'edges.start-classifier.provenance.representation',
+        }),
+        expect.objectContaining({
+          code: 'EXTERNAL_ORCHESTRATION_PROVENANCE_KIND_MISMATCH',
+          path: 'relationships.spawned-run-with-external-provenance.provenance.representation',
+        }),
+        expect.objectContaining({
+          code: 'EXTERNAL_ORCHESTRATION_PROVENANCE_KIND_MISMATCH',
+          path: 'relationships.spawned-thread-with-external-provenance.provenance.representation',
+        }),
+        expect.objectContaining({
+          code: 'PROVENANCE_EVIDENCE_REQUIRED',
+          path: 'relationships.external-relationship-without-evidence.provenance.evidence',
+        }),
+      ]),
+    );
+  });
+
   it('keeps relationship proposal operations progressive and rejects unsupported evidence claims atomically', () => {
     const graph = structuredClone(sampleGraph);
     const relationship = {
@@ -1077,29 +1143,29 @@ describe('routing edge semantics', () => {
     expect(proposal).toMatchObject({ status: 'pending', diff: { addedRelationshipIds: ['spawn-review-thread'] } });
     expect(graph.relationships).toEqual([]);
 
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    const beforeInvalidProposal = structuredClone(graph);
     const invalid = createProposal(graph, {
       operations: [
         {
           type: 'add_relationship',
           relationship: {
-            id: 'unsupported-runtime-claim',
+            id: 'external-without-evidence',
             kind: 'external-orchestration',
             source: { kind: 'node', nodeId: 'classifier' },
             target: { kind: 'external', externalId: 'runner', label: 'Runner' },
-            provenance: { representation: 'runtime-generated' },
+            provenance: { representation: 'external-orchestration' },
           },
         },
       ],
-      rationale: 'Attempt a runtime claim without evidence.',
+      rationale: 'Attempt an external orchestration claim without evidence.',
     }).proposal;
     expect(invalid).toMatchObject({ status: 'invalid' });
     expect(invalid?.validationErrors).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: 'PROVENANCE_EVIDENCE_REQUIRED', path: 'relationships.unsupported-runtime-claim.provenance.evidence' }),
-        expect.objectContaining({ code: 'EXTERNAL_RELATIONSHIP_PROVENANCE_REQUIRED', path: 'relationships.unsupported-runtime-claim.provenance.representation' }),
-        expect.objectContaining({ code: 'EXTERNAL_ORCHESTRATION_CAPABILITY_REQUIRED', path: 'capabilities.provenance.externalOrchestrationAvailable' }),
+        expect.objectContaining({ code: 'PROVENANCE_EVIDENCE_REQUIRED', path: 'relationships.external-without-evidence.provenance.evidence' }),
       ]),
     );
-    expect(graph.relationships).toEqual([]);
+    expect(graph).toEqual(beforeInvalidProposal);
   });
 });
