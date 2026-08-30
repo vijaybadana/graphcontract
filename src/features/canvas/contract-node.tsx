@@ -27,6 +27,8 @@ export type StepModifierInspectorSection =
   | 'participation'
   | 'hitl'
   | 'sensitive'
+  | 'storeAccess'
+  | 'retry'
   | 'modifiers';
 
 /** Stable presentation metadata for the Package 1 inspector seam. */
@@ -172,31 +174,31 @@ export function stepModifierPresentations(
       inspectorSection: 'sensitive',
     });
   }
-  if (node.modifiers?.storeRead) {
+  if (node.storeAccess?.read || node.modifiers?.storeRead) {
     modifiers.push({
       id: 'storeRead',
       label: 'Store R',
       accessibleLabel: 'Store read',
       tone: 'store',
-      inspectorSection: 'modifiers',
+      inspectorSection: 'storeAccess',
     });
   }
-  if (node.modifiers?.storeWrite) {
+  if (node.storeAccess?.write || node.modifiers?.storeWrite) {
     modifiers.push({
       id: 'storeWrite',
       label: 'Store W',
       accessibleLabel: 'Store write',
       tone: 'store',
-      inspectorSection: 'modifiers',
+      inspectorSection: 'storeAccess',
     });
   }
-  if (node.modifiers?.retryFallback) {
+  if (node.retry || node.modifiers?.retryFallback) {
     modifiers.push({
       id: 'retryFallback',
       label: 'Retry',
-      accessibleLabel: 'Retry or fallback',
+      accessibleLabel: 'Internal retry policy',
       tone: 'retry',
-      inspectorSection: 'modifiers',
+      inspectorSection: 'retry',
     });
   }
   if (node.modifiers?.opaque) {

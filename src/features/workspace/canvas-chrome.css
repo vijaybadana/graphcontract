@@ -12,8 +12,9 @@
 }
 
 .canvas-instruction-strip {
-  top: 82px;
-  left: 50%;
+  top: 132px;
+  left: calc(var(--palette-offset) + ((100% - var(--palette-offset) - var(--inspector-offset)) / 2));
+  max-width: calc(100% - var(--palette-offset) - var(--inspector-offset) - 32px);
   gap: 16px;
   transform: translateX(-50%);
   border-radius: 8px;

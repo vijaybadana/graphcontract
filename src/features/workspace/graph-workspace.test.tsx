@@ -50,6 +50,26 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('GraphWorkspace subgraph creation', () => {
+  it('opens and refocuses the requested graph capability settings from the strip', async () => {
+    renderWorkspace(false);
+
+    const storeCapability = await screen.findByRole('button', { name: /Store: Off, Cross-thread knowledge/i });
+    fireEvent.click(storeCapability);
+    const storeTab = await screen.findByRole('tab', { name: 'Store' });
+    expect(storeTab.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(storeTab);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'State' }));
+    expect(screen.getByRole('tab', { name: 'State' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(storeCapability);
+
+    await waitFor(() => {
+      const requestedStoreTab = screen.getByRole('tab', { name: 'Store' });
+      expect(requestedStoreTab.getAttribute('aria-selected')).toBe('true');
+      expect(document.activeElement).toBe(requestedStoreTab);
+    });
+  }, 30_000);
+
   it('shows validated observed workers only in Runtime view without mutating the accepted graph', async () => {
     useGraphStore.getState().loadDynamicParallelismDemo();
     const acceptedBefore = structuredClone(useGraphStore.getState().graph);

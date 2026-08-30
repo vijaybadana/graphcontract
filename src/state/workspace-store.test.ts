@@ -33,6 +33,71 @@ beforeEach(() => {
 });
 
 describe('workspace subgraph actions', () => {
+  it('edits durability capabilities and direct Step policies as undoable, non-topology actions', () => {
+    const topology = () => ({
+      nodes: useGraphStore.getState().graph.nodes.map((node) => ({
+        id: node.id,
+        kind: node.kind,
+        parentId: node.parentId,
+        position: node.position,
+      })),
+      edges: structuredClone(useGraphStore.getState().graph.edges),
+      subgraphs: structuredClone(useGraphStore.getState().graph.subgraphs),
+    });
+    const beforeTopology = topology();
+
+    useGraphStore.getState().updateGraphCapabilities({
+      store: { available: true, namespace: 'preferences', retention: 'session' },
+      runtimeMode: { mode: 'text', input: 'text' },
+    });
+    useGraphStore.getState().updateStepStoreAccess('billing', {
+      read: { namespace: 'preferences', key: 'customer' },
+    });
+    useGraphStore.getState().updateStepRetry('billing', {
+      maxAttempts: 3,
+      backoff: { strategy: 'exponential', initialDelayMs: 100 },
+    });
+
+    expect(useGraphStore.getState().graph).toMatchObject({
+      capabilities: {
+        store: { available: true, namespace: 'preferences', retention: 'session' },
+        runtimeMode: { mode: 'text', input: 'text' },
+      },
+    });
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')).toMatchObject({
+      kind: 'step',
+      storeAccess: { read: { namespace: 'preferences', key: 'customer' } },
+      retry: { maxAttempts: 3, backoff: { strategy: 'exponential', initialDelayMs: 100 } },
+      modifiers: { storeRead: true, retryFallback: true },
+    });
+    expect(topology()).toEqual(beforeTopology);
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')).not.toHaveProperty('retry');
+  });
+
+  it('keeps direct durability edits inert while proposal review is pending or the graph is frozen', () => {
+    const before = structuredClone(useGraphStore.getState().graph);
+    expect(useGraphStore.getState().submitProposal({
+      rationale: 'Review an independent label update.',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } }],
+    }).ok).toBe(true);
+    useGraphStore.getState().updateGraphCapabilities({ store: { available: true } });
+    useGraphStore.getState().updateStepRetry('billing', {
+      maxAttempts: 2,
+      backoff: { strategy: 'fixed', initialDelayMs: 0 },
+    });
+    expect(useGraphStore.getState().graph).toEqual(before);
+
+    useGraphStore.getState().rejectProposal();
+    expect(useGraphStore.getState().freezeGraph().ok).toBe(true);
+    useGraphStore.getState().updateStepStoreAccess('billing', { read: {} });
+    expect(useGraphStore.getState().graph.status).toBe('frozen');
+    expect(useGraphStore.getState().graph.capabilities).toEqual(before.capabilities);
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')).not.toHaveProperty('storeAccess');
+    useGraphStore.getState().unfreezeGraph();
+  });
+
   it('auto-lays out the accepted graph as one undoable selection-clearing action', () => {
     const original = structuredClone(useGraphStore.getState().graph);
     const graph = structuredClone(original);

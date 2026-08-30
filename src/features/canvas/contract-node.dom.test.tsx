@@ -175,13 +175,15 @@ describe('ContractNode Step anatomy', () => {
           approvalRequired: false,
           idempotency: 'Request key',
         },
-        modifiers: { storeRead: true },
+        storeAccess: { read: {} },
+        retry: { maxAttempts: 2, backoff: { strategy: 'fixed', initialDelayMs: 0 } },
       }),
     ).toEqual([
       expect.objectContaining({ id: 'executor', label: 'Tool', inspectorSection: 'executor' }),
       expect.objectContaining({ id: 'hitl', inspectorSection: 'hitl' }),
       expect.objectContaining({ id: 'sensitive', inspectorSection: 'sensitive' }),
-      expect.objectContaining({ id: 'storeRead' }),
+      expect.objectContaining({ id: 'storeRead', inspectorSection: 'storeAccess' }),
+      expect.objectContaining({ id: 'retryFallback', inspectorSection: 'retry', accessibleLabel: 'Internal retry policy' }),
     ]);
   });
 });

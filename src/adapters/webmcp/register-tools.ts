@@ -37,6 +37,73 @@ const positionSchema = {
   additionalProperties: false,
 };
 
+const workingStateCapabilitySchema = {
+  type: 'object',
+  required: ['enabled', 'schema', 'reducers'],
+  properties: {
+    enabled: { type: 'boolean' },
+    schema: {
+      type: 'object', required: ['fields'],
+      properties: { fields: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+      additionalProperties: false,
+    },
+    reducers: {
+      type: 'array',
+      items: {
+        type: 'object', required: ['key', 'summary'],
+        properties: { key: { type: 'string' }, summary: { type: 'string' } }, additionalProperties: false,
+      },
+    },
+  },
+  additionalProperties: false,
+};
+
+const checkpointerCapabilitySchema = {
+  type: 'object',
+  required: ['enabled', 'durableThread'],
+  properties: {
+    enabled: { type: 'boolean' }, backend: { type: 'string' },
+    durableThread: {
+      type: 'object', required: ['required'],
+      properties: { required: { type: 'boolean' }, threadIdSource: { type: 'string' } },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const longTermStoreCapabilitySchema = {
+  type: 'object', required: ['available'],
+  properties: { available: { type: 'boolean' }, namespace: { type: 'string' }, retention: { type: 'string' } },
+  additionalProperties: false,
+};
+
+const runtimeModeCapabilitySchema = {
+  type: 'object', required: ['mode'],
+  properties: { mode: { enum: ['unspecified', 'text', 'voice'] }, input: { enum: ['text', 'audio'] } },
+  additionalProperties: false,
+};
+
+const graphCapabilitiesPatchSchema = {
+  type: 'object',
+  description: 'Replaces supplied complete graph-level capability records. State, Checkpointer, Store, and runtime mode remain distinct.',
+  properties: {
+    state: workingStateCapabilitySchema,
+    checkpointer: checkpointerCapabilitySchema,
+    store: longTermStoreCapabilitySchema,
+    runtimeMode: runtimeModeCapabilitySchema,
+  },
+  additionalProperties: false,
+};
+
+const singleSubgraphCapabilityOverrideSchema = {
+  oneOf: [
+    { type: 'object', required: ['state'], properties: { state: workingStateCapabilitySchema }, additionalProperties: false },
+    { type: 'object', required: ['checkpointer'], properties: { checkpointer: checkpointerCapabilitySchema }, additionalProperties: false },
+    { type: 'object', required: ['store'], properties: { store: longTermStoreCapabilitySchema }, additionalProperties: false },
+  ],
+};
+
 const subgraphSchema = {
   type: 'object',
   required: ['id', 'label', 'position', 'dimensions', 'collapsed'],
@@ -51,6 +118,11 @@ const subgraphSchema = {
       additionalProperties: false,
     },
     collapsed: { type: 'boolean' },
+    capabilityOverrides: {
+      type: 'object',
+      properties: { state: workingStateCapabilitySchema, checkpointer: checkpointerCapabilitySchema, store: longTermStoreCapabilitySchema },
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
 };
@@ -147,6 +219,40 @@ const stepModifierSchema = {
   additionalProperties: false,
 };
 
+const stepStoreAccessSchema = {
+  type: 'object',
+  description: 'Direct Step Store access. It is valid only when Store is available in the Step’s effective graph or subgraph scope.',
+  properties: {
+    read: {
+      type: 'object', properties: { namespace: { type: 'string' }, key: { type: 'string' } }, additionalProperties: false,
+    },
+    write: {
+      type: 'object', properties: { namespace: { type: 'string' }, key: { type: 'string' }, retention: { type: 'string' } }, additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const retryPolicySchema = {
+  type: 'object',
+  description: 'Internal Step retry policy. It never creates a topology loop or runtime authority.',
+  properties: {
+    maxAttempts: { type: 'integer', minimum: 2, maximum: 10 },
+    backoff: {
+      type: 'object',
+      properties: {
+        strategy: { enum: ['fixed', 'exponential'] }, initialDelayMs: { type: 'integer', minimum: 0 }, maxDelayMs: { type: 'integer', minimum: 0 },
+      },
+      additionalProperties: false,
+    },
+    retryOn: { type: 'array', items: { type: 'string' } },
+    fallback: {
+      type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' } }, additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
 const mergeCompletionSchema = {
   oneOf: [
     {
@@ -228,6 +334,8 @@ const stepProperties = {
   hitl: hitlSchema,
   sensitive: sensitiveEffectPolicySchema,
   modifiers: stepModifierSchema,
+  storeAccess: stepStoreAccessSchema,
+  retry: retryPolicySchema,
 };
 
 const nodePatchSchema = {
@@ -235,6 +343,8 @@ const nodePatchSchema = {
   properties: {
     ...nodeBaseProperties,
     ...stepProperties,
+    storeAccess: { anyOf: [stepStoreAccessSchema, { type: 'null' }] },
+    retry: { anyOf: [retryPolicySchema, { type: 'null' }] },
     merge: mergeConfigSchema,
     sensitive: {
       anyOf: [sensitiveEffectPolicySchema, { type: 'null' }],
@@ -407,6 +517,32 @@ const operationSchema = {
     },
     {
       type: 'object',
+      required: ['type', 'patch'],
+      properties: {
+        type: { const: 'update_graph_capabilities' },
+        patch: graphCapabilitiesPatchSchema,
+      },
+    },
+    {
+      type: 'object',
+      required: ['type', 'subgraphId', 'override'],
+      properties: {
+        type: { const: 'set_subgraph_capability_override' },
+        subgraphId: { type: 'string' },
+        override: singleSubgraphCapabilityOverrideSchema,
+      },
+    },
+    {
+      type: 'object',
+      required: ['type', 'subgraphId', 'capability'],
+      properties: {
+        type: { const: 'remove_subgraph_capability_override' },
+        subgraphId: { type: 'string' },
+        capability: { enum: ['state', 'checkpointer', 'store'] },
+      },
+    },
+    {
+      type: 'object',
       required: ['type', 'subgraphId', 'nodeIds'],
       properties: {
         type: { const: 'assign_nodes_to_subgraph' },
@@ -479,6 +615,8 @@ export async function registerWebMcpTools(
                   status: proposal.status,
                   rationale: proposal.rationale,
                   createdAt: proposal.createdAt,
+                  operations: proposal.operations,
+                  diff: proposal.diff,
                 }
               : undefined,
           };
@@ -491,7 +629,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, mutate runtime projections, or directly modify accepted state.',
+          'Creates a review-only proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. State, Checkpointer, Store, and runtime-mode records are distinct graph capabilities; set or remove one supported subgraph override at a time, and declare direct Step Store read/write only where Store is available in effective scope. Retry is an internal Step policy, never a topology loop or runtime authority. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, mutate runtime projections, or directly modify accepted state.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],

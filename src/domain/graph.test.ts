@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyGraphOperations,
+  createProposal,
   createDefaultGraphCapabilities,
   enumerateScenarios,
   graphOperationSchema,
@@ -494,6 +495,89 @@ describe('routing edge semantics', () => {
     expect(structural.errors).toEqual([
       expect.objectContaining({ code: 'STEP_FIELDS_REQUIRE_STEP', path: 'operations.0' }),
     ]);
+  });
+
+  it('applies progressive v5 capability and override operations with stable proposal paths', () => {
+    const original = structuredClone(researchSupervisorGraph);
+    const operations = [
+      {
+        type: 'update_graph_capabilities' as const,
+        patch: {
+          store: { available: true, namespace: 'research-preferences', retention: '30d' },
+          runtimeMode: { mode: 'text' as const, input: 'text' as const },
+        },
+      },
+      {
+        type: 'set_subgraph_capability_override' as const,
+        subgraphId: 'research-supervisor',
+        override: { store: { available: true, namespace: 'supervisor-preferences' } },
+      },
+      {
+        type: 'update_node' as const,
+        nodeId: 'research-supervisor-agent',
+        patch: {
+          storeAccess: { read: { namespace: 'supervisor-preferences', key: 'query' } },
+          retry: {
+            maxAttempts: 3,
+            backoff: { strategy: 'exponential' as const, initialDelayMs: 100 },
+            retryOn: ['provider.timeout'],
+          },
+        },
+      },
+    ] satisfies GraphOperation[];
+
+    expect(graphOperationSchema.safeParse(operations[0]).success).toBe(true);
+    expect(graphOperationSchema.safeParse(operations[1]).success).toBe(true);
+    const applied = applyGraphOperations(original, operations);
+    expect(applied.errors).toEqual([]);
+    expect(validateGraph(applied.graph)).toEqual([]);
+    expect(applied.graph.capabilities.store).toEqual({ available: true, namespace: 'research-preferences', retention: '30d' });
+    expect(applied.graph.subgraphs.find((subgraph) => subgraph.id === 'research-supervisor')?.capabilityOverrides).toEqual({
+      store: { available: true, namespace: 'supervisor-preferences' },
+    });
+    expect(applied.graph.nodes.find((node) => node.id === 'research-supervisor-agent')).toMatchObject({
+      storeAccess: { read: { namespace: 'supervisor-preferences', key: 'query' } },
+      retry: { maxAttempts: 3, backoff: { strategy: 'exponential' } },
+    });
+    expect(createProposal(original, { rationale: 'Add durable research context.', operations }).proposal?.diff.changedCapabilityPaths).toEqual([
+      'capabilities.store',
+      'capabilities.runtimeMode',
+      'subgraphs.research-supervisor.capabilityOverrides.store',
+    ]);
+  });
+
+  it('removes one subgraph override and keeps invalid effective Store proposals out of accepted state', () => {
+    const graph = structuredClone(researchSupervisorGraph);
+    graph.capabilities.store = { available: true, namespace: 'research-preferences' };
+    const subgraph = graph.subgraphs.find((candidate) => candidate.id === 'research-supervisor');
+    if (!subgraph) throw new Error('Expected the Research Supervisor subgraph.');
+    subgraph.capabilityOverrides = { store: { available: false } };
+
+    const remove = applyGraphOperations(graph, [{
+      type: 'remove_subgraph_capability_override', subgraphId: subgraph.id, capability: 'store',
+    }]);
+    expect(remove.errors).toEqual([]);
+    expect(remove.graph.subgraphs.find((candidate) => candidate.id === subgraph.id)).not.toHaveProperty('capabilityOverrides');
+
+    const before = structuredClone(graph);
+    const invalid = createProposal(graph, {
+      rationale: 'Read disabled Store in the overridden research scope.',
+      operations: [{
+        type: 'update_node',
+        nodeId: 'research-supervisor-agent',
+        patch: { storeAccess: { read: { namespace: 'research-preferences' } } },
+      }],
+    });
+    expect(invalid.proposal).toMatchObject({
+      status: 'invalid',
+      validationErrors: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'STORE_READ_REQUIRES_AVAILABLE_STORE',
+          path: 'nodes.research-supervisor-agent.storeAccess.read',
+        }),
+      ]),
+    });
+    expect(graph).toEqual(before);
   });
 
   it('keeps the Research Intake topology valid with commands and a derived return loop', () => {

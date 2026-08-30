@@ -38,6 +38,12 @@ import {
 } from '@/src/features/inspector/inspector-select';
 import { useGraphStore } from '@/src/state/workspace-store';
 import { PreviewInputRequestSheet } from '@/src/features/hitl/preview-input-request';
+import {
+  GraphDurabilitySettings,
+  type GraphDurabilityTab,
+  StepDurabilitySettings,
+  SubgraphDurabilityOverrides,
+} from '@/src/features/inspector/durability-settings';
 
 type StepNode = Extract<GraphNode, { kind: 'step' }>;
 type StepHitlConfig = NonNullable<StepNode['hitl']>;
@@ -125,6 +131,11 @@ const localId = (prefix: string) =>
 
 export type InspectorFocusRequest = {
   section: StepModifierInspectorSection;
+  requestId: number;
+};
+
+export type GraphSettingsRequest = {
+  tab: GraphDurabilityTab;
   requestId: number;
 };
 
@@ -236,10 +247,12 @@ export type RuntimeInstanceInspectorSelection = RuntimeInstanceNodeData;
 
 export function ContextInspector({
   focusRequest,
+  graphSettingsRequest,
   runtimeInstance,
   readOnly = false,
 }: {
   focusRequest?: InspectorFocusRequest | null;
+  graphSettingsRequest?: GraphSettingsRequest | null;
   runtimeInstance?: RuntimeInstanceInspectorSelection | null;
   readOnly?: boolean;
 }) {
@@ -309,7 +322,7 @@ export function ContextInspector({
     Boolean(previewNode.hitl.response);
 
   const updateModifierFlag = (
-    key: Exclude<keyof StepModifierSummary, 'readiness'>,
+    key: Exclude<keyof StepModifierSummary, 'readiness' | 'storeRead' | 'storeWrite' | 'retryFallback'>,
     enabled: boolean,
   ) => {
     if (node?.kind !== 'step') return;
@@ -359,9 +372,18 @@ export function ContextInspector({
         <h2>Inspector</h2>
       </header>
       {!runtimeInstance && !node && !subgraph && !edge && (
-        <p className="context-inspector__empty">
-          Select a node, subgraph, or edge to configure it. Shift-click or drag-select multiple nodes.
-        </p>
+        <div className="context-inspector__content">
+          <p className="context-inspector__empty">
+            Select a node, subgraph, or edge to configure it. Shift-click or drag-select multiple nodes.
+          </p>
+          <GraphDurabilitySettings
+            key={graphSettingsRequest?.requestId ?? 'default'}
+            graph={graph}
+            editable={editable}
+            initialTab={graphSettingsRequest?.tab}
+            focusInitialTab={Boolean(graphSettingsRequest)}
+          />
+        </div>
       )}
       {selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length > 1 && (
         <p className="context-inspector__selection-summary" role="status" aria-live="polite">
@@ -458,6 +480,7 @@ export function ContextInspector({
               </div>
             </div>
           </section>
+          <SubgraphDurabilityOverrides graph={graph} subgraph={subgraph} editable={editable} />
           <section className="context-inspector__group context-inspector__group--tinted" aria-labelledby="subgraph-members-heading">
             <div className="context-inspector__toggle-row">
               <h3 id="subgraph-members-heading">Member nodes</h3>
@@ -774,6 +797,13 @@ export function ContextInspector({
                 </div>
               )}
             </section>
+            <StepDurabilitySettings
+              graph={graph}
+              node={node}
+              editable={editable}
+              storeAccessRef={(element) => { stepSectionRefs.current.storeAccess = element ?? undefined; }}
+              retryRef={(element) => { stepSectionRefs.current.retry = element ?? undefined; }}
+            />
             <section
               ref={(element) => { stepSectionRefs.current.modifiers = element ?? undefined; }}
               id="inspector-step-modifiers"
@@ -787,18 +817,6 @@ export function ContextInspector({
                 <label className="context-inspector__toggle-label">
                   <span>Guardrail</span>
                   <input type="checkbox" checked={Boolean(node.modifiers?.guardrail)} disabled={!editable} onChange={(event) => updateModifierFlag('guardrail', event.target.checked)} />
-                </label>
-                <label className="context-inspector__toggle-label">
-                  <span>Store read</span>
-                  <input type="checkbox" checked={Boolean(node.modifiers?.storeRead)} disabled={!editable} onChange={(event) => updateModifierFlag('storeRead', event.target.checked)} />
-                </label>
-                <label className="context-inspector__toggle-label">
-                  <span>Store write</span>
-                  <input type="checkbox" checked={Boolean(node.modifiers?.storeWrite)} disabled={!editable} onChange={(event) => updateModifierFlag('storeWrite', event.target.checked)} />
-                </label>
-                <label className="context-inspector__toggle-label">
-                  <span>Retry or fallback</span>
-                  <input type="checkbox" checked={Boolean(node.modifiers?.retryFallback)} disabled={!editable} onChange={(event) => updateModifierFlag('retryFallback', event.target.checked)} />
                 </label>
                 <label className="context-inspector__toggle-label">
                   <span>Opaque or prebuilt</span>

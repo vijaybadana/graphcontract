@@ -14,10 +14,14 @@ import {
 } from '@/src/application/workspace';
 import {
   GraphEdgePatch,
+  GraphCapabilities,
+  GraphCapabilityOverrides,
   GraphNodePatch,
   GraphPosition,
   GraphSubgraph,
   RuntimeProjectionFixture,
+  RetryPolicy,
+  StepStoreAccess,
   WorkflowGraph,
 } from '@/src/domain';
 import { runtimeFixtureForLoadedDynamicParallelismDemo } from '@/src/application/package-three-demo';
@@ -52,6 +56,14 @@ type WorkspaceStore = WorkspaceCore & {
   moveSubgraph: (id: string, position: GraphPosition) => void;
   moveCanvasElements: (positions: Record<string, GraphPosition>) => void;
   updateNode: (id: string, patch: GraphNodePatch) => void;
+  updateGraphCapabilities: (patch: Partial<GraphCapabilities>) => void;
+  setSubgraphCapabilityOverride: (
+    subgraphId: string,
+    capability: keyof GraphCapabilityOverrides,
+    value: GraphCapabilityOverrides[keyof GraphCapabilityOverrides] | null,
+  ) => void;
+  updateStepStoreAccess: (id: string, storeAccess: StepStoreAccess | null) => void;
+  updateStepRetry: (id: string, retry: RetryPolicy | null) => void;
   updateSubgraph: (id: string, patch: Partial<Omit<GraphSubgraph, 'id'>>) => void;
   setSubgraphCollapsed: (id: string, collapsed: boolean) => void;
   assignNodesToSubgraph: (subgraphId: string, nodeIds: string[]) => void;
@@ -209,6 +221,14 @@ export const useGraphStore = create<WorkspaceStore>()(
         moveCanvasElements: (positions) =>
           commit(workspace.moveCanvasElements(currentCore(), positions)),
         updateNode: (id, patch) => commit(workspace.updateNode(currentCore(), id, patch)),
+        updateGraphCapabilities: (patch) =>
+          commit(workspace.updateGraphCapabilities(currentCore(), patch)),
+        setSubgraphCapabilityOverride: (subgraphId, capability, value) =>
+          commit(workspace.setSubgraphCapabilityOverride(currentCore(), subgraphId, capability, value)),
+        updateStepStoreAccess: (id, storeAccess) =>
+          commit(workspace.updateStepStoreAccess(currentCore(), id, storeAccess)),
+        updateStepRetry: (id, retry) =>
+          commit(workspace.updateStepRetry(currentCore(), id, retry)),
         updateSubgraph: (id, patch) =>
           commit(workspace.updateSubgraph(currentCore(), id, patch)),
         setSubgraphCollapsed: (id, collapsed) =>

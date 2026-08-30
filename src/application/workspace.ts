@@ -4,6 +4,8 @@ import {
   createProposal,
   enumerateScenarios,
   GraphEdgePatch,
+  GraphCapabilities,
+  GraphCapabilityOverrides,
   GraphNode,
   GraphNodePatch,
   GraphProposal,
@@ -19,6 +21,8 @@ import {
   WorkflowGraph,
   StepExecutor,
   StepGraphNode,
+  StepStoreAccess,
+  RetryPolicy,
 } from '@/src/domain';
 import { dynamicParallelismDemoGraph } from './package-three-demo';
 import { layoutWorkflowGraph } from './layout-workflow';
@@ -360,6 +364,63 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           return updated;
         }),
       }));
+    },
+
+    /** Direct human capability editing stays in the accepted-graph path. */
+    updateGraphCapabilities(
+      state: WorkspaceCore,
+      patch: Partial<GraphCapabilities>,
+    ) {
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        capabilities: { ...graph.capabilities, ...patch },
+      }));
+    },
+
+    /**
+     * An absent override deliberately means inherit. This keeps a human
+     * subgraph edit separate from proposal authority and from topology.
+     */
+    setSubgraphCapabilityOverride(
+      state: WorkspaceCore,
+      subgraphId: string,
+      capability: keyof GraphCapabilityOverrides,
+      value: GraphCapabilityOverrides[keyof GraphCapabilityOverrides] | null,
+    ) {
+      if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
+        return { state, changed: false };
+      }
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        subgraphs: graph.subgraphs.map((subgraph) => {
+          if (subgraph.id !== subgraphId) return subgraph;
+          const overrides = { ...subgraph.capabilityOverrides };
+          if (value === null) delete overrides[capability];
+          else if (capability === 'state') overrides.state = value as GraphCapabilities['state'];
+          else if (capability === 'checkpointer') overrides.checkpointer = value as GraphCapabilities['checkpointer'];
+          else overrides.store = value as GraphCapabilities['store'];
+          const updated = { ...subgraph };
+          if (Object.keys(overrides).length > 0) updated.capabilityOverrides = overrides;
+          else delete updated.capabilityOverrides;
+          return updated;
+        }),
+      }));
+    },
+
+    updateStepStoreAccess(
+      state: WorkspaceCore,
+      nodeId: string,
+      storeAccess: StepStoreAccess | null,
+    ) {
+      return this.updateNode(state, nodeId, { storeAccess });
+    },
+
+    updateStepRetry(
+      state: WorkspaceCore,
+      nodeId: string,
+      retry: RetryPolicy | null,
+    ) {
+      return this.updateNode(state, nodeId, { retry });
     },
 
     createSubgraph(

@@ -3,10 +3,12 @@
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import type { KeyboardEvent, PointerEvent } from 'react';
 
-import { GraphSubgraph } from '@/src/domain';
+import { EffectiveGraphCapabilities, GraphSubgraph } from '@/src/domain';
 import './subgraph-node.css';
 
 export type SubgraphNodeData = GraphSubgraph & {
+  /** Effective scope is projection data; canonical capability ownership stays on the graph. */
+  durability?: Pick<EffectiveGraphCapabilities, 'state' | 'checkpointer' | 'store'>;
   /** Review-only state projected from a pending graph proposal. */
   proposalState?: 'added' | 'updated' | 'removed';
   /**
@@ -38,6 +40,30 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
     event.stopPropagation();
     toggleCollapse();
   };
+  const durabilityCues = data.durability
+    ? [
+        {
+          id: 'state',
+          label: 'State',
+          status: data.durability.state.value.enabled
+            ? `${data.durability.state.value.schema.fields.length} fields`
+            : 'off',
+          source: data.durability.state.source,
+        },
+        {
+          id: 'checkpoint',
+          label: 'Checkpoint',
+          status: data.durability.checkpointer.value.enabled ? 'on' : 'off',
+          source: data.durability.checkpointer.source,
+        },
+        {
+          id: 'store',
+          label: 'Store',
+          status: data.durability.store.value.available ? 'available' : 'off',
+          source: data.durability.store.source,
+        },
+      ] as const
+    : [];
 
   return (
     <div
@@ -64,6 +90,16 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
         <div className="subgraph-node-heading">
           <span className="subgraph-node-indicator">Subgraph</span>
           <p className="subgraph-node-title">{data.label}</p>
+          {durabilityCues.length > 0 && (
+            <ul className="subgraph-node-capabilities" aria-label="Effective durability capabilities">
+              {durabilityCues.map((cue) => (
+                <li key={cue.id} data-source={cue.source}>
+                  <strong>{cue.label}</strong>
+                  <span>{cue.status} · {cue.source === 'overridden' ? 'override' : 'inherits'}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <button
           type="button"

@@ -4,7 +4,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createProposal, researchIntakeRoutingGraph, sampleGraph } from '@/src/domain';
+import { createProposal, researchIntakeRoutingGraph, researchSupervisorGraph, sampleGraph } from '@/src/domain';
 import { dynamicParallelismDemoGraph } from '@/src/application/package-three-demo';
 import { useGraphStore } from '@/src/state/workspace-store';
 import { ContextInspector } from './context-inspector';
@@ -61,6 +61,56 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ContextInspector routing details', () => {
+  it('edits graph capabilities, scoped overrides, and canonical Step durability without drawing topology', () => {
+    useGraphStore.setState({ graph: structuredClone(sampleGraph) });
+    renderInspector();
+
+    expect(screen.getByText('Graph settings')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Store' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Store available' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Store namespace' }), { target: { value: 'preferences' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Runtime' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Runtime mode' }), { target: { value: 'voice' } });
+
+    expect(useGraphStore.getState().graph.capabilities).toMatchObject({
+      store: { available: true, namespace: 'preferences' },
+      runtimeMode: { mode: 'voice', input: 'audio' },
+    });
+
+    cleanup();
+    selectNode('billing');
+    renderInspector();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Direct Store read' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Retry policy enabled' }));
+
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')).toMatchObject({
+      kind: 'step',
+      storeAccess: { read: {} },
+      retry: { maxAttempts: 2, backoff: { strategy: 'fixed', initialDelayMs: 0 } },
+    });
+    expect(screen.getByText(/does not add a route, an edge, or a topology loop/)).toBeTruthy();
+
+    cleanup();
+    const scoped = structuredClone(researchSupervisorGraph);
+    scoped.capabilities.store = { available: true };
+    useGraphStore.setState({ graph: scoped });
+    useGraphStore.setState({
+      selection: {
+        nodeIds: [],
+        subgraphIds: ['research-supervisor'],
+        edgeIds: [],
+        primary: { type: 'subgraph', id: 'research-supervisor' },
+      },
+    });
+    renderInspector();
+    expect(screen.getByText('Durability scope')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Store' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Override Store' }));
+    expect(useGraphStore.getState().graph.subgraphs[0]).toMatchObject({
+      capabilityOverrides: { store: { available: true } },
+    });
+  });
+
   it('keeps Send configuration and Merge reducer controls separate from Step controls', () => {
     useGraphStore.setState({ graph: structuredClone(dynamicParallelismDemoGraph) });
     selectNode('merge-evidence');

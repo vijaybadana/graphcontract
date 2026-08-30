@@ -83,6 +83,29 @@ function graphWithTwoSubgraphs(): WorkflowGraph {
 }
 
 describe('projectGraphToCanvas', () => {
+  it('projects distinct inherited and overridden durability scope cues onto subgraphs', () => {
+    const graph = graphWithSubgraph();
+    graph.capabilities = {
+      state: { enabled: true, schema: { fields: ['messages'] }, reducers: [] },
+      checkpointer: { enabled: true, durableThread: { required: false } },
+      store: { available: false },
+      runtimeMode: { mode: 'text', input: 'text' },
+    };
+    graph.subgraphs[0].capabilityOverrides = { store: { available: true, namespace: 'preferences' } };
+
+    const subgraph = projectGraphToCanvas(graph, null).nodes.find((node) => node.id === 'review-group');
+    expect(subgraph).toMatchObject({
+      type: 'subgraph',
+      data: {
+        durability: {
+          state: { source: 'inherited', value: { enabled: true } },
+          checkpointer: { source: 'inherited', value: { enabled: true } },
+          store: { source: 'overridden', value: { available: true, namespace: 'preferences' } },
+        },
+      },
+    });
+  });
+
   it('keeps one design template and projects validated runtime instances without moving the Merge', () => {
     const fixture = runtimeFixtureForLoadedDynamicParallelismDemo(dynamicParallelismDemoGraph)!;
     const design = projectGraphToCanvas(dynamicParallelismDemoGraph, null);

@@ -51,6 +51,7 @@ import { SubgraphNode } from '@/src/features/canvas/subgraph-node';
 import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
 import {
   ContextInspector,
+  type GraphSettingsRequest,
   type InspectorFocusRequest,
 } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
@@ -63,6 +64,7 @@ import {
 import { PanelResizer } from '@/src/features/workspace/panel-resizer';
 import { workspaceSelectionFromCanvas } from '@/src/features/workspace/canvas-selection';
 import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
+import { GraphCapabilityStrip } from '@/src/features/workspace/graph-capability-strip';
 import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
 import {
   resolveWorkspacePanelVisibility,
@@ -143,10 +145,12 @@ export function GraphWorkspace() {
   const [viewMode, setViewMode] = useState<'design' | 'runtime'>('design');
   const [runtimeSelection, setRuntimeSelection] = useState<RuntimeInstanceNodeData | null>(null);
   const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
+  const [graphSettingsRequest, setGraphSettingsRequest] = useState<GraphSettingsRequest | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
+  const graphSettingsRequestIdRef = useRef(0);
   const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
 
   const editable = graph.status === 'draft' && !proposal;
@@ -180,6 +184,14 @@ export function GraphWorkspace() {
       setCompactPanelPreference('inspector');
     }
   }, [isCompactWorkspace]);
+  const openGraphSettings = useCallback((tab: GraphSettingsRequest['tab'] = 'state') => {
+    setRuntimeSelection(null);
+    clearSelection();
+    openInspectorForSelection();
+    setInspectorFocusRequest(null);
+    graphSettingsRequestIdRef.current += 1;
+    setGraphSettingsRequest({ tab, requestId: graphSettingsRequestIdRef.current });
+  }, [clearSelection, openInspectorForSelection]);
   const activateStepModifier = useCallback(
     (nodeId: string, modifier: StepModifierPresentation) => {
       // Projection owns the chip; workspace owns the accepted selection and
@@ -697,6 +709,7 @@ export function GraphWorkspace() {
               onExpand={toggleInspector}
             />
           )}
+          <GraphCapabilityStrip graph={graph} onOpenSettings={openGraphSettings} />
           <ReactFlow<CanvasFlowNode, CanvasFlowEdge>
             nodes={canvasInteractions.nodes}
             edges={canvasInteractions.edges}
@@ -808,7 +821,7 @@ export function GraphWorkspace() {
               aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} readOnly={activeViewMode === 'runtime'} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} readOnly={activeViewMode === 'runtime'} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
             </div>
             <PanelResizer
               side="right"

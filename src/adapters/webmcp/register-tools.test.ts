@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createProposal, sampleGraph } from '@/src/domain';
+import { createProposal, researchSupervisorGraph, sampleGraph } from '@/src/domain';
 import { createWorkspaceService } from '@/src/application/workspace';
 import { registerWebMcpTools } from './register-tools';
 
@@ -105,7 +105,7 @@ describe('WebMCP adapter', () => {
     const nonSendEdge = addEdgeVariants.find((variant) => variant.properties?.mode?.enum?.includes('normal'));
     const sendEdgePatch = updateEdgeVariants.find((variant) => variant.properties?.mode?.const === 'send');
     const nonSendEdgePatch = updateEdgeVariants.find((variant) => variant.properties?.mode?.enum?.includes('normal'));
-    const stepOnlyProperties = ['executor', 'participation', 'hitl', 'sensitive', 'modifiers'];
+    const stepOnlyProperties = ['executor', 'participation', 'hitl', 'sensitive', 'storeAccess', 'retry', 'modifiers'];
 
     expect(proposalSchema.required).toEqual(['operations', 'rationale']);
     expect(operationTypes).toEqual(expect.arrayContaining([
@@ -114,6 +114,9 @@ describe('WebMCP adapter', () => {
       'assign_nodes_to_subgraph',
       'remove_nodes_from_subgraph',
       'dissolve_subgraph',
+      'update_graph_capabilities',
+      'set_subgraph_capability_override',
+      'remove_subgraph_capability_override',
     ]));
     expect(addNodeVariants).toHaveLength(4);
     expect([nodeKind(startNode!), nodeKind(stepNode!), nodeKind(mergeNode!), nodeKind(endNode!)]).toEqual([
@@ -186,6 +189,8 @@ describe('WebMCP adapter', () => {
       },
       modifiers: expect.any(Object),
       merge: expect.any(Object),
+      storeAccess: expect.any(Object),
+      retry: expect.any(Object),
     });
     expect(updateNode?.properties?.patch?.description).toContain('Merge-only');
     expect(proposalTool.description).toContain('Start, Step, Merge, or End');
@@ -698,5 +703,137 @@ describe('WebMCP adapter', () => {
       'propose_graph_changes',
       'get_branch_scenarios',
     ]);
+  });
+
+  it('keeps v5 durability proposals review-only across valid, removal, invalid, stale, frozen, and pending states', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-31T14:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = { ...service.createInitial(), graph: structuredClone(researchSupervisorGraph) };
+
+    await registerWebMcpTools(
+      { registerTool: async (tool: RegisteredTool) => { registered.set(tool.name, tool); } } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const acceptedBefore = structuredClone(state.graph);
+    const valid = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Add review-only durable support context.',
+      expectedGraphUpdatedAt: acceptedBefore.updatedAt,
+      operations: [
+        {
+          type: 'update_graph_capabilities',
+          patch: { store: { available: true, namespace: 'support-preferences', retention: '30d' } },
+        },
+        {
+          type: 'set_subgraph_capability_override',
+          subgraphId: 'research-supervisor',
+          override: { store: { available: true, namespace: 'classifier-preferences' } },
+        },
+        {
+          type: 'update_node', nodeId: 'research-supervisor-agent',
+          patch: {
+            storeAccess: { read: { namespace: 'classifier-preferences', key: 'customer.id' } },
+            retry: {
+              maxAttempts: 3,
+              backoff: { strategy: 'exponential', initialDelayMs: 100 },
+              retryOn: ['provider.timeout'],
+            },
+          },
+        },
+      ],
+    });
+    expect(valid).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(state.graph).toEqual(acceptedBefore);
+    const pendingRead = await registered.get('get_graph')!.execute({});
+    expect(pendingRead).toMatchObject({ graph: { capabilities: { store: { available: false } } } });
+    const pendingProposal = (pendingRead as { pendingProposal: { operations: unknown[]; diff: { changedCapabilityPaths: string[] } } }).pendingProposal;
+    expect(pendingProposal.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'update_graph_capabilities',
+        patch: expect.objectContaining({ store: expect.objectContaining({ available: true }) }),
+      }),
+      expect.objectContaining({
+        type: 'set_subgraph_capability_override',
+        override: expect.objectContaining({ store: expect.objectContaining({ available: true }) }),
+      }),
+      expect.objectContaining({
+        type: 'update_node',
+        patch: expect.objectContaining({ storeAccess: expect.any(Object), retry: expect.any(Object) }),
+      }),
+    ]));
+    expect(pendingProposal.diff.changedCapabilityPaths).toEqual(expect.arrayContaining([
+      'capabilities.store',
+      'subgraphs.research-supervisor.capabilityOverrides.store',
+    ]));
+
+    state = service.approveProposal(state).state;
+    expect(state.graph.capabilities.store).toMatchObject({ available: true, namespace: 'support-preferences' });
+    expect(state.graph.nodes.find((node) => node.id === 'research-supervisor-agent')).toMatchObject({
+      storeAccess: { read: { namespace: 'classifier-preferences' } }, retry: { maxAttempts: 3 },
+    });
+
+    const beforeRejectedRemoval = structuredClone(state.graph);
+    await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Offer removal of the local Store override for review.',
+      operations: [{ type: 'remove_subgraph_capability_override', subgraphId: 'research-supervisor', capability: 'store' }],
+    });
+    state = service.rejectProposal(state).state;
+    expect(state.graph).toEqual(beforeRejectedRemoval);
+
+    const invalidBefore = structuredClone(state.graph);
+    const invalid = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Disable effective Store despite direct access.',
+      operations: [{
+        type: 'set_subgraph_capability_override', subgraphId: 'research-supervisor', override: { store: { available: false } },
+      }],
+    });
+    expect(invalid).toMatchObject({
+      ok: true,
+      proposal: {
+        status: 'invalid',
+        validationErrors: expect.arrayContaining([
+          expect.objectContaining({ code: 'STORE_READ_REQUIRES_AVAILABLE_STORE' }),
+        ]),
+      },
+    });
+    expect(state.graph).toEqual(invalidBefore);
+    state = service.rejectProposal(state).state;
+
+    state = service.freezeGraph(service.createInitial()).state;
+    const frozen = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Attempt a frozen capability edit.',
+      operations: [{ type: 'update_graph_capabilities', patch: { store: { available: true } } }],
+    });
+    expect(frozen).toEqual({
+      ok: false,
+      error: { code: 'GRAPH_FROZEN', message: 'Unfreeze the graph before requesting changes.' },
+    });
+
+    state = service.createInitial();
+    const stale = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Use an obsolete accepted version.', expectedGraphUpdatedAt: '2020-01-01T00:00:00.000Z',
+      operations: [{ type: 'update_graph_capabilities', patch: { store: { available: true } } }],
+    });
+    expect(stale).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+    const first = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Await human review.', operations: [{ type: 'update_graph_capabilities', patch: { store: { available: true } } }],
+    });
+    const pending = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Attempt to supersede a capability proposal.', operations: [{ type: 'update_graph_capabilities', patch: { store: { available: false } } }],
+    });
+    expect(first).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(pending).toMatchObject({ ok: false, error: { code: 'PENDING_PROPOSAL_EXISTS' } });
+    expect([...registered.keys()]).toEqual(['get_graph', 'propose_graph_changes', 'get_branch_scenarios']);
   });
 });

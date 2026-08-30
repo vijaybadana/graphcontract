@@ -6,6 +6,7 @@ import {
   GraphNode,
   GraphProposal,
   GraphSubgraph,
+  resolveEffectiveCapabilities,
   RuntimeProjectionFixture,
   validateGraph,
   WorkflowGraph,
@@ -286,6 +287,7 @@ type ProposalVisualState = 'added' | 'updated' | 'removed';
 
 function subgraphFlowNode(
   subgraph: GraphSubgraph,
+  graph: WorkflowGraph,
   proposalState?: ProposalVisualState,
 ): CanvasFlowNode {
   const width = subgraph.collapsed ? CONTRACT_NODE_WIDTH : subgraph.dimensions.width;
@@ -310,7 +312,11 @@ function subgraphFlowNode(
     focusable: !removed,
     connectable: false,
     ariaLabel: `${subgraph.label} subgraph, ${proposalState ? `proposed ${proposalState}, ` : ''}${subgraph.collapsed ? 'collapsed' : 'expanded'}`,
-    data: { ...subgraph, proposalState },
+    data: {
+      ...subgraph,
+      proposalState,
+      durability: resolveEffectiveCapabilities(graph, subgraph.id),
+    },
   };
 }
 
@@ -541,7 +547,7 @@ export function projectGraphToCanvas(
   const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const validationIssues = validateGraph(preview);
   const nodes: CanvasFlowNode[] = [
-    ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(subgraph, subgraphProposalState(subgraph.id))),
+    ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(subgraph, preview, subgraphProposalState(subgraph.id))),
     ...sourceNodes.map((node) =>
       projectDomainNode(
         node,

@@ -99,6 +99,9 @@ export type GraphCapabilityOverrides = Partial<
   Pick<GraphCapabilities, 'state' | 'checkpointer' | 'store'>
 >;
 
+/** A proposal may replace one complete graph capability record at a time. */
+export type GraphCapabilitiesPatch = Partial<GraphCapabilities>;
+
 export type CapabilitySource = 'graph' | 'inherited' | 'overridden';
 
 export type EffectiveCapability<T> = {
@@ -680,6 +683,18 @@ export type GraphOperation =
       subgraphId: string;
       patch: Partial<Omit<GraphSubgraph, 'id'>>;
     }
+  | { type: 'update_graph_capabilities'; patch: GraphCapabilitiesPatch }
+  | {
+      type: 'set_subgraph_capability_override';
+      subgraphId: string;
+      /** Exactly one supported capability record; it replaces that override. */
+      override: GraphCapabilityOverrides;
+    }
+  | {
+      type: 'remove_subgraph_capability_override';
+      subgraphId: string;
+      capability: keyof GraphCapabilityOverrides;
+    }
   | { type: 'assign_nodes_to_subgraph'; subgraphId: string; nodeIds: string[] }
   | { type: 'remove_nodes_from_subgraph'; nodeIds: string[] }
   | { type: 'dissolve_subgraph'; subgraphId: string }
@@ -702,6 +717,8 @@ export type ProposalDiff = {
   addedEdgeIds: string[];
   updatedEdgeIds: string[];
   removedEdgeIds: string[];
+  /** Stable canonical paths for durability-scope changes. */
+  changedCapabilityPaths: string[];
 };
 
 export type GraphProposal = {
@@ -897,10 +914,18 @@ export const graphCapabilitiesSchema = z
   })
   .strict();
 
+export const graphCapabilitiesPatchSchema = graphCapabilitiesSchema.partial().strict();
+
 export const graphCapabilityOverridesSchema = graphCapabilitiesSchema
   .pick({ state: true, checkpointer: true, store: true })
   .partial()
   .strict();
+
+const singleGraphCapabilityOverrideSchema = z.union([
+  z.object({ state: workingStateCapabilitySchema }).strict(),
+  z.object({ checkpointer: checkpointerCapabilitySchema }).strict(),
+  z.object({ store: longTermStoreCapabilitySchema }).strict(),
+]);
 
 export const stepStoreAccessSchema = z
   .object({
@@ -1194,6 +1219,20 @@ export const graphOperationSchema = z.discriminatedUnion('type', [
     type: z.literal('update_subgraph'),
     subgraphId: z.string().min(1),
     patch: graphSubgraphSchema.omit({ id: true }).partial().strict(),
+  }),
+  z.object({
+    type: z.literal('update_graph_capabilities'),
+    patch: graphCapabilitiesPatchSchema,
+  }),
+  z.object({
+    type: z.literal('set_subgraph_capability_override'),
+    subgraphId: z.string().min(1),
+    override: singleGraphCapabilityOverrideSchema,
+  }),
+  z.object({
+    type: z.literal('remove_subgraph_capability_override'),
+    subgraphId: z.string().min(1),
+    capability: z.enum(['state', 'checkpointer', 'store']),
   }),
   z.object({
     type: z.literal('assign_nodes_to_subgraph'),
@@ -2724,6 +2763,47 @@ export function applyGraphOperations(
           ...structuredClone(operation.patch),
         };
       }
+    } else if (operation.type === 'update_graph_capabilities') {
+      next.capabilities = {
+        ...next.capabilities,
+        ...structuredClone(operation.patch),
+      };
+    } else if (operation.type === 'set_subgraph_capability_override') {
+      const subgraphIndex = next.subgraphs.findIndex((subgraph) => subgraph.id === operation.subgraphId);
+      if (subgraphIndex < 0) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}.subgraphId`));
+      } else {
+        next.subgraphs[subgraphIndex] = {
+          ...next.subgraphs[subgraphIndex],
+          capabilityOverrides: {
+            ...next.subgraphs[subgraphIndex].capabilityOverrides,
+            ...structuredClone(operation.override),
+          },
+        };
+      }
+    } else if (operation.type === 'remove_subgraph_capability_override') {
+      const subgraphIndex = next.subgraphs.findIndex((subgraph) => subgraph.id === operation.subgraphId);
+      if (subgraphIndex < 0) {
+        errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}.subgraphId`));
+      } else {
+        const current = next.subgraphs[subgraphIndex].capabilityOverrides;
+        if (!current?.[operation.capability]) {
+          errors.push(
+            issue(
+              'OPERATION_NOT_FOUND',
+              `Subgraph “${operation.subgraphId}” has no ${operation.capability} capability override.`,
+              `operations.${index}.capability`,
+            ),
+          );
+        } else {
+          const remaining = { ...current };
+          delete remaining[operation.capability];
+          const updated = { ...next.subgraphs[subgraphIndex] };
+          if (Object.keys(remaining).length > 0) updated.capabilityOverrides = remaining;
+          else delete updated.capabilityOverrides;
+          next.subgraphs[subgraphIndex] = updated;
+        }
+      }
     } else if (operation.type === 'assign_nodes_to_subgraph') {
       if (!hasSubgraph(operation.subgraphId)) {
         errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}`));
@@ -2816,10 +2896,12 @@ export function proposalDiff(operations: GraphOperation[], baseGraph?: WorkflowG
     addedEdgeIds: [],
     updatedEdgeIds: [],
     removedEdgeIds: [],
+    changedCapabilityPaths: [],
   };
   const add = (values: string[], value: string) => {
     if (!values.includes(value)) values.push(value);
   };
+  const addCapabilityPath = (value: string) => add(diff.changedCapabilityPaths, value);
   let candidate = baseGraph ? structuredClone(baseGraph) : undefined;
 
   for (const operation of operations) {
@@ -2831,6 +2913,21 @@ export function proposalDiff(operations: GraphOperation[], baseGraph?: WorkflowG
     if (operation.type === 'remove_node') add(diff.removedNodeIds, operation.nodeId);
     if (operation.type === 'add_subgraph') add(diff.addedSubgraphIds, operation.subgraph.id);
     if (operation.type === 'update_subgraph') add(diff.updatedSubgraphIds, operation.subgraphId);
+    if (operation.type === 'update_graph_capabilities') {
+      for (const capability of Object.keys(operation.patch) as Array<keyof GraphCapabilities>) {
+        addCapabilityPath(`capabilities.${capability}`);
+      }
+    }
+    if (operation.type === 'set_subgraph_capability_override') {
+      for (const capability of Object.keys(operation.override) as Array<keyof GraphCapabilityOverrides>) {
+        add(diff.updatedSubgraphIds, operation.subgraphId);
+        addCapabilityPath(`subgraphs.${operation.subgraphId}.capabilityOverrides.${capability}`);
+      }
+    }
+    if (operation.type === 'remove_subgraph_capability_override') {
+      add(diff.updatedSubgraphIds, operation.subgraphId);
+      addCapabilityPath(`subgraphs.${operation.subgraphId}.capabilityOverrides.${operation.capability}`);
+    }
     if (operation.type === 'dissolve_subgraph') {
       add(diff.removedSubgraphIds, operation.subgraphId);
       for (const node of candidate?.nodes ?? []) {

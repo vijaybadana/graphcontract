@@ -99,6 +99,30 @@
   line-height: 1.2;
 }
 
+.subgraph-node-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .45rem;
+  margin: .48rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.subgraph-node-capabilities li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .18rem;
+  color: #5b6c64;
+  font-size: .53rem;
+  font-weight: 650;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.subgraph-node-capabilities li[data-source='overridden'] { color: #225f9e; }
+.subgraph-node-capabilities strong { color: #31463b; font-weight: 800; }
+.subgraph-node-capabilities li[data-source='overridden'] strong { color: #1d4f87; }
+
 .subgraph-node-description {
   margin: 0.625rem 0 0;
   color: #607069;
