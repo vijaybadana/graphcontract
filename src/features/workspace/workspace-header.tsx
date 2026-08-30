@@ -11,6 +11,7 @@ import {
   LockSimple,
   LockSimpleOpen,
   SidebarSimple,
+  TreeStructure,
   Trash,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
@@ -36,6 +37,7 @@ type WorkspaceHeaderProps = {
   canDuplicate: boolean;
   canDelete: boolean;
   canFreeze: boolean;
+  canAutoLayout: boolean;
   viewMode: 'design' | 'runtime';
   runtimeAvailable: boolean;
   runtimeUnavailableReason?: string;
@@ -46,6 +48,7 @@ type WorkspaceHeaderProps = {
   onRedo: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onAutoLayout: () => void;
   onFit: () => void;
   onReset: () => void;
   onFreeze: () => void;
@@ -70,6 +73,7 @@ export function WorkspaceHeader({
   canDuplicate,
   canDelete,
   canFreeze,
+  canAutoLayout,
   viewMode,
   runtimeAvailable,
   runtimeUnavailableReason,
@@ -80,6 +84,7 @@ export function WorkspaceHeader({
   onRedo,
   onDuplicate,
   onDelete,
+  onAutoLayout,
   onFit,
   onReset,
   onFreeze,
@@ -172,6 +177,17 @@ export function WorkspaceHeader({
         </div>
         <div className="workspace-command-divider workspace-canvas-command-divider" />
         <div className="workspace-command-group workspace-canvas-command-group" role="group" aria-label="Canvas controls">
+          <button
+            type="button"
+            className="workspace-auto-layout-button"
+            aria-label="Auto-layout graph"
+            title="Auto-layout graph"
+            disabled={!canAutoLayout}
+            onClick={onAutoLayout}
+          >
+            <TreeStructure aria-hidden="true" size={15} weight="bold" />
+            <span>Auto-layout</span>
+          </button>
           <HeaderIconButton label="Fit graph" icon={FrameCorners} onClick={onFit} />
           <HeaderIconButton label="Reset example graph" icon={ArrowsClockwise} disabled={proposalPending} onClick={onReset} />
         </div>

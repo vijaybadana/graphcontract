@@ -231,7 +231,7 @@ describe('workspace application service', () => {
     });
   });
 
-  it('approves a valid subgraph proposal through the human path and keeps child coordinates relative', () => {
+  it('approves a valid subgraph proposal through the human path and reflows its relative geometry', () => {
     let timestamp = '2026-08-28T12:00:00.000Z';
     const timestampedService = createWorkspaceService({
       now: () => timestamp,
@@ -256,10 +256,11 @@ describe('workspace application service', () => {
 
     expect(approved.result?.ok).toBe(true);
     expect(approved.state.graph.updatedAt).toBe('2026-08-28T12:01:00.000Z');
-    expect(approved.state.graph.subgraphs[0]?.position).toEqual({ x: 340, y: 180 });
-    expect(approved.state.graph.nodes.find((node) => node.id === 'research-supervisor-agent')?.position).toEqual({
-      x: 220,
-      y: 130,
+    expect(approved.layoutApplied).toBe(true);
+    expect(approved.state.graph.subgraphs[0]?.position).not.toEqual({ x: 340, y: 180 });
+    expect(approved.state.graph.nodes.find((node) => node.id === 'research-supervisor-agent')).toMatchObject({
+      parentId: 'research-supervisor',
+      position: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     });
   });
 
@@ -499,8 +500,56 @@ describe('workspace application service', () => {
     const approved = service.approveProposal(proposed.state);
 
     expect(approved.result?.ok).toBe(true);
-    expect(Math.max(...approved.state.graph.nodes.map((node) => node.position.x))).toBeLessThan(1600);
+    expect(Math.max(...approved.state.graph.nodes.map((node) => node.position.x))).toBeLessThan(2000);
     expect(approved.state.graph.nodes.find((node) => node.id === 'fraud-check')?.position).not.toEqual({ x: 5000, y: 5000 });
+  });
+
+  it('lays out approved edge updates while preserving the accepted routing semantics', () => {
+    const initial = service.createInitial();
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Clarify the priority billing branch for review.',
+      operations: [{
+        type: 'update_edge',
+        edgeId: 'classifier-billing',
+        patch: { label: 'priority billing' },
+      }],
+    });
+
+    const approved = service.approveProposal(proposed.state);
+    const updated = approved.state.graph.edges.find((edge) => edge.id === 'classifier-billing');
+
+    expect(approved.result?.ok).toBe(true);
+    expect(approved.layoutApplied).toBe(true);
+    expect(updated).toMatchObject({
+      source: 'classifier',
+      target: 'billing',
+      mode: 'conditional',
+      label: 'priority billing',
+    });
+    expect(approved.state.graph.nodes.find((node) => node.id === 'start')?.position).not.toEqual(
+      initial.graph.nodes.find((node) => node.id === 'start')?.position,
+    );
+  });
+
+  it('lays out approved subgraph geometry and membership replacements', () => {
+    const initial = service.loadResearchSupervisorDemo(service.createInitial()).state;
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Reposition the research team container for review.',
+      operations: [{
+        type: 'update_subgraph',
+        subgraphId: 'research-supervisor',
+        patch: { position: { x: 5000, y: 5000 } },
+      }],
+    });
+
+    const approved = service.approveProposal(proposed.state);
+
+    expect(approved.result?.ok).toBe(true);
+    expect(approved.layoutApplied).toBe(true);
+    expect(approved.state.graph.subgraphs.find((subgraph) => subgraph.id === 'research-supervisor')?.position).not.toEqual({
+      x: 5000,
+      y: 5000,
+    });
   });
 
   it('converts positions at subgraph boundaries and preserves child coordinates when moved', () => {
@@ -690,6 +739,7 @@ describe('workspace application service', () => {
       status: 'draft',
     });
     expect(loaded.state.scenarios).toEqual([]);
+    expect(loaded.layoutApplied).toBe(true);
 
     const proposed = service.submitProposal(loaded.state, {
       rationale: 'Keep accepted state review-only.',

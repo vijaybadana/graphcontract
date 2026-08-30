@@ -52,7 +52,7 @@ export function useCoalescedFitView<
           void fitView({
             ...BASE_FIT_VIEW_OPTIONS,
             padding,
-            duration: animated ? 180 : 0,
+            duration: animated && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches !== true ? 180 : 0,
           });
         });
       }, 48);

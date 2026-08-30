@@ -13,6 +13,7 @@ const callbacks = {
   onRedo() {},
   onDuplicate() {},
   onDelete() {},
+  onAutoLayout() {},
   onFit() {},
   onReset() {},
   onFreeze() {},
@@ -43,6 +44,7 @@ describe('WorkspaceHeader freeze control', () => {
         canDuplicate={false}
         canDelete={false}
         canFreeze
+        canAutoLayout
         viewMode="design"
         runtimeAvailable={false}
         {...callbacks}
@@ -77,6 +79,7 @@ describe('WorkspaceHeader freeze control', () => {
         canDuplicate={false}
         canDelete={false}
         canFreeze
+        canAutoLayout
         viewMode="design"
         runtimeAvailable={false}
         runtimeUnavailableReason="No runtime trace or fixture is available."
@@ -109,6 +112,7 @@ describe('WorkspaceHeader freeze control', () => {
         canDuplicate={false}
         canDelete={false}
         canFreeze
+        canAutoLayout
         viewMode="runtime"
         runtimeAvailable
         {...callbacks}
@@ -138,6 +142,7 @@ describe('WorkspaceHeader freeze control', () => {
       canDuplicate: false,
       canDelete: false,
       canFreeze: true,
+      canAutoLayout: true,
       viewMode: 'design' as const,
       runtimeAvailable: false,
       runtimeUnavailableReason: 'No runtime trace or fixture is available.',
@@ -171,6 +176,7 @@ describe('WorkspaceHeader freeze control', () => {
       canDuplicate: false,
       canDelete: false,
       canFreeze: false,
+      canAutoLayout: false,
       viewMode: 'design' as const,
       runtimeAvailable: false,
       runtimeUnavailableReason: 'No runtime trace or fixture is available.',
@@ -183,5 +189,42 @@ describe('WorkspaceHeader freeze control', () => {
     cleanup();
     render(<WorkspaceHeader {...baseProps} proposalPending={false} />);
     expect(screen.getByRole('button', { name: 'Reset example graph' }).disabled).toBe(false);
+  });
+
+  it('exposes an explicit Auto-layout action and keeps it inert while editing is locked', () => {
+    const onAutoLayout = vi.fn();
+    const props = {
+      graphName: 'Support workflow',
+      graphStatus: 'draft' as const,
+      webMcpStatus: 'connected' as const,
+      nodeCount: 7,
+      edgeCount: 6,
+      issueCount: 0,
+      proposalPending: false,
+      libraryOpen: false,
+      libraryEntryCount: 10,
+      paletteOpen: true,
+      inspectorOpen: false,
+      canUndo: false,
+      canRedo: false,
+      canDuplicate: false,
+      canDelete: false,
+      canFreeze: true,
+      canAutoLayout: true,
+      viewMode: 'design' as const,
+      runtimeAvailable: false,
+      ...callbacks,
+      onAutoLayout,
+    };
+
+    render(<WorkspaceHeader {...props} />);
+    const autoLayout = screen.getByRole('button', { name: 'Auto-layout graph' });
+    expect(autoLayout.getAttribute('title')).toBe('Auto-layout graph');
+    fireEvent.click(autoLayout);
+    expect(onAutoLayout).toHaveBeenCalledOnce();
+
+    cleanup();
+    render(<WorkspaceHeader {...props} graphStatus="frozen" canAutoLayout={false} />);
+    expect((screen.getByRole('button', { name: 'Auto-layout graph' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -43,6 +43,8 @@ export type WorkspaceTransition<Result = undefined> = {
   changed: boolean;
   notice?: string;
   result?: Result;
+  /** Signals the UI store to coalesce a non-animated viewport fit. */
+  layoutApplied?: boolean;
 };
 
 export type WorkspaceDependencies = {
@@ -189,8 +191,42 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     return { state: { graph, proposal: null, scenarios: [] }, changed: true, notice };
   };
 
+  const isLayoutAffectingProposalOperation = (operation: GraphProposal['operations'][number]) => {
+    switch (operation.type) {
+      case 'add_node':
+      case 'remove_node':
+      case 'add_edge':
+      case 'update_edge':
+      case 'remove_edge':
+      case 'add_subgraph':
+      case 'update_subgraph':
+      case 'assign_nodes_to_subgraph':
+      case 'remove_nodes_from_subgraph':
+      case 'dissolve_subgraph':
+        return true;
+      default:
+        return false;
+    }
+  };
+
   return {
     createInitial,
+
+    /**
+     * Layout is an explicit, accepted-graph editing action. It deliberately
+     * does not run as a side effect of ordinary graph edits or restoration.
+     */
+    autoLayout(state: WorkspaceCore): WorkspaceTransition {
+      if (!editable(state)) return blocked(state);
+      return {
+        ...changeGraph(
+          state,
+          (graph) => layoutWorkflowGraph(graph),
+          'Workflow arranged with deterministic left-to-right layout.',
+        ),
+        layoutApplied: true,
+      };
+    },
 
     addNode(
       state: WorkspaceCore,
@@ -650,9 +686,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           },
         };
       }
-      const hasStructuralChanges = proposal.operations.some((operation) =>
-        ['add_node', 'remove_node', 'add_edge', 'remove_edge'].includes(operation.type),
-      );
+      const hasStructuralChanges = proposal.operations.some(isLayoutAffectingProposalOperation);
       const acceptedGraph = hasStructuralChanges
         ? layoutWorkflowGraph(applied.graph)
         : applied.graph;
@@ -662,6 +696,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         changed: true,
         notice: 'Proposal approved and applied to the accepted graph.',
         result: { ok: true, proposal: { ...proposal, status: 'approved' } },
+        layoutApplied: hasStructuralChanges,
       };
     },
 
@@ -736,11 +771,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           notice: `“${entry.title}” cannot be opened because its template is invalid.`,
         };
       }
-      return changeGraph(
-        state,
-        () => clone(entry.graph),
-        `“${entry.title}” opened from the Graph Library. One Undo restores your previous workflow.`,
-      );
+      return {
+        ...changeGraph(
+          state,
+          () => layoutWorkflowGraph(entry.graph),
+          `“${entry.title}” opened from the Graph Library. One Undo restores your previous workflow.`,
+        ),
+        layoutApplied: true,
+      };
     },
 
     loadResearchSupervisorDemo(state: WorkspaceCore): WorkspaceTransition {

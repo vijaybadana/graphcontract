@@ -107,6 +107,7 @@ export function GraphWorkspace() {
   const past = useGraphStore((state) => state.past);
   const future = useGraphStore((state) => state.future);
   const fitViewRevision = useGraphStore((state) => state.fitViewRevision);
+  const autoLayout = useGraphStore((state) => state.autoLayout);
   const runtimeProjectionFixture = useGraphStore((state) => state.runtimeProjectionFixture);
   const addNode = useGraphStore((state) => state.addNode);
   const createSubgraph = useGraphStore((state) => state.createSubgraph);
@@ -625,6 +626,7 @@ export function GraphWorkspace() {
           canDuplicate={canvasEditable && selection.nodeIds.length > 0}
           canDelete={canvasEditable && hasDeletableSelection}
           canFreeze={validationIssues.length === 0 && !proposal}
+          canAutoLayout={editable}
           viewMode={activeViewMode}
           runtimeAvailable={runtimeAvailable}
           runtimeUnavailableReason={runtimeUnavailableReason}
@@ -635,6 +637,7 @@ export function GraphWorkspace() {
           onRedo={redo}
           onDuplicate={duplicateSelection}
           onDelete={deleteSelection}
+          onAutoLayout={autoLayout}
           onFit={fitGraph}
           onReset={resetGraph}
           onFreeze={handleFreeze}

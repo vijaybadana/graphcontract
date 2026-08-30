@@ -39,6 +39,7 @@ type WorkspaceStore = WorkspaceCore & {
   future: WorkspaceCore[];
   notice: string | null;
   fitViewRevision: number;
+  autoLayout: () => void;
   addNode: (preset: NodeCreationPreset, position?: { x: number; y: number }) => void;
   createSubgraph: (input: {
     label?: string;
@@ -162,6 +163,14 @@ export const useGraphStore = create<WorkspaceStore>()(
         future: [],
         notice: null,
         fitViewRevision: 0,
+
+        autoLayout: () => {
+          const transition = workspace.autoLayout(currentCore());
+          commit(transition, { selection: transition.changed ? emptySelection() : get().selection });
+          if (transition.layoutApplied) {
+            set((state) => ({ fitViewRevision: state.fitViewRevision + 1 }));
+          }
+        },
 
         addNode: (preset, position = { x: 360, y: 180 }) => {
           const transition = workspace.addNode(currentCore(), preset, position);
@@ -347,7 +356,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         approveProposal: () => {
           const transition = workspace.approveProposal(currentCore());
           commit(transition, { history: false, selection: emptySelection() });
-          if (transition.result?.ok) {
+          if (transition.layoutApplied) {
             set((state) => ({ fitViewRevision: state.fitViewRevision + 1 }));
           }
           return transition.result!;

@@ -203,6 +203,39 @@
 .workspace-library-button.is-active strong,
 .workspace-library-button:hover strong { background: rgb(255 255 255 / 16%); }
 
+.workspace-auto-layout-button {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgb(17 24 39 / 10%);
+  border-radius: 9px;
+  background: #f8f9f7;
+  padding: 0 8px;
+  color: rgb(17 24 39 / 72%);
+  font-size: 9px;
+  font-weight: 760;
+  white-space: nowrap;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.workspace-auto-layout-button:hover:not(:disabled) {
+  border-color: #17211c;
+  background: #17211c;
+  color: white;
+  transform: translateY(-1px);
+}
+
+.workspace-auto-layout-button:focus-visible {
+  outline: 3px solid rgb(14 116 144 / 55%);
+  outline-offset: 2px;
+}
+
+.workspace-auto-layout-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .workspace-icon-button {
   display: grid;
   width: 34px;
@@ -360,6 +393,14 @@
 
   .workspace-library-command-divider { display: none; }
 
+  .workspace-auto-layout-button {
+    width: 34px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .workspace-auto-layout-button span { display: none; }
+
   .workspace-command-island {
     min-width: 0;
   }
@@ -394,6 +435,7 @@
 @media (prefers-reduced-motion: reduce) {
   .workspace-icon-button,
   .workspace-library-button,
+  .workspace-auto-layout-button,
   .workspace-freeze-button {
     transition: none;
   }

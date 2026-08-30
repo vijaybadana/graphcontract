@@ -33,6 +33,58 @@ beforeEach(() => {
 });
 
 describe('workspace subgraph actions', () => {
+  it('auto-lays out the accepted graph as one undoable selection-clearing action', () => {
+    const original = structuredClone(useGraphStore.getState().graph);
+    const graph = structuredClone(original);
+    graph.nodes.find((node) => node.id === 'billing')!.position = { x: 5000, y: 5000 };
+    useGraphStore.setState({
+      graph,
+      selection: {
+        nodeIds: ['billing'],
+        subgraphIds: [],
+        edgeIds: [],
+        primary: { type: 'node', id: 'billing' },
+      },
+    });
+    const revision = useGraphStore.getState().fitViewRevision;
+
+    useGraphStore.getState().autoLayout();
+
+    expect(useGraphStore.getState()).toMatchObject({
+      selection: emptySelection(),
+      fitViewRevision: revision + 1,
+    });
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')?.position).not.toEqual({
+      x: 5000,
+      y: 5000,
+    });
+    expect(useGraphStore.getState().past).toHaveLength(1);
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')?.position).toEqual({
+      x: 5000,
+      y: 5000,
+    });
+  });
+
+  it('keeps Auto-layout inert while a proposal is pending or the graph is frozen', () => {
+    const original = structuredClone(useGraphStore.getState().graph);
+    expect(useGraphStore.getState().submitProposal({
+      rationale: 'Review a label only.',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } }],
+    }).ok).toBe(true);
+    useGraphStore.getState().autoLayout();
+    expect(useGraphStore.getState().graph).toEqual(original);
+
+    useGraphStore.getState().rejectProposal();
+    expect(useGraphStore.getState().freezeGraph().ok).toBe(true);
+    useGraphStore.getState().autoLayout();
+    expect(useGraphStore.getState().graph.status).toBe('frozen');
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')?.position).toEqual(
+      original.nodes.find((node) => node.id === 'billing')?.position,
+    );
+    useGraphStore.getState().unfreezeGraph();
+  });
   it('creates, moves, and dissolves a selected container in one canvas history transition', () => {
     useGraphStore.getState().createSubgraph({ position: { x: 300, y: 80 } });
     const created = useGraphStore.getState();
