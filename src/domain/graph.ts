@@ -724,6 +724,104 @@ export const sampleGraph: WorkflowGraph = {
   subgraphs: [],
 };
 
+/** A compact authored contract used to demonstrate that human outcomes follow
+ * canonical topology. It is intentionally a design-time preview fixture: no
+ * runtime response, resume, or side effect is executed by loading it. */
+export const humanControlHitlDemoGraph: WorkflowGraph = {
+  schemaVersion: '3',
+  id: 'human-control-hitl-demo',
+  name: 'Human Control · Deploy Change',
+  status: 'draft',
+  updatedAt: '2026-08-30T00:00:00.000Z',
+  nodes: [
+    { id: 'human-control-start', kind: 'start', label: 'Start', position: { x: 40, y: 280 } },
+    {
+      id: 'deploy-change',
+      kind: 'step',
+      executor: 'tool',
+      label: 'Deploy change',
+      description: 'Applies an approved production change with a human gate.',
+      position: { x: 250, y: 280 },
+      hitl: {
+        enabled: true,
+        timing: 'before',
+        activation: { reason: 'This action modifies production.' },
+        response: {
+          type: 'approval',
+          allowedOutcomes: [
+            { id: 'approve', label: 'Approve', resumeNodeId: 'change-completed' },
+            { id: 'request-changes', label: 'Request changes', resumeNodeId: 'revise-change-plan' },
+            { id: 'reject', label: 'Reject', resumeNodeId: 'change-cancelled' },
+          ],
+        },
+      },
+      sensitive: {
+        target: 'Production deployment',
+        authorization: 'Release manager',
+        approvalRequired: true,
+        idempotency: 'Deployment request ID',
+      },
+    },
+    {
+      id: 'change-completed',
+      kind: 'end',
+      label: 'Completed',
+      position: { x: 710, y: 80 },
+    },
+    {
+      id: 'revise-change-plan',
+      kind: 'step',
+      executor: 'ai',
+      label: 'Revise change plan',
+      description: 'Updates the proposed change before it is reviewed again.',
+      position: { x: 560, y: 280 },
+    },
+    {
+      id: 'revision-prepared',
+      kind: 'end',
+      label: 'Revision prepared',
+      position: { x: 860, y: 280 },
+    },
+    {
+      id: 'change-cancelled',
+      kind: 'end',
+      label: 'Cancelled',
+      position: { x: 710, y: 480 },
+    },
+  ],
+  edges: [
+    { id: 'human-control-start-deploy', source: 'human-control-start', target: 'deploy-change', mode: 'normal' },
+    {
+      id: 'deploy-approved',
+      source: 'deploy-change',
+      target: 'change-completed',
+      mode: 'conditional',
+      label: 'approve',
+    },
+    {
+      id: 'deploy-request-changes',
+      source: 'deploy-change',
+      target: 'revise-change-plan',
+      mode: 'conditional',
+      label: 'request changes',
+    },
+    {
+      id: 'deploy-rejected',
+      source: 'deploy-change',
+      target: 'change-cancelled',
+      mode: 'conditional',
+      label: 'reject',
+    },
+    {
+      id: 'revision-prepared',
+      source: 'revise-change-plan',
+      target: 'revision-prepared',
+      mode: 'normal',
+    },
+  ],
+  subgraphs: [],
+};
+
 /** A compact valid fixture for the first-class subgraph interaction. */
 export const researchSupervisorGraph: WorkflowGraph = {
   schemaVersion: '3',

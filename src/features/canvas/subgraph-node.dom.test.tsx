@@ -221,6 +221,7 @@ describe('SubgraphNode in React Flow', () => {
   it('requires a clear confirmation before loading Research Intake Routing', () => {
     const onLoadResearchSupervisorDemo = vi.fn();
     const onLoadResearchIntakeRoutingDemo = vi.fn();
+    const onLoadHumanControlHitlDemo = vi.fn();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(
       <NodePalette
@@ -231,6 +232,7 @@ describe('SubgraphNode in React Flow', () => {
         onAdd={vi.fn()}
         onLoadResearchSupervisorDemo={onLoadResearchSupervisorDemo}
         onLoadResearchIntakeRoutingDemo={onLoadResearchIntakeRoutingDemo}
+        onLoadHumanControlHitlDemo={onLoadHumanControlHitlDemo}
         onCollapse={vi.fn()}
       />,
     );
@@ -245,6 +247,7 @@ describe('SubgraphNode in React Flow', () => {
     fireEvent.click(demoButton);
     expect(onLoadResearchIntakeRoutingDemo).toHaveBeenCalledOnce();
     expect(onLoadResearchSupervisorDemo).not.toHaveBeenCalled();
+    expect(onLoadHumanControlHitlDemo).not.toHaveBeenCalled();
   });
 
   it('prepares native Blob download links and releases their URLs after unmount', () => {

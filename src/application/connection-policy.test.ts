@@ -42,7 +42,7 @@ describe('evaluateConnection', () => {
 
   it('keeps internal Start and End nodes as the only permitted subgraph boundary routes', () => {
     const graph: WorkflowGraph = {
-      schemaVersion: '2',
+      schemaVersion: '3',
       id: 'subgraph-boundaries',
       name: 'Subgraph boundaries',
       status: 'draft',

@@ -1,7 +1,7 @@
 'use client';
 
 import { CheckCircle, LockSimple, PaperPlaneTilt, X } from '@phosphor-icons/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { WorkflowGraph } from '@/src/domain';
 
@@ -14,6 +14,14 @@ type PreviewResponse = {
   response: string;
 };
 
+type PreviewInputRequestSheetProps = {
+  graph: WorkflowGraph;
+  node: StepNode;
+  onClose: () => void;
+  /** The invoking human control is the preferred close destination. */
+  restoreFocusTo?: { current: HTMLElement | null };
+};
+
 function destinationLabel(graph: WorkflowGraph, nodeId: string) {
   const destination = graph.nodes.find((node) => node.id === nodeId);
   return destination ? `${destination.label} · ${destination.id}` : `Missing destination · ${nodeId}`;
@@ -24,29 +32,61 @@ function destinationLabel(graph: WorkflowGraph, nodeId: string) {
  * not import the workspace store: selecting a response cannot execute, resume,
  * propose, or mutate the accepted graph.
  */
-export function PreviewInputRequestSheet({
+export function PreviewInputRequestSheet(props: PreviewInputRequestSheetProps) {
+  const response = props.node.hitl?.response;
+  if (!response) return null;
+  // Recreate local-only form state whenever the authored response contract
+  // changes. This avoids synchronizing component state from an effect.
+  return (
+    <PreviewInputRequestSheetContents
+      key={`${props.node.id}:${JSON.stringify(response)}`}
+      {...props}
+      response={response}
+    />
+  );
+}
+
+function PreviewInputRequestSheetContents({
   graph,
   node,
   onClose,
-}: {
-  graph: WorkflowGraph;
-  node: StepNode;
-  onClose: () => void;
+  restoreFocusTo,
+  response,
+}: PreviewInputRequestSheetProps & {
+  response: NonNullable<NonNullable<StepNode['hitl']>['response']>;
 }) {
-  const response = node.hitl?.response;
   const [textResponse, setTextResponse] = useState('');
-  const [selectionResponse, setSelectionResponse] = useState('');
+  const [selectionResponse, setSelectionResponse] = useState(
+    () => response?.selectionChoices?.[0]?.id ?? '',
+  );
   const [selectedOutcomeId, setSelectedOutcomeId] = useState('');
   const [previewResponse, setPreviewResponse] = useState<PreviewResponse | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const initialFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
 
   useEffect(() => {
-    setTextResponse('');
-    setSelectionResponse(response?.selectionChoices?.[0]?.id ?? '');
-    setSelectedOutcomeId('');
-    setPreviewResponse(null);
-  }, [node.id, response]);
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
-  if (!response) return null;
+  useEffect(() => {
+    initialFocusRef.current =
+      restoreFocusTo?.current ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    closeButtonRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      if (initialFocusRef.current?.isConnected) initialFocusRef.current.focus();
+    };
+  }, [restoreFocusTo]);
+
   const selectedOutcome = response.allowedOutcomes.find((outcome) => outcome.id === selectedOutcomeId);
   const selectedChoice = response.selectionChoices?.find((choice) => choice.id === selectionResponse);
   const responsePayload =
@@ -61,18 +101,27 @@ export function PreviewInputRequestSheet({
     : undefined;
 
   return (
-    <div className="preview-input-request" role="dialog" aria-modal="true" aria-labelledby="preview-input-request-title">
+    <div
+      className="preview-input-request"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="preview-input-request-title"
+      aria-describedby="preview-input-request-notice"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div className="preview-input-request__sheet">
         <header className="preview-input-request__header">
           <div>
             <p>Human control</p>
             <h2 id="preview-input-request-title">Preview input request</h2>
           </div>
-          <button type="button" aria-label="Close input request preview" onClick={onClose}>
+          <button ref={closeButtonRef} type="button" aria-label="Close input request preview" onClick={onClose}>
             <X aria-hidden="true" size={18} weight="bold" />
           </button>
         </header>
-        <p className="preview-input-request__notice" role="status">
+        <p id="preview-input-request-notice" className="preview-input-request__notice" role="status">
           Preview only — no runtime execution, response, resume, or graph mutation occurs here.
         </p>
         <section>

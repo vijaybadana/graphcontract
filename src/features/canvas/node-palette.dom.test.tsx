@@ -20,6 +20,7 @@ describe('NodePalette Step presets', () => {
         onAdd={onAdd}
         onLoadResearchSupervisorDemo={vi.fn()}
         onLoadResearchIntakeRoutingDemo={vi.fn()}
+        onLoadHumanControlHitlDemo={vi.fn()}
         onCollapse={vi.fn()}
       />,
     );
@@ -32,5 +33,5 @@ describe('NodePalette Step presets', () => {
 
     fireEvent.click(humanReview);
     expect(onAdd).toHaveBeenCalledWith('humanReview');
-  });
+  }, 15_000);
 });

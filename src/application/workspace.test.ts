@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { validateGraph, workflowGraphSchema } from '@/src/domain';
-import { buildGraphContractDownload } from '@/src/adapters/exports/downloads';
+import {
+  buildGraphContractDownload,
+  buildGraphScenariosDownload,
+} from '@/src/adapters/exports/downloads';
 import { createWorkspaceService } from './workspace';
 
 const service = createWorkspaceService({
@@ -40,7 +43,20 @@ describe('workspace application service', () => {
     const originalId = state.graph.nodes.at(-1)!.id;
     const updated = presetService.updateNode(state, originalId, {
       participation: { internalTools: true },
-      hitl: { enabled: true, timing: 'after', inputType: 'approval' },
+      hitl: {
+        enabled: true,
+        timing: 'after',
+        response: {
+          type: 'approval',
+          allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'end' }],
+        },
+      },
+      sensitive: {
+        target: 'Review record',
+        authorization: 'Review owner',
+        approvalRequired: false,
+        idempotency: 'Review request ID',
+      },
       modifiers: { guardrail: true, storeRead: true, retryFallback: true },
     });
     const duplicated = presetService.duplicateNodes(updated.state, [originalId]);
@@ -50,7 +66,15 @@ describe('workspace application service', () => {
       kind: 'step',
       executor: 'human',
       participation: { internalTools: true },
-      hitl: { enabled: true, timing: 'after', inputType: 'approval' },
+      hitl: {
+        enabled: true,
+        timing: 'after',
+        response: {
+          type: 'approval',
+          allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'end' }],
+        },
+      },
+      sensitive: { target: 'Review record', approvalRequired: false },
       modifiers: { guardrail: true, storeRead: true, retryFallback: true },
     });
     expect(
@@ -61,7 +85,15 @@ describe('workspace application service', () => {
       kind: 'step',
       executor: 'human',
       participation: { internalTools: true },
-      hitl: { enabled: true, timing: 'after', inputType: 'approval' },
+      hitl: {
+        enabled: true,
+        timing: 'after',
+        response: {
+          type: 'approval',
+          allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'end' }],
+        },
+      },
+      sensitive: { target: 'Review record', approvalRequired: false },
       modifiers: { guardrail: true, storeRead: true, retryFallback: true },
     });
   });
@@ -313,12 +345,90 @@ describe('workspace application service', () => {
     const initial = service.createInitial();
     const rejected = service.updateNode(initial, 'start', {
       executor: 'ai',
-      hitl: { enabled: true, timing: 'before', inputType: 'approval' },
+      hitl: {
+        enabled: true,
+        timing: 'before',
+        response: {
+          type: 'approval',
+          allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'classifier' }],
+        },
+      },
+      sensitive: {
+        target: 'Structural state',
+        authorization: 'Nobody',
+        approvalRequired: false,
+        idempotency: 'Not applicable',
+      },
     });
 
     expect(rejected.changed).toBe(false);
     expect(rejected.notice).toBe('Step-only fields can only update Step nodes.');
     expect(rejected.state).toEqual(initial);
+  });
+
+  it('keeps v3 human-control policy data in proposal review, frozen scenarios, and downloads', () => {
+    const demo = service.loadHumanControlHitlDemo(service.createInitial());
+    const deploy = demo.state.graph.nodes.find((node) => node.id === 'deploy-change');
+    expect(validateGraph(demo.state.graph)).toEqual([]);
+    expect(deploy).toMatchObject({
+      kind: 'step',
+      hitl: {
+        timing: 'before',
+        response: {
+          allowedOutcomes: [
+            { id: 'approve', resumeNodeId: 'change-completed' },
+            { id: 'request-changes', resumeNodeId: 'revise-change-plan' },
+            { id: 'reject', resumeNodeId: 'change-cancelled' },
+          ],
+        },
+      },
+      sensitive: { approvalRequired: true },
+    });
+
+    const proposed = service.submitProposal(demo.state, {
+      rationale: 'Clarify the release authorization in the review-only candidate.',
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'deploy-change',
+          patch: {
+            sensitive: {
+              target: 'Production deployment',
+              authorization: 'Production release manager',
+              approvalRequired: true,
+              idempotency: 'Deployment request ID',
+            },
+          },
+        },
+      ],
+    });
+    expect(proposed.state.graph.nodes.find((node) => node.id === 'deploy-change')).toEqual(deploy);
+    expect(proposed.state.proposal?.operations[0]).toMatchObject({
+      type: 'update_node',
+      patch: { sensitive: { authorization: 'Production release manager' } },
+    });
+    expect(service.updateNode(proposed.state, 'deploy-change', { label: 'Bypass review' }).changed).toBe(false);
+
+    const frozen = service.freezeGraph(demo.state);
+    expect(frozen.result?.ok).toBe(true);
+    expect(frozen.state.scenarios.map((scenario) => scenario.humanOutcomes[0]?.outcomeId)).toEqual([
+      'approve',
+      'reject',
+      'request-changes',
+    ]);
+    const graphDownload = JSON.parse(buildGraphContractDownload(frozen.state.graph).content);
+    const scenarioDownload = JSON.parse(
+      buildGraphScenariosDownload(frozen.state.graph, frozen.state.scenarios).content,
+    );
+    expect(graphDownload.nodes.find((node: { id: string }) => node.id === 'deploy-change')).toMatchObject({
+      hitl: { response: { allowedOutcomes: expect.any(Array) } },
+      sensitive: { approvalRequired: true },
+    });
+    expect(scenarioDownload.scenarios.map((scenario: { humanOutcomes: Array<{ outcomeId: string }> }) => scenario.humanOutcomes[0]?.outcomeId)).toEqual([
+      'approve',
+      'reject',
+      'request-changes',
+    ]);
   });
 
   it('preserves the accepted graph and every review-state proposal when reset is requested', () => {

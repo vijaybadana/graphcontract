@@ -109,6 +109,27 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
   });
 
+  it('loads the Human Control & HITL demo as an undoable, explicitly requested replacement', () => {
+    const previousGraphId = useGraphStore.getState().graph.id;
+    useGraphStore.getState().loadHumanControlHitlDemo();
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'deploy-change')).toMatchObject({
+      kind: 'step',
+      hitl: {
+        response: {
+          allowedOutcomes: expect.arrayContaining([
+            expect.objectContaining({ id: 'approve' }),
+            expect.objectContaining({ id: 'request-changes' }),
+            expect.objectContaining({ id: 'reject' }),
+          ]),
+        },
+      },
+      sensitive: { approvalRequired: true },
+    });
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
+  });
+
   it('commits a normal-node drop and parent assignment as one history transition', () => {
     useGraphStore.getState().createSubgraph({
       position: { x: 400, y: 40 },
@@ -131,8 +152,21 @@ describe('workspace persistence reload', () => {
     const originalId = useGraphStore.getState().selection.primary!.id;
     useGraphStore.getState().updateNode(originalId, {
       participation: { internalTools: true },
-      hitl: { enabled: true, timing: 'before', inputType: 'approval' },
-      modifiers: { guardrail: true, sensitiveSideEffect: true, storeRead: true },
+      hitl: {
+        enabled: true,
+        timing: 'before',
+        response: {
+          type: 'approval',
+          allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'end' }],
+        },
+      },
+      sensitive: {
+        target: 'Customer record',
+        authorization: 'Support lead',
+        approvalRequired: false,
+        idempotency: 'Support request ID',
+      },
+      modifiers: { guardrail: true, storeRead: true },
     });
     useGraphStore.getState().copySelection();
     useGraphStore.getState().pasteSelection();
@@ -142,8 +176,21 @@ describe('workspace persistence reload', () => {
       kind: 'step',
       executor: 'ai',
       participation: { internalTools: true },
-      hitl: { enabled: true, timing: 'before', inputType: 'approval' },
-      modifiers: { guardrail: true, sensitiveSideEffect: true, storeRead: true },
+      hitl: {
+        enabled: true,
+        timing: 'before',
+        response: {
+          type: 'approval',
+          allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'end' }],
+        },
+      },
+      sensitive: {
+        target: 'Customer record',
+        authorization: 'Support lead',
+        approvalRequired: false,
+        idempotency: 'Support request ID',
+      },
+      modifiers: { guardrail: true, storeRead: true },
     };
     expect(useGraphStore.getState().graph.nodes.find((node) => node.id === copyId)).toMatchObject(
       expectedStep,
@@ -171,7 +218,14 @@ describe('workspace persistence reload', () => {
       label: 'Unfinished agent',
       position: { x: 900, y: 120 },
       participation: { internalTools: true },
-      hitl: { enabled: true, timing: 'after', inputType: 'text' },
+      hitl: {
+        enabled: true,
+        timing: 'after',
+        response: {
+          type: 'text',
+          allowedOutcomes: [{ id: 'continue', label: 'Continue', resumeNodeId: 'end' }],
+        },
+      },
       modifiers: { retryFallback: true, readiness: 'degraded' },
     });
     draft.edges.push({
@@ -189,7 +243,7 @@ describe('workspace persistence reload', () => {
     });
     persisted.set(
       'graphcontract-workspace-v1',
-      JSON.stringify({ state: { graph: draft, proposal: null, scenarios: [] }, version: 2 }),
+      JSON.stringify({ state: { graph: draft, proposal: null, scenarios: [] }, version: 4 }),
     );
 
     await useGraphStore.persist.rehydrate();
@@ -209,7 +263,14 @@ describe('workspace persistence reload', () => {
       kind: 'step',
       executor: 'ai',
       participation: { internalTools: true },
-      hitl: { enabled: true, timing: 'after', inputType: 'text' },
+      hitl: {
+        enabled: true,
+        timing: 'after',
+        response: {
+          type: 'text',
+          allowedOutcomes: [{ id: 'continue', label: 'Continue', resumeNodeId: 'end' }],
+        },
+      },
       modifiers: { retryFallback: true, readiness: 'degraded' },
     });
     expect(validateGraph(useGraphStore.getState().graph).map((entry) => entry.code)).toEqual(

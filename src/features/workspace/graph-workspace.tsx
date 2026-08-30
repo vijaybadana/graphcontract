@@ -114,6 +114,7 @@ export function GraphWorkspace() {
   const resetGraph = useGraphStore((state) => state.resetGraph);
   const loadResearchSupervisorDemo = useGraphStore((state) => state.loadResearchSupervisorDemo);
   const loadResearchIntakeRoutingDemo = useGraphStore((state) => state.loadResearchIntakeRoutingDemo);
+  const loadHumanControlHitlDemo = useGraphStore((state) => state.loadHumanControlHitlDemo);
   const clearNotice = useGraphStore((state) => state.clearNotice);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
@@ -166,6 +167,7 @@ export function GraphWorkspace() {
     proposalPending: Boolean(proposal),
   });
   const inspectorTab = proposal || selection.primary ? 'review' : rightTab;
+  const inspectorSelectionKey = `${graph.status}:${proposal?.id ?? ''}:${selection.primary?.type ?? ''}:${selection.primary?.id ?? ''}`;
   const toggleSubgraphCollapse = useCallback(
     (subgraphId: string, collapsed: boolean) => {
       if (editable) setSubgraphCollapsed(subgraphId, collapsed);
@@ -548,6 +550,7 @@ export function GraphWorkspace() {
               onAdd={addAtCenter}
               onLoadResearchSupervisorDemo={loadResearchSupervisorDemo}
               onLoadResearchIntakeRoutingDemo={loadResearchIntakeRoutingDemo}
+              onLoadHumanControlHitlDemo={loadHumanControlHitlDemo}
               onCollapse={closePalette}
             />
             <PanelResizer
@@ -681,7 +684,7 @@ export function GraphWorkspace() {
               aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector focusRequest={inspectorFocusRequest} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
             </div>
             <PanelResizer
               side="right"

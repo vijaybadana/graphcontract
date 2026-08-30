@@ -11,6 +11,7 @@ import {
 } from '@/src/adapters/react-flow/project-graph';
 import {
   createProposal,
+  humanControlHitlDemoGraph,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   sampleGraph,
@@ -20,7 +21,7 @@ import {
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
-    schemaVersion: '2',
+    schemaVersion: '3',
     id: 'subgraph-projection',
     name: 'Subgraph projection',
     status: 'draft',
@@ -132,6 +133,45 @@ describe('projectGraphToCanvas', () => {
     expect(frozenEdge.data.presentation).toMatchObject({ frozen: true, invalid: false });
     expect(frozenEdge.reconnectable).toBe(false);
     expect(proposedEdge.data.presentation.proposalState).toBe('updated');
+  });
+
+  it('keeps v3 HITL outcomes and sensitive policy in a read-only proposal preview', () => {
+    const proposal = createProposal(humanControlHitlDemoGraph, {
+      rationale: 'Clarify the authorization without applying the candidate.',
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'deploy-change',
+          patch: {
+            sensitive: {
+              target: 'Production deployment',
+              authorization: 'Production release manager',
+              approvalRequired: true,
+              idempotency: 'Deployment request ID',
+            },
+          },
+        },
+      ],
+    }).proposal!;
+    const preview = projectGraphToCanvas(humanControlHitlDemoGraph, proposal);
+    const deploy = preview.nodes.find((node) => node.id === 'deploy-change');
+
+    expect(deploy?.data).toMatchObject({
+      proposalState: 'updated',
+      hitl: {
+        response: {
+          allowedOutcomes: [
+            { id: 'approve', resumeNodeId: 'change-completed' },
+            { id: 'request-changes', resumeNodeId: 'revise-change-plan' },
+            { id: 'reject', resumeNodeId: 'change-cancelled' },
+          ],
+        },
+      },
+      sensitive: { authorization: 'Production release manager' },
+    });
+    expect(humanControlHitlDemoGraph.nodes.find((node) => node.id === 'deploy-change')).toMatchObject({
+      sensitive: { authorization: 'Release manager' },
+    });
   });
 
   it('projects every edge from a source-scoped routing issue and every invalid connection', () => {

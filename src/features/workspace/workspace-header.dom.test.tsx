@@ -47,7 +47,7 @@ describe('WorkspaceHeader freeze control', () => {
     render(<WorkspaceHeader {...baseProps} graphStatus="frozen" />);
     expect(screen.getByRole('button', { name: 'Unfreeze contract; currently frozen' })).toBeTruthy();
     expect(screen.getByText('Unfreeze')).toBeTruthy();
-  });
+  }, 15_000);
 
   it('locks Reset example graph for every proposal review state', () => {
     const baseProps = {

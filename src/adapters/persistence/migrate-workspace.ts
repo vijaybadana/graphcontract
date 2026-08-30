@@ -116,7 +116,8 @@ function migrateV2Proposal(proposal: unknown, graph: WorkflowGraphV2): unknown {
         if (hitl.success) patch.hitl = migrateHitlConfigV2(hitl.data, operation.nodeId, proposalGraph);
       }
       if (isRecord(patch.modifiers) && patch.modifiers.sensitiveSideEffect === true) {
-        const { sensitiveSideEffect: _legacySensitive, ...modifiers } = patch.modifiers;
+        const modifiers = { ...patch.modifiers };
+        delete modifiers.sensitiveSideEffect;
         patch.modifiers = Object.keys(modifiers).length > 0 ? modifiers : undefined;
         patch.sensitive = { ...legacySensitiveEffectPolicy };
       }

@@ -12,6 +12,7 @@ import {
   normalizeWorkflowGraphRouting,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
+  humanControlHitlDemoGraph,
   sampleGraph,
   validateGraph,
   ValidationIssue,
@@ -94,7 +95,7 @@ function createNodeFromPreset(
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
-  ['executor', 'participation', 'modifiers', 'hitl'].some((field) => field in patch);
+  ['executor', 'participation', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
 
@@ -709,6 +710,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         state,
         () => clone(researchIntakeRoutingGraph),
         'Research Intake Routing demo loaded.',
+      );
+    },
+
+    loadHumanControlHitlDemo(state: WorkspaceCore): WorkspaceTransition {
+      return changeGraph(
+        state,
+        () => clone(humanControlHitlDemoGraph),
+        'Human Control & HITL demo loaded.',
       );
     },
   };

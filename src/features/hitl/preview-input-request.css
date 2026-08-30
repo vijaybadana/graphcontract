@@ -4,7 +4,7 @@
 .preview-input-request__header p, .preview-input-request__header h2, .preview-input-request__sheet h3, .preview-input-request__sheet section > p { margin: 0; }
 .preview-input-request__header p { color: #718078; font-size: .62rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .preview-input-request__header h2 { margin-top: .18rem; font-size: 1rem; }
-.preview-input-request__header button { display: grid; width: 2rem; height: 2rem; place-items: center; border: 1px solid #d7dfda; border-radius: .5rem; background: #fff; color: #45534a; }
+.preview-input-request__header button { display: grid; min-width: 2rem; min-height: 2rem; place-items: center; border: 1px solid #d7dfda; border-radius: .5rem; background: #fff; color: #45534a; }
 .preview-input-request__header button:focus-visible, .preview-input-request__resume:focus-visible, .preview-input-request__outcomes input:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .preview-input-request__notice { margin: .85rem 0; border: 1px solid #c7d4ea; border-radius: .5rem; background: #f3f7ff; color: #315792; padding: .62rem .7rem; font-size: .72rem; font-weight: 700; line-height: 1.45; }
 .preview-input-request__sheet section { display: grid; gap: .45rem; border-top: 1px solid rgb(20 31 27 / 9%); margin-top: .9rem; padding-top: .9rem; }

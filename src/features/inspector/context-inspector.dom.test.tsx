@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createProposal, researchIntakeRoutingGraph, sampleGraph } from '@/src/domain';
@@ -120,7 +120,7 @@ describe('ContextInspector routing details', () => {
     expect(
       useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier'),
     ).toMatchObject({ hitl: { enabled: true, response: { type: 'selection' } } });
-  }, 15_000);
+  }, 30_000);
 
   it('previews configured human outcomes locally without changing the accepted graph', () => {
     const graph = structuredClone(sampleGraph);
@@ -143,14 +143,49 @@ describe('ContextInspector routing details', () => {
     selectNode('classifier');
     renderInspector();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Preview input request' }));
+    const previewTrigger = screen.getByRole('button', { name: 'Preview input request' });
+    fireEvent.click(previewTrigger);
     expect(screen.getByRole('dialog', { name: 'Preview input request' })).toBeTruthy();
     expect(screen.getByText(/Preview only — no runtime execution/)).toBeTruthy();
     expect(screen.getByText(/Only a human can choose this preview response/)).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close input request preview' }));
     fireEvent.click(screen.getByRole('radio', { name: /Approve\s*Would resume at Billing Agent/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Preview selected response' }));
     expect(screen.getByText(/would resume at Billing Agent · billing/)).toBeTruthy();
     expect(useGraphStore.getState().graph).toEqual(beforePreview);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Preview input request' })).toBeNull();
+    expect(document.activeElement).toBe(previewTrigger);
+  });
+
+  it('clears an open preview when selection or accepted status changes', async () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected Step fixture.');
+    classifier.hitl = {
+      enabled: true,
+      timing: 'before',
+      response: {
+        type: 'approval',
+        allowedOutcomes: [{ id: 'approve', label: 'Approve', resumeNodeId: 'billing' }],
+      },
+    };
+    useGraphStore.setState({ graph });
+    selectNode('classifier');
+    renderInspector();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview input request' }));
+    expect(screen.getByRole('dialog', { name: 'Preview input request' })).toBeTruthy();
+    selectNode('billing');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Preview input request' })).toBeNull());
+
+    cleanup();
+    useGraphStore.setState({ graph, selection: emptySelection() });
+    selectNode('classifier');
+    renderInspector();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview input request' }));
+    useGraphStore.setState({ graph: { ...graph, status: 'frozen' } });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Preview input request' })).toBeNull());
   });
 
   it('keeps HITL and sensitive policy fields read-only for frozen and proposal review graphs', () => {

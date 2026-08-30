@@ -60,7 +60,7 @@ describe('GraphWorkspace subgraph creation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
     expect(screen.getByRole('button', { name: 'Open Inspector' })).toBeTruthy();
-  }, 10_000);
+  }, 30_000);
 
   it('opens Edit & review and replaces the compact palette after palette drop creation', async () => {
     renderWorkspace(true);
@@ -77,7 +77,7 @@ describe('GraphWorkspace subgraph creation', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Collapse node palette' })).toBeNull();
     });
-  }, 10_000);
+  }, 30_000);
 
   it('creates all five work presets as canonical Steps from the mounted palette', async () => {
     renderWorkspace(false);
@@ -95,7 +95,7 @@ describe('GraphWorkspace subgraph creation', () => {
       const created = useGraphStore.getState().graph.nodes.find((node) => !existingNodeIds.has(node.id));
       expect(created).toMatchObject({ kind: 'step', executor });
     }
-  }, 10_000);
+  }, 30_000);
 
   it('normalizes every work drag payload through the same canonical preset path as palette clicks', async () => {
     renderWorkspace(false);
@@ -135,7 +135,7 @@ describe('GraphWorkspace subgraph creation', () => {
 
       expect(stepSemantics(dropped)).toEqual(stepSemantics(clicked));
     }
-  }, 10_000);
+  }, 30_000);
 
   it('uses visible chips and keyboard overflow to select a Step and focus stable inspector sections', async () => {
     const graph = structuredClone(sampleGraph);

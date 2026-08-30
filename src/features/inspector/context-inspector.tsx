@@ -103,7 +103,8 @@ function responseForType(response: StepHitlResponse, type: StepHitlResponse['typ
         : response.allowedOutcomes.map(({ id, label }) => ({ id, label })),
     };
   }
-  const { selectionChoices: _selectionChoices, ...withoutChoices } = response;
+  const withoutChoices = { ...response };
+  delete withoutChoices.selectionChoices;
   return { ...withoutChoices, type };
 }
 
@@ -205,6 +206,7 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
   const updateEdge = useGraphStore((state) => state.updateEdge);
   const removeEdge = useGraphStore((state) => state.removeEdge);
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement>(null);
   const editable = graph.status === 'draft' && !proposal;
   const { fitView } = useReactFlow();
   const primary = selection.primary;
@@ -243,6 +245,15 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
     });
     return () => cancelAnimationFrame(frame);
   }, [focusRequest, node?.id, node?.kind]);
+
+  const previewNode = previewNodeId === node?.id ? node : undefined;
+  const previewIsCurrent =
+    Boolean(previewNodeId) &&
+    graph.status === 'draft' &&
+    !proposal &&
+    previewNode?.kind === 'step' &&
+    previewNode.hitl?.enabled &&
+    Boolean(previewNode.hitl.response);
 
   const updateModifierFlag = (
     key: Exclude<keyof StepModifierSummary, 'readiness'>,
@@ -574,7 +585,8 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
                       disabled={!editable}
                       onChange={(event) => {
                         const reason = event.target.value;
-                        const { activation: _activation, ...withoutActivation } = node.hitl!;
+                        const withoutActivation = { ...node.hitl! };
+                        delete withoutActivation.activation;
                         updateNode(node.id, {
                           hitl: {
                             ...withoutActivation,
@@ -656,7 +668,13 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
                       ))}
                     </div>
                   )}
-                  <button type="button" className="secondary-button" onClick={() => setPreviewNodeId(node.id)}>
+                  <button
+                    ref={previewTriggerRef}
+                    type="button"
+                    className="secondary-button"
+                    disabled={!editable}
+                    onClick={() => setPreviewNodeId(node.id)}
+                  >
                     Preview input request
                   </button>
                 </div>
@@ -754,8 +772,13 @@ export function ContextInspector({ focusRequest }: { focusRequest?: InspectorFoc
           </div>
         </div>
       )}
-      {node?.kind === 'step' && previewNodeId === node.id && node.hitl?.enabled && node.hitl.response && (
-        <PreviewInputRequestSheet graph={graph} node={node} onClose={() => setPreviewNodeId(null)} />
+      {previewNode?.kind === 'step' && previewNode.hitl?.enabled && previewNode.hitl.response && previewIsCurrent && (
+        <PreviewInputRequestSheet
+          graph={graph}
+          node={previewNode}
+          onClose={() => setPreviewNodeId(null)}
+          restoreFocusTo={previewTriggerRef}
+        />
       )}
       {edge && (
         <div className="context-inspector__content">

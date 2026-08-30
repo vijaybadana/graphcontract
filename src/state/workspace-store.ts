@@ -71,6 +71,7 @@ type WorkspaceStore = WorkspaceCore & {
   resetGraph: () => void;
   loadResearchSupervisorDemo: () => void;
   loadResearchIntakeRoutingDemo: () => void;
+  loadHumanControlHitlDemo: () => void;
   clearNotice: () => void;
 };
 
@@ -377,6 +378,14 @@ export const useGraphStore = create<WorkspaceStore>()(
 
         loadResearchIntakeRoutingDemo: () => {
           commit(workspace.loadResearchIntakeRoutingDemo(currentCore()), { selection: emptySelection() });
+          set((state) => ({
+            clipboardNodeIds: [],
+            fitViewRevision: state.fitViewRevision + 1,
+          }));
+        },
+
+        loadHumanControlHitlDemo: () => {
+          commit(workspace.loadHumanControlHitlDemo(currentCore()), { selection: emptySelection() });
           set((state) => ({
             clipboardNodeIds: [],
             fitViewRevision: state.fitViewRevision + 1,

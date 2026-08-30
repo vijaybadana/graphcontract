@@ -101,6 +101,7 @@ type NodePaletteProps = {
   onAdd: (kind: PaletteKind) => void;
   onLoadResearchSupervisorDemo: () => void;
   onLoadResearchIntakeRoutingDemo: () => void;
+  onLoadHumanControlHitlDemo: () => void;
   onCollapse: () => void;
 };
 
@@ -118,6 +119,7 @@ function NodePaletteContents({
   onAdd,
   onLoadResearchSupervisorDemo,
   onLoadResearchIntakeRoutingDemo,
+  onLoadHumanControlHitlDemo,
   onCollapse,
 }: NodePaletteProps) {
   const [query, setQuery] = useState('');
@@ -146,6 +148,16 @@ function NodePaletteContents({
       )
     ) {
       onLoadResearchIntakeRoutingDemo();
+    }
+  };
+
+  const loadHumanControlHitlDemo = () => {
+    if (
+      window.confirm(
+        'Replace the current canvas with the Human Control & HITL demo? This replaces the current workflow; one Undo restores it.',
+      )
+    ) {
+      onLoadHumanControlHitlDemo();
     }
   };
 
@@ -205,6 +217,16 @@ function NodePaletteContents({
         <strong>{getContractHealthLabel(graph, proposal, validationIssueCount)}</strong>
       </div>
       <div className="node-palette__demo">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={loadHumanControlHitlDemo}
+          className="node-palette__demo-button"
+        >
+          <HandIcon aria-hidden="true" size={15} weight="duotone" />
+          Load Human Control &amp; HITL demo
+        </button>
+        <p>Includes canonical approve, request-changes, and reject outcomes. One Undo restores your workflow.</p>
         <button
           type="button"
           disabled={disabled}
