@@ -29,7 +29,7 @@
   Acceptance: Step, Agent, Action, Tool and Human review presets all create the same canonical object; complex modifier combinations remain readable and accessible.
   Verify: DOM/accessibility tests and real Chromium add/edit/overflow/freeze/proposal journey.
 
-- [ ] **4. Implement HITL and sensitive human control**
+- [x] **4. Implement HITL and sensitive human control**
   Spec ref: `lead-handover.md > Package 2 — HITL, human control and sensitive effects`
   What to build: Add gate timing, response contracts, preview input sheet, sensitive policies and human-outcome scenarios without claiming live runtime execution.
   Acceptance: Human-owned versus HITL is unambiguous; only human UI can respond/resume preview; WebMCP can propose but not exercise authority.
