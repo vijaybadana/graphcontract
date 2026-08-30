@@ -2,6 +2,7 @@
 
 import { CheckCircle, LockSimple, PaperPlaneTilt, X } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { WorkflowGraph } from '@/src/domain';
 
@@ -100,7 +101,7 @@ function PreviewInputRequestSheetContents({
     ? response.allowedOutcomes.find((outcome) => outcome.id === previewResponse.outcomeId)
     : undefined;
 
-  return (
+  return createPortal(
     <div
       className="preview-input-request"
       role="dialog"
@@ -185,6 +186,7 @@ function PreviewInputRequestSheetContents({
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
