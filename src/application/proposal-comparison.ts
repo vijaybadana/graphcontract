@@ -3,6 +3,7 @@ import {
   GraphProposal,
   GraphSubgraph,
   NonNativeRelationship,
+  proposalMatchesGraph,
   validateGraph,
   ValidationIssue,
   WorkflowGraph,
@@ -25,6 +26,7 @@ export type ProposalComparisonEntry<T> = {
 };
 
 export type ProposalComparison = {
+  kind: 'comparable';
   /** Detached, normalized copies. The caller's accepted graph is never changed. */
   base: WorkflowGraph;
   candidate: WorkflowGraph;
@@ -36,11 +38,25 @@ export type ProposalComparison = {
   operationErrors: ValidationIssue[];
   validationErrors: ValidationIssue[];
   declaredValidationErrors: ValidationIssue[];
-  stale: boolean;
   invalid: boolean;
-  effectiveStatus: GraphProposal['status'];
+  effectiveStatus: Exclude<GraphProposal['status'], 'stale'>;
   approvable: boolean;
 };
+
+export type StaleProposalReason =
+  | 'base_graph_id_mismatch'
+  | 'base_graph_updated_at_mismatch'
+  | 'proposal_marked_stale';
+
+/** A stale proposal cannot produce a candidate for review or projection. */
+export type StaleProposalReview = {
+  kind: 'stale';
+  /** Detached, normalized copy of the only graph that remains authoritative. */
+  accepted: WorkflowGraph;
+  reason: StaleProposalReason;
+};
+
+export type ProposalReview = ProposalComparison | StaleProposalReview;
 
 type Identified = { id: string };
 type CapabilityRecord = { id: string; value: unknown };
@@ -59,6 +75,15 @@ function stableIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function staleProposalReason(
+  proposal: GraphProposal,
+  graph: WorkflowGraph,
+): StaleProposalReason {
+  if (proposal.baseGraphId !== graph.id) return 'base_graph_id_mismatch';
+  if (proposal.baseUpdatedAt !== graph.updatedAt) return 'base_graph_updated_at_mismatch';
+  return 'proposal_marked_stale';
 }
 
 /** Returns stable leaf paths without depending on object insertion order. */
@@ -155,29 +180,37 @@ function compareCapabilities(
 }
 
 /**
- * Derives a complete base-versus-final-candidate comparison from canonical
- * operations. `proposal.diff` is deliberately ignored: it is a convenient
- * operation summary, not final truth for progressive or invalid operations.
+ * Returns accepted-only review state for a stale proposal. Otherwise derives
+ * a complete base-versus-final-candidate comparison from canonical operations.
+ * `proposal.diff` is deliberately ignored: it is a convenient operation
+ * summary, not final truth for progressive or invalid operations.
  */
 export function deriveProposalComparison(
   graph: WorkflowGraph,
   proposal: GraphProposal,
-): ProposalComparison {
+): ProposalReview {
   // applyGraphOperations clones before it normalizes, so both snapshots are
   // detached and the accepted input remains immutable for review and approval.
-  const base = applyGraphOperations(graph, []).graph;
+  const accepted = applyGraphOperations(graph, []).graph;
+  if (proposal.status === 'stale' || !proposalMatchesGraph(proposal, graph)) {
+    return {
+      kind: 'stale',
+      accepted,
+      reason: staleProposalReason(proposal, graph),
+    };
+  }
+
+  const base = accepted;
   const applied = applyGraphOperations(base, proposal.operations);
   // Revalidate the graph produced by the same progressive replay instead of
   // trusting proposal errors that may describe an older accepted snapshot.
   const validationErrors = stableIssues([...applied.errors, ...validateGraph(applied.graph)]);
   const declaredValidationErrors = proposal.validationErrors ? structuredClone(proposal.validationErrors) : [];
-  const stale = proposal.status === 'stale' ||
-    proposal.baseGraphId !== graph.id ||
-    proposal.baseUpdatedAt !== graph.updatedAt;
   const invalid = validationErrors.length > 0 || proposal.status === 'invalid';
-  const effectiveStatus = stale ? 'stale' : invalid ? 'invalid' : proposal.status;
+  const effectiveStatus: ProposalComparison['effectiveStatus'] = invalid ? 'invalid' : proposal.status;
 
   return {
+    kind: 'comparable',
     base,
     candidate: applied.graph,
     nodes: compareById(base.nodes, applied.graph.nodes),
@@ -188,7 +221,6 @@ export function deriveProposalComparison(
     operationErrors: structuredClone(applied.errors),
     validationErrors,
     declaredValidationErrors,
-    stale,
     invalid,
     effectiveStatus,
     approvable: effectiveStatus === 'pending',

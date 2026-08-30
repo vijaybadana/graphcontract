@@ -12,6 +12,7 @@ import {
   GraphSubgraph,
   NodeKind,
   normalizeWorkflowGraph,
+  proposalMatchesGraph,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   humanControlHitlDemoGraph,
@@ -755,7 +756,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         };
         return { state, changed: false, result: { ok: false, error } };
       }
-      if (proposal.baseUpdatedAt !== state.graph.updatedAt) {
+      if (!proposalMatchesGraph(proposal, state.graph)) {
         const stale = { ...proposal, status: 'stale' as const };
         const error = {
           code: 'PROPOSAL_STALE',

@@ -8,6 +8,7 @@ import {
   graphOperationSchema,
   graphNodePatchSchema,
   normalizeWorkflowGraph,
+  proposalMatchesGraph,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   resolveEffectiveCapabilities,
@@ -1117,6 +1118,23 @@ describe('routing edge semantics', () => {
         }),
       ]),
     );
+  });
+
+  it('matches proposal authority only to the exact graph identity and revision', () => {
+    const graph = structuredClone(sampleGraph);
+    const proposal = createProposal(graph, {
+      rationale: 'Clarify the billing specialist.',
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } },
+      ],
+    }).proposal!;
+
+    expect(proposalMatchesGraph(proposal, graph)).toBe(true);
+    expect(proposalMatchesGraph(proposal, { ...graph, id: 'replacement-graph' })).toBe(false);
+    expect(proposalMatchesGraph(proposal, {
+      ...graph,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+    })).toBe(false);
   });
 
   it('keeps relationship proposal operations progressive and rejects unsupported evidence claims atomically', () => {

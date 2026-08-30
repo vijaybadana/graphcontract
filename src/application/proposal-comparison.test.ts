@@ -7,6 +7,12 @@ import {
 } from '@/src/domain';
 import { deriveProposalComparison } from './proposal-comparison';
 
+function requireComparableReview(review: ReturnType<typeof deriveProposalComparison>) {
+  expect(review.kind).toBe('comparable');
+  if (review.kind !== 'comparable') throw new Error('Expected a comparable proposal review.');
+  return review;
+}
+
 describe('deriveProposalComparison', () => {
   it('derives deterministic final truth by ID instead of trusting proposal.diff', () => {
     const base = structuredClone(researchIntakeRoutingGraph);
@@ -47,7 +53,7 @@ describe('deriveProposalComparison', () => {
     }).proposal!;
     proposal.diff = { ...proposal.diff, addedNodeIds: [], removedEdgeIds: [] };
 
-    const comparison = deriveProposalComparison(base, proposal);
+    const comparison = requireComparableReview(deriveProposalComparison(base, proposal));
 
     expect(comparison.nodes['candidate-step']).toMatchObject({
       state: 'added', after: { label: 'Refined candidate' },
@@ -76,7 +82,7 @@ describe('deriveProposalComparison', () => {
       operations: [{ type: 'update_node', nodeId: 'clarify-request', patch: { label: 'Clarify Research Request' } }],
     }).proposal!;
 
-    const comparison = deriveProposalComparison(base, proposal);
+    const comparison = requireComparableReview(deriveProposalComparison(base, proposal));
 
     expect(comparison.capabilities['graph.state']).toMatchObject({ state: 'unchanged', changedFields: [] });
     expect(comparison.nodes['clarify-request']).toMatchObject({
@@ -87,23 +93,58 @@ describe('deriveProposalComparison', () => {
     expect(comparison.effectiveStatus).toBe('pending');
   });
 
-  it('reports operation, invalid, and stale truth without treating either state as approvable', () => {
+  it('reports operation and invalid truth without treating the candidate as approvable', () => {
     const base = structuredClone(researchIntakeRoutingGraph) as WorkflowGraph;
     const proposal = createProposal(base, {
       rationale: 'Reference a missing node.',
       operations: [{ type: 'update_node', nodeId: 'missing', patch: { label: 'Nope' } }],
     }).proposal!;
-    const staleBase = { ...base, updatedAt: '2099-01-01T00:00:00.000Z' };
 
-    const invalidComparison = deriveProposalComparison(base, proposal);
-    const staleComparison = deriveProposalComparison(staleBase, proposal);
+    const invalidComparison = requireComparableReview(deriveProposalComparison(base, proposal));
 
     expect(invalidComparison.operationErrors.map((entry) => entry.code)).toContain('OPERATION_NOT_FOUND');
     expect(invalidComparison.invalid).toBe(true);
     expect(invalidComparison.effectiveStatus).toBe('invalid');
     expect(invalidComparison.approvable).toBe(false);
-    expect(staleComparison.stale).toBe(true);
-    expect(staleComparison.effectiveStatus).toBe('stale');
-    expect(staleComparison.approvable).toBe(false);
+  });
+
+  it.each([
+    [
+      'graph ID',
+      { id: 'replacement-graph' },
+      'base_graph_id_mismatch',
+    ],
+    [
+      'graph timestamp',
+      { updatedAt: '2099-01-01T00:00:00.000Z' },
+      'base_graph_updated_at_mismatch',
+    ],
+  ] as const)('returns accepted-only review state for a stale %s', (_label, change, reason) => {
+    const base = structuredClone(researchIntakeRoutingGraph) as WorkflowGraph;
+    const proposal = createProposal(base, {
+      rationale: 'This candidate must never be replayed against another accepted graph.',
+      operations: [{
+        type: 'update_node',
+        nodeId: 'clarify-request',
+        patch: { label: 'Synthetic stale candidate' },
+      }],
+    }).proposal!;
+    const accepted = { ...base, ...change };
+
+    const review = deriveProposalComparison(accepted, proposal);
+
+    expect(review).toMatchObject({
+      kind: 'stale',
+      accepted: { id: accepted.id, updatedAt: accepted.updatedAt },
+      reason,
+    });
+    expect(review).not.toHaveProperty('candidate');
+    expect(review).not.toHaveProperty('base');
+    expect(review).not.toHaveProperty('nodes');
+    expect(JSON.stringify(review)).not.toContain('Synthetic stale candidate');
+    if (review.kind !== 'stale') throw new Error('Expected stale accepted-only review state.');
+    expect(review.accepted.nodes.find((node) => node.id === 'clarify-request')?.label)
+      .toBe('Clarify Request');
+    expect(review.accepted).not.toBe(accepted);
   });
 });

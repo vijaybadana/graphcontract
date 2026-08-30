@@ -286,7 +286,7 @@ describe('workspace application service', () => {
     expect(rejected.state.graph.updatedAt).toBe(before.updatedAt);
   });
 
-  it('keeps expectedGraphUpdatedAt optional but rejects supplied stale values and human stale approval', () => {
+  it('keeps expectedGraphUpdatedAt optional and rejects either stale identity field identically', () => {
     const initial = service.createInitial();
     const compatible = service.submitProposal(initial, {
       rationale: 'Existing clients may omit the timestamp.',
@@ -297,10 +297,21 @@ describe('workspace application service', () => {
       expectedGraphUpdatedAt: '2026-01-01T00:00:00.000Z',
       operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } }],
     });
-    const stale = service.approveProposal({
+    const staleGraphs = [
+      { ...compatible.state.graph, id: 'replacement-graph' },
+      { ...compatible.state.graph, updatedAt: '2026-08-29T00:00:00.000Z' },
+    ];
+    const staleApprovals = staleGraphs.map((graph) => service.approveProposal({
       ...compatible.state,
-      graph: { ...compatible.state.graph, updatedAt: '2026-08-29T00:00:00.000Z' },
-    });
+      graph,
+    }));
+    const staleError = {
+      ok: false as const,
+      error: {
+        code: 'PROPOSAL_STALE',
+        message: 'The graph changed after this proposal was created.',
+      },
+    };
 
     expect(compatible.result?.ok).toBe(true);
     expect(mismatched.result).toEqual({
@@ -310,15 +321,15 @@ describe('workspace application service', () => {
         message: 'The accepted graph changed. Read it again before proposing changes.',
       },
     });
-    expect(stale.result).toEqual({
-      ok: false,
-      error: {
-        code: 'PROPOSAL_STALE',
-        message: 'The graph changed after this proposal was created.',
-      },
+    expect(staleApprovals[0].result).toEqual(staleApprovals[1].result);
+    staleApprovals.forEach((stale, index) => {
+      expect(stale.result).toEqual(staleError);
+      expect(stale.changed).toBe(true);
+      expect(stale.notice).toBe('Proposal is stale. Ask the agent to read the graph again.');
+      expect(stale.state.graph).toEqual(staleGraphs[index]);
+      expect(stale.state.graph.nodes.find((node) => node.id === 'billing')?.label).toBe('Billing Agent');
+      expect(stale.state.proposal?.status).toBe('stale');
     });
-    expect(stale.state.graph.nodes.find((node) => node.id === 'billing')?.label).toBe('Billing Agent');
-    expect(stale.state.proposal?.status).toBe('stale');
   });
 
   it('freezes a valid graph and enumerates its reachable paths', () => {

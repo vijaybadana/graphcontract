@@ -971,6 +971,18 @@ export type GraphProposal = {
   diff: ProposalDiff;
 };
 
+/**
+ * A proposal is authoritative only for the exact accepted graph snapshot it
+ * was created from. Both the stable graph identity and revision timestamp are
+ * required; matching either field alone is insufficient.
+ */
+export function proposalMatchesGraph(
+  proposal: Pick<GraphProposal, 'baseGraphId' | 'baseUpdatedAt'>,
+  graph: Pick<WorkflowGraph, 'id' | 'updatedAt'>,
+): boolean {
+  return proposal.baseGraphId === graph.id && proposal.baseUpdatedAt === graph.updatedAt;
+}
+
 export type BranchCondition = {
   nodeId: string;
   nodeLabel: string;
