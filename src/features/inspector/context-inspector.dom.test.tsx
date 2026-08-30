@@ -4,6 +4,11 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import {
+  proposalReviewToCanvasProjection,
+  type CanvasReviewProjection,
+} from '@/src/adapters/react-flow/project-graph';
+import { deriveProposalComparison } from '@/src/application/proposal-comparison';
 import { createProposal, researchIntakeRoutingGraph, researchSupervisorGraph, sampleGraph } from '@/src/domain';
 import { dynamicParallelismDemoGraph } from '@/src/application/package-three-demo';
 import { useGraphStore } from '@/src/state/workspace-store';
@@ -38,10 +43,10 @@ function selectNode(nodeId: string) {
   });
 }
 
-function renderInspector() {
+function renderInspector(reviewProjection?: CanvasReviewProjection | null) {
   render(
     <ReactFlowProvider>
-      <ContextInspector />
+      <ContextInspector reviewProjection={reviewProjection} />
     </ReactFlowProvider>,
   );
 }
@@ -430,9 +435,12 @@ describe('ContextInspector routing details', () => {
       rationale: 'Rename classifier for review.',
       operations: [{ type: 'update_node', nodeId: 'classifier', patch: { label: 'Classifier proposal' } }],
     }).proposal!;
+    const reviewProjection = proposalReviewToCanvasProjection(
+      deriveProposalComparison(graph, proposal),
+    );
     useGraphStore.setState({ graph, proposal });
     selectNode('classifier');
-    renderInspector();
+    renderInspector(reviewProjection);
     expect((screen.getByRole('button', { name: 'HITL timing' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('textbox', { name: 'Sensitive authorization' }) as HTMLInputElement).disabled).toBe(true);
   });
@@ -543,11 +551,23 @@ describe('ContextInspector routing details', () => {
         },
       ],
     }).proposal!;
+    const reviewProjection = proposalReviewToCanvasProjection(
+      deriveProposalComparison(researchIntakeRoutingGraph, proposal),
+    );
+    // The supplied review remains authoritative even if raw proposal data is
+    // subsequently incomplete or points at another replay result.
+    proposal.operations = [{
+      type: 'update_edge',
+      edgeId: 'clarify-write-brief',
+      patch: { label: 'wrong raw replay label' },
+    }];
+    proposal.diff.updatedEdgeIds = [];
     useGraphStore.setState({ proposal });
     selectEdge('clarify-write-brief');
-    renderInspector();
+    renderInspector(reviewProjection);
 
     expect((screen.getByDisplayValue('reviewed command') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue('wrong raw replay label')).toBeNull();
     expect(screen.getByText(/Proposal preview: updated route/)).toBeTruthy();
     expect(screen.getByText(/human must approve or reject/)).toBeTruthy();
 

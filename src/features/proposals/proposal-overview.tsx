@@ -4,15 +4,16 @@ import { ReactFlow, ReactFlowProvider } from '@xyflow/react';
 import { useMemo } from 'react';
 
 import {
+  type CanvasReviewProjection,
   type CanvasFlowEdge,
   projectGraphToCanvas,
+  proposalReviewToCanvasProjection,
 } from '@/src/adapters/react-flow/project-graph';
 import type {
   ProposalComparison,
   ProposalComparisonEntry,
-  ProposalComparisonState,
 } from '@/src/application/proposal-comparison';
-import type { GraphProposal } from '@/src/domain';
+import type { WorkflowGraph } from '@/src/domain';
 import { ContractNode } from '@/src/features/canvas/contract-node';
 import { ExternalSystemTile } from '@/src/features/canvas/external-system-tile';
 import { MergeNode } from '@/src/features/canvas/merge-node';
@@ -47,40 +48,11 @@ const changedEntries = (
 ) => Object.values(collection)
   .filter((entry) => entry.state !== 'unchanged') as ProposalComparisonEntry<unknown>[];
 
-const idsWithState = <T,>(
-  collection: Record<string, ProposalComparisonEntry<T>>,
-  state: ProposalComparisonState,
-) => Object.values(collection)
-  .filter((entry) => entry.state === state)
-  .map((entry) => entry.id);
-
-function comparisonDiff(
-  comparison: ProposalComparison,
-  source: GraphProposal['diff'],
-): GraphProposal['diff'] {
-  return {
-    ...source,
-    addedNodeIds: idsWithState(comparison.nodes, 'added'),
-    updatedNodeIds: idsWithState(comparison.nodes, 'updated'),
-    removedNodeIds: idsWithState(comparison.nodes, 'removed'),
-    addedSubgraphIds: idsWithState(comparison.subgraphs, 'added'),
-    updatedSubgraphIds: idsWithState(comparison.subgraphs, 'updated'),
-    removedSubgraphIds: idsWithState(comparison.subgraphs, 'removed'),
-    membershipChangedNodeIds: [],
-    addedEdgeIds: idsWithState(comparison.nativeEdges, 'added'),
-    updatedEdgeIds: idsWithState(comparison.nativeEdges, 'updated'),
-    removedEdgeIds: idsWithState(comparison.nativeEdges, 'removed'),
-    addedRelationshipIds: idsWithState(comparison.relationships, 'added'),
-    updatedRelationshipIds: idsWithState(comparison.relationships, 'updated'),
-    removedRelationshipIds: idsWithState(comparison.relationships, 'removed'),
-  };
-}
-
 function readOnlyProjection(
-  comparison: ProposalComparison,
-  proposal: GraphProposal | null,
+  graph: WorkflowGraph,
+  reviewProjection: CanvasReviewProjection | null,
 ) {
-  const projected = projectGraphToCanvas(comparison.base, proposal);
+  const projected = projectGraphToCanvas(graph, reviewProjection);
   return {
     nodes: projected.nodes.map((node) => ({
       ...node,
@@ -116,16 +88,16 @@ function readOnlyProjection(
 
 function ProposalGraphOverview({
   label,
-  comparison,
-  proposal,
+  graph,
+  reviewProjection,
 }: {
   label: string;
-  comparison: ProposalComparison;
-  proposal: GraphProposal | null;
+  graph: WorkflowGraph;
+  reviewProjection: CanvasReviewProjection | null;
 }) {
   const projection = useMemo(
-    () => readOnlyProjection(comparison, proposal),
-    [comparison, proposal],
+    () => readOnlyProjection(graph, reviewProjection),
+    [graph, reviewProjection],
   );
 
   return (
@@ -169,10 +141,8 @@ function entrySummary(entry: ProposalComparisonEntry<unknown>) {
 
 export function ProposalOverview({
   comparison,
-  proposal,
 }: {
   comparison: ProposalComparison;
-  proposal: GraphProposal;
 }) {
   const sections: DiffSection[] = [
     { id: 'nodes', label: 'Nodes', entries: changedEntries(comparison.nodes) },
@@ -182,13 +152,7 @@ export function ProposalOverview({
     { id: 'capabilities', label: 'Capabilities', entries: changedEntries(comparison.capabilities) },
   ].filter((section) => section.entries.length > 0);
   const total = sections.reduce((count, section) => count + section.entries.length, 0);
-  const displayProposal = useMemo<GraphProposal>(() => ({
-    ...proposal,
-    // Stale candidates remain visible for human review, but the projector only
-    // previews active statuses. This clone is presentation-only and cannot be approved.
-    status: comparison.approvable ? 'pending' : 'invalid',
-    diff: comparisonDiff(comparison, proposal.diff),
-  }), [comparison, proposal]);
+  const reviewProjection = proposalReviewToCanvasProjection(comparison);
 
   return (
     <section className="proposal-overview" aria-labelledby="proposal-overview-title">
@@ -201,8 +165,8 @@ export function ProposalOverview({
       </div>
 
       <div className="proposal-overview-graphs">
-        <ProposalGraphOverview label="Before" comparison={comparison} proposal={null} />
-        <ProposalGraphOverview label="Proposed" comparison={comparison} proposal={displayProposal} />
+        <ProposalGraphOverview label="Before" graph={comparison.base} reviewProjection={null} />
+        <ProposalGraphOverview label="Proposed" graph={comparison.base} reviewProjection={reviewProjection} />
       </div>
 
       <div className="proposal-overview-summary" aria-label="Proposal diff summary">

@@ -12,10 +12,8 @@ import { ReactNode, useEffect, useRef, useState } from 'react';
 import './context-inspector.css';
 
 import {
-  applyGraphOperations,
   GraphEdge,
   GraphNode,
-  GraphProposal,
   GraphSubgraph,
   HumanOutcome,
   HitlResponseContract,
@@ -33,7 +31,10 @@ import {
   WorkflowGraph,
 } from '@/src/domain';
 import { topologyDerivedLoopEdgeIds } from '@/src/adapters/react-flow/project-graph';
-import type { EvidenceMarker } from '@/src/adapters/react-flow/project-graph';
+import type {
+  CanvasReviewProjection,
+  EvidenceMarker,
+} from '@/src/adapters/react-flow/project-graph';
 import { evaluateConnection } from '@/src/application/connection-policy';
 import type { StepModifierInspectorSection } from '@/src/features/canvas/contract-node';
 import type { RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
@@ -255,15 +256,13 @@ const edgeValidationIssues = (graph: WorkflowGraph, edge: GraphEdge): Validation
   );
 };
 
-const edgeProposalState = (
-  proposal: GraphProposal | null,
+const edgeReviewState = (
+  reviewProjection: CanvasReviewProjection | null | undefined,
   edgeId: string,
 ): 'added' | 'updated' | 'removed' | undefined => {
-  if (!proposal) return undefined;
-  if (proposal.diff.removedEdgeIds.includes(edgeId)) return 'removed';
-  if (proposal.diff.addedEdgeIds.includes(edgeId)) return 'added';
-  if (proposal.diff.updatedEdgeIds.includes(edgeId)) return 'updated';
-  return undefined;
+  if (reviewProjection?.kind !== 'comparable') return undefined;
+  const state = reviewProjection.states.nativeEdges[edgeId];
+  return state === 'unchanged' ? undefined : state;
 };
 
 function edgeDestinationOptions(
@@ -327,6 +326,7 @@ export function ContextInspector({
   runtimeInstance,
   relationship,
   evidence,
+  reviewProjection,
   readOnly = false,
 }: {
   focusRequest?: InspectorFocusRequest | null;
@@ -334,6 +334,7 @@ export function ContextInspector({
   runtimeInstance?: RuntimeInstanceInspectorSelection | null;
   relationship?: NonNativeRelationship | null;
   evidence?: EvidenceMarker | null;
+  reviewProjection?: CanvasReviewProjection | null;
   readOnly?: boolean;
 }) {
   const graph = useGraphStore((state) => state.graph);
@@ -353,34 +354,41 @@ export function ContextInspector({
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
   const [opaqueInspectionOpen, setOpaqueInspectionOpen] = useState(false);
   const previewTriggerRef = useRef<HTMLButtonElement>(null);
-  const editable = graph.status === 'draft' && !proposal && !readOnly;
+  const proposalUnderReview = Boolean(proposal || reviewProjection);
+  const editable = graph.status === 'draft' && !proposalUnderReview && !readOnly;
   const { fitView } = useReactFlow();
+  const acceptedGraph = reviewProjection?.accepted ?? graph;
+  const previewGraph = reviewProjection?.kind === 'comparable'
+    ? reviewProjection.candidate
+    : acceptedGraph;
   const primary = selection.primary;
-  const node = primary?.type === 'node' ? graph.nodes.find((item) => item.id === primary.id) : undefined;
+  const node = primary?.type === 'node'
+    ? previewGraph.nodes.find((item) => item.id === primary.id)
+    : undefined;
   const subgraph =
     primary?.type === 'subgraph'
-      ? graph.subgraphs.find((item) => item.id === primary.id)
+      ? previewGraph.subgraphs.find((item) => item.id === primary.id)
       : undefined;
-  const proposalPreview = proposal?.status === 'pending' || proposal?.status === 'invalid';
-  const previewGraph = proposal && proposalPreview
-    ? applyGraphOperations(graph, proposal.operations).graph
-    : graph;
   const acceptedEdge =
-    primary?.type === 'edge' ? graph.edges.find((item) => item.id === primary.id) : undefined;
+    primary?.type === 'edge'
+      ? acceptedGraph.edges.find((item) => item.id === primary.id)
+      : undefined;
   const previewEdge =
-    primary?.type === 'edge' ? previewGraph.edges.find((item) => item.id === primary.id) : undefined;
+    primary?.type === 'edge' && reviewProjection?.kind === 'comparable'
+      ? previewGraph.edges.find((item) => item.id === primary.id)
+      : undefined;
   const edge = previewEdge ?? acceptedEdge;
-  const edgeGraph = previewEdge ? previewGraph : graph;
+  const edgeGraph = previewEdge ? previewGraph : acceptedGraph;
   const edgeTarget = edge ? edgeGraph.nodes.find((node) => node.id === edge.target) : undefined;
   const edgeIssues = edge ? edgeValidationIssues(edgeGraph, edge) : [];
   const edgeIsLoop = edge ? topologyDerivedLoopEdgeIds(edgeGraph).has(edge.id) : false;
-  const edgePreviewState = edge ? edgeProposalState(proposal, edge.id) : undefined;
+  const edgePreviewState = edge ? edgeReviewState(reviewProjection, edge.id) : undefined;
   const edgeDestinations = edge ? edgeDestinationOptions(edgeGraph, edge) : [];
   const sendDestinations = edge ? sendDestinationOptions(edgeGraph, edge) : [];
   const selectedNodeIds = selection.nodeIds.filter((nodeId) =>
     graph.nodes.some((node) => node.id === nodeId),
   );
-  const parentOptions = subgraphParentOptions(graph.subgraphs);
+  const parentOptions = subgraphParentOptions(previewGraph.subgraphs);
   const stepSectionRefs = useRef<
     Partial<Record<StepModifierInspectorSection, HTMLElement>>
   >({});
@@ -397,7 +405,7 @@ export function ContextInspector({
   const previewIsCurrent =
     Boolean(previewNodeId) &&
     graph.status === 'draft' &&
-    !proposal &&
+    !proposalUnderReview &&
     previewNode?.kind === 'step' &&
     previewNode.hitl?.enabled &&
     Boolean(previewNode.hitl.response);
@@ -1348,10 +1356,10 @@ export function ContextInspector({
           </section>
           {!editable && (
             <p className="context-inspector__read-only" role="status">
-              {readOnly
-                ? 'Runtime projection is read-only. Switch to Design view to edit the accepted graph.'
-                : proposal
+              {proposalUnderReview
                 ? 'Proposal preview is read-only. A human must approve or reject the proposal before editing the accepted graph.'
+                : readOnly
+                  ? 'Projection is read-only. Switch to Design view to edit the accepted graph.'
                 : 'Frozen contract: route editing is unavailable until the graph is unfrozen.'}
             </p>
           )}

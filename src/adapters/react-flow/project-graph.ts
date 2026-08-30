@@ -1,10 +1,8 @@
 import { Edge, MarkerType } from '@xyflow/react';
 
 import {
-  applyGraphOperations,
   GraphEdge,
   GraphNode,
-  GraphProposal,
   GraphSubgraph,
   NonNativeRelationship,
   Provenance,
@@ -14,6 +12,10 @@ import {
   validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
+import type {
+  ProposalComparisonEntry,
+  ProposalReview,
+} from '@/src/application/proposal-comparison';
 import {
   CONTRACT_NODE_HEIGHT,
   CONTRACT_NODE_WIDTH,
@@ -58,6 +60,81 @@ export type CanvasEdgeReviewProjection = {
   aggregate: CanvasReviewAggregate;
   byDomainEdgeId: Readonly<Record<string, CanvasReviewState>>;
 };
+
+export type CanvasReviewElementStates = {
+  nodes: Readonly<Record<string, CanvasReviewState>>;
+  subgraphs: Readonly<Record<string, CanvasReviewState>>;
+  nativeEdges: Readonly<Record<string, CanvasReviewState>>;
+  relationships: Readonly<Record<string, CanvasReviewState>>;
+};
+
+/**
+ * Canvas review input is detached from proposal operations and stored diffs.
+ * A comparable review supplies the already-derived final candidate plus
+ * stable-ID states; a stale review deliberately has no candidate branch.
+ */
+export type CanvasReviewProjection =
+  | {
+      kind: 'comparable';
+      accepted: WorkflowGraph;
+      candidate: WorkflowGraph;
+      states: CanvasReviewElementStates;
+      membershipChangedNodeIds: readonly string[];
+      membershipAffectedSubgraphIds: readonly string[];
+    }
+  | {
+      kind: 'stale';
+      accepted: WorkflowGraph;
+    };
+
+function reviewStatesById<T>(
+  entries: Readonly<Record<string, ProposalComparisonEntry<T>>>,
+): Readonly<Record<string, CanvasReviewState>> {
+  return Object.freeze(Object.fromEntries(
+    Object.values(entries).map((entry) => [entry.id, entry.state]),
+  ));
+}
+
+/** Purely adapts the one authoritative proposal review for canvas consumers. */
+export function proposalReviewToCanvasProjection(
+  review: ProposalReview | null,
+): CanvasReviewProjection | null {
+  if (!review) return null;
+  if (review.kind === 'stale') {
+    return Object.freeze({ kind: 'stale', accepted: review.accepted });
+  }
+
+  const membershipChangedNodeIds = Object.values(review.nodes)
+    .filter((entry) =>
+      entry.before !== undefined &&
+      entry.after !== undefined &&
+      entry.before.parentId !== entry.after.parentId,
+    )
+    .map((entry) => entry.id)
+    .sort();
+  const membershipAffectedSubgraphIds = [...new Set(
+    membershipChangedNodeIds.flatMap((nodeId) => {
+      const entry = review.nodes[nodeId];
+      return [entry.before?.parentId, entry.after?.parentId].filter(
+        (subgraphId): subgraphId is string => Boolean(subgraphId),
+      );
+    }),
+  )].sort();
+
+  return Object.freeze({
+    kind: 'comparable',
+    accepted: review.base,
+    candidate: review.candidate,
+    states: Object.freeze({
+      nodes: reviewStatesById(review.nodes),
+      subgraphs: reviewStatesById(review.subgraphs),
+      nativeEdges: reviewStatesById(review.nativeEdges),
+      relationships: reviewStatesById(review.relationships),
+    }),
+    membershipChangedNodeIds: Object.freeze(membershipChangedNodeIds),
+    membershipAffectedSubgraphIds: Object.freeze(membershipAffectedSubgraphIds),
+  });
+}
 
 export type CanvasSystemRelationshipEndpointAliases = Partial<
   Record<'source' | 'target', string>
@@ -179,12 +256,6 @@ type ProjectedDomainEdge = {
   target: string;
 };
 
-type EdgeVisualState = {
-  added: boolean;
-  removed: boolean;
-  updated: boolean;
-};
-
 const proxyEdgeId = (source: string, target: string) =>
   `subgraph-proxy:${encodeURIComponent(source)}:${encodeURIComponent(target)}`;
 
@@ -237,27 +308,10 @@ export function canReconnectCanvasEdge(edge: CanvasFlowEdge): boolean {
   return isCanvasNativeEdge(edge) && edge.data?.projection === 'domain' && domainEdgeIdsForCanvasEdge(edge).length === 1;
 }
 
-function edgeVisualState(
-  edgeId: string,
-  proposal: GraphProposal | null,
-): EdgeVisualState {
-  const diff = proposal?.diff;
-  return {
-    added: Boolean(diff?.addedEdgeIds.includes(edgeId)),
-    removed: Boolean(diff?.removedEdgeIds.includes(edgeId)),
-    updated: Boolean(diff?.updatedEdgeIds.includes(edgeId)),
-  };
-}
-
-function proposalStateForEdge(
-  edgeId: string,
-  proposal: GraphProposal | null,
+function proposalVisualState(
+  state: CanvasReviewState | undefined,
 ): ProposalVisualState | undefined {
-  const state = edgeVisualState(edgeId, proposal);
-  if (state.removed) return 'removed';
-  if (state.added) return 'added';
-  if (state.updated) return 'updated';
-  return undefined;
+  return state === 'unchanged' ? undefined : state;
 }
 
 function aggregateReviewStates(
@@ -269,26 +323,15 @@ function aggregateReviewStates(
 
 function reviewProjectionForEdges(
   edges: readonly GraphEdge[],
-  proposal: GraphProposal | null,
+  states: Readonly<Record<string, CanvasReviewState>>,
 ): CanvasEdgeReviewProjection {
   const entries = edges
-    .map((edge) => [edge.id, proposalStateForEdge(edge.id, proposal) ?? 'unchanged'] as const)
+    .map((edge) => [edge.id, states[edge.id] ?? 'unchanged'] as const)
     .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
   return {
     aggregate: aggregateReviewStates(entries.map(([, state]) => state)),
     byDomainEdgeId: Object.fromEntries(entries),
   };
-}
-
-function proposalStateForRelationship(
-  relationshipId: string,
-  proposal: GraphProposal | null,
-): ProposalVisualState | undefined {
-  const diff = proposal?.diff;
-  if (diff?.removedRelationshipIds.includes(relationshipId)) return 'removed';
-  if (diff?.addedRelationshipIds.includes(relationshipId)) return 'added';
-  if (diff?.updatedRelationshipIds.includes(relationshipId)) return 'updated';
-  return undefined;
 }
 
 function isEdgeInvalid(
@@ -504,35 +547,6 @@ function isUnparentedNodeInsideExpandedSubgraph(
   );
 }
 
-function membershipAffectedSubgraphIds(
-  graph: WorkflowGraph,
-  operations: GraphProposal['operations'],
-): Set<string> {
-  const affected = new Set<string>();
-  let candidate = structuredClone(graph);
-
-  for (const operation of operations) {
-    if (operation.type === 'assign_nodes_to_subgraph') {
-      if (candidate.subgraphs.some((subgraph) => subgraph.id === operation.subgraphId)) {
-        affected.add(operation.subgraphId);
-      }
-      for (const nodeId of new Set(operation.nodeIds)) {
-        const node = candidate.nodes.find((candidateNode) => candidateNode.id === nodeId);
-        if (node?.parentId) affected.add(node.parentId);
-      }
-    }
-    if (operation.type === 'remove_nodes_from_subgraph') {
-      for (const nodeId of new Set(operation.nodeIds)) {
-        const node = candidate.nodes.find((candidateNode) => candidateNode.id === nodeId);
-        if (node?.parentId) affected.add(node.parentId);
-      }
-    }
-    candidate = applyGraphOperations(candidate, [operation]).graph;
-  }
-
-  return affected;
-}
-
 function absolutePosition(
   node: GraphNode,
   subgraphsById: ReadonlyMap<string, GraphSubgraph>,
@@ -543,61 +557,44 @@ function absolutePosition(
     : node.position;
 }
 
-function nodeProposalState(
-  nodeId: string,
-  diff: GraphProposal['diff'] | undefined,
-): ProposalVisualState | undefined {
-  const membershipChangedNodeIds = diff?.membershipChangedNodeIds ?? [];
-  if (diff?.addedNodeIds.includes(nodeId)) return 'added';
-  if (diff?.removedNodeIds.includes(nodeId)) return 'removed';
-  if (diff?.updatedNodeIds.includes(nodeId) || membershipChangedNodeIds.includes(nodeId)) {
-    return 'updated';
-  }
-  return undefined;
-}
-
 function descendantReviewStateForSubgraph(
-  graph: WorkflowGraph,
+  accepted: WorkflowGraph,
   preview: WorkflowGraph,
   subgraphId: string,
-  proposal: GraphProposal | null,
+  review: Extract<CanvasReviewProjection, { kind: 'comparable' }> | null,
 ): CanvasReviewAggregate {
-  if (!proposal) return 'unchanged';
+  if (!review) return 'unchanged';
 
   const descendantNodeIds = new Set(
-    [...graph.nodes, ...preview.nodes]
+    [...accepted.nodes, ...preview.nodes]
       .filter((node) => node.parentId === subgraphId)
       .map((node) => node.id),
   );
   const states: ProposalVisualState[] = [];
   for (const nodeId of [...descendantNodeIds].sort()) {
-    const state = nodeProposalState(nodeId, proposal.diff);
+    const state = proposalVisualState(review.states.nodes[nodeId]);
     if (state) states.push(state);
   }
 
-  const changedEdgeIds = new Set([
-    ...proposal.diff.addedEdgeIds,
-    ...proposal.diff.updatedEdgeIds,
-    ...proposal.diff.removedEdgeIds,
-  ]);
+  const changedEdgeIds = Object.keys(review.states.nativeEdges).filter(
+    (edgeId) => review.states.nativeEdges[edgeId] !== 'unchanged',
+  );
   for (const edgeId of [...changedEdgeIds].sort()) {
-    const touchesDescendant = [...graph.edges, ...preview.edges].some(
+    const touchesDescendant = [...accepted.edges, ...preview.edges].some(
       (edge) =>
         edge.id === edgeId &&
         (descendantNodeIds.has(edge.source) || descendantNodeIds.has(edge.target)),
     );
-    const state = proposalStateForEdge(edgeId, proposal);
+    const state = proposalVisualState(review.states.nativeEdges[edgeId]);
     if (touchesDescendant && state) states.push(state);
   }
 
-  const changedRelationshipIds = new Set([
-    ...proposal.diff.addedRelationshipIds,
-    ...proposal.diff.updatedRelationshipIds,
-    ...proposal.diff.removedRelationshipIds,
-  ]);
+  const changedRelationshipIds = Object.keys(review.states.relationships).filter(
+    (relationshipId) => review.states.relationships[relationshipId] !== 'unchanged',
+  );
   for (const relationshipId of [...changedRelationshipIds].sort()) {
     const touchesDescendant = [
-      ...(graph.relationships ?? []),
+      ...(accepted.relationships ?? []),
       ...(preview.relationships ?? []),
     ].some(
       (relationship) =>
@@ -606,7 +603,7 @@ function descendantReviewStateForSubgraph(
           (endpoint) => endpoint.kind === 'node' && descendantNodeIds.has(endpoint.nodeId),
         ),
     );
-    const state = proposalStateForRelationship(relationshipId, proposal);
+    const state = proposalVisualState(review.states.relationships[relationshipId]);
     if (touchesDescendant && state) states.push(state);
   }
 
@@ -633,13 +630,13 @@ function projectDomainNode(
   node: GraphNode,
   preview: WorkflowGraph,
   subgraphsById: ReadonlyMap<string, GraphSubgraph>,
-  diff: GraphProposal['diff'] | undefined,
+  reviewStates: Readonly<Record<string, CanvasReviewState>>,
   validationIssues: ReturnType<typeof validateGraph>,
   runtimeHiddenNodeIds: ReadonlySet<string>,
   scenarioState?: ScenarioElementState,
 ): CanvasFlowNode {
   const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
-  const proposalState = nodeProposalState(node.id, diff);
+  const proposalState = proposalVisualState(reviewStates[node.id]);
   const outsideSubgraph =
     proposalState !== 'removed' && isUnparentedNodeInsideExpandedSubgraph(node, preview.subgraphs);
   const parentProperties = node.parentId
@@ -704,17 +701,17 @@ function projectDomainNode(
 
 export function projectGraphToCanvas(
   graph: WorkflowGraph,
-  proposal: GraphProposal | null,
+  reviewProjection: CanvasReviewProjection | null,
   options: CanvasProjectionOptions = {},
 ): { nodes: CanvasFlowNode[]; edges: CanvasFlowEdge[] } {
-  const visibleProposal =
-    proposal?.status === 'pending' || proposal?.status === 'invalid' ? proposal : null;
-  const preview = visibleProposal
-    ? applyGraphOperations(graph, visibleProposal.operations).graph
-    : graph;
+  const accepted = reviewProjection?.accepted ?? graph;
+  const comparableReview = reviewProjection?.kind === 'comparable'
+    ? reviewProjection
+    : null;
+  const preview = comparableReview?.candidate ?? accepted;
   const runtime =
-    options.mode === 'runtime' && !visibleProposal
-      ? runtimeProjectionAvailability(graph, options.runtimeFixture)
+    options.mode === 'runtime' && !reviewProjection
+      ? runtimeProjectionAvailability(accepted, options.runtimeFixture)
       : null;
   const runtimeTemplateNodeIds = new Set(
     runtime?.available ? runtime.fixture.instances.map((instance) => instance.templateNodeId) : [],
@@ -736,23 +733,21 @@ export function projectGraphToCanvas(
       }
     }
   }
-  const diff = visibleProposal?.diff;
   const scenarioPresentation = options.scenarioPresentation ?? null;
-  const membershipAffectedSubgraphs = visibleProposal
-    ? membershipAffectedSubgraphIds(graph, visibleProposal.operations)
-    : new Set<string>();
+  const membershipAffectedSubgraphs = new Set(
+    comparableReview?.membershipAffectedSubgraphIds ?? [],
+  );
+  const nodeReviewStates = comparableReview?.states.nodes ?? {};
+  const subgraphReviewStates = comparableReview?.states.subgraphs ?? {};
+  const edgeReviewStates = comparableReview?.states.nativeEdges ?? {};
+  const relationshipReviewStates = comparableReview?.states.relationships ?? {};
   const subgraphReviewProjection = (subgraph: GraphSubgraph) => {
-    let proposalState: ProposalVisualState | undefined;
-    if (diff?.removedSubgraphIds?.includes(subgraph.id)) proposalState = 'removed';
-    else if (diff?.addedSubgraphIds?.includes(subgraph.id)) proposalState = 'added';
-    else if (
-      diff?.updatedSubgraphIds?.includes(subgraph.id) ||
-      membershipAffectedSubgraphs.has(subgraph.id)
-    ) {
+    let proposalState = proposalVisualState(subgraphReviewStates[subgraph.id]);
+    if (!proposalState && membershipAffectedSubgraphs.has(subgraph.id)) {
       proposalState = 'updated';
     }
     const descendantReviewState = subgraph.collapsed
-      ? descendantReviewStateForSubgraph(graph, preview, subgraph.id, visibleProposal)
+      ? descendantReviewStateForSubgraph(accepted, preview, subgraph.id, comparableReview)
       : undefined;
     return {
       proposalState:
@@ -768,7 +763,7 @@ export function projectGraphToCanvas(
   const previewSubgraphIds = new Set(preview.subgraphs.map((subgraph) => subgraph.id));
   const sourceSubgraphs = [
     ...preview.subgraphs,
-    ...graph.subgraphs.filter((subgraph) => !previewSubgraphIds.has(subgraph.id)),
+    ...accepted.subgraphs.filter((subgraph) => !previewSubgraphIds.has(subgraph.id)),
   ];
 
   // The candidate graph is the authoritative preview. Keep deleted accepted
@@ -777,7 +772,7 @@ export function projectGraphToCanvas(
   const previewNodeIds = new Set(preview.nodes.map((node) => node.id));
   const sourceNodes = [
     ...preview.nodes,
-    ...graph.nodes.filter((node) => !previewNodeIds.has(node.id)),
+    ...accepted.nodes.filter((node) => !previewNodeIds.has(node.id)),
   ];
   const nodeScenarioState = (nodeId: string) =>
     scenarioElementState(
@@ -810,7 +805,7 @@ export function projectGraphToCanvas(
         node,
         preview,
         subgraphsById,
-        diff,
+        nodeReviewStates,
         validationIssues,
         runtimeTemplateNodeIds,
         nodeScenarioState(node.id),
@@ -821,7 +816,7 @@ export function projectGraphToCanvas(
   const previewEdgeIds = new Set(preview.edges.map((edge) => edge.id));
   const sourceEdges = [
     ...preview.edges,
-    ...graph.edges.filter((edge) => !previewEdgeIds.has(edge.id)),
+    ...accepted.edges.filter((edge) => !previewEdgeIds.has(edge.id)),
   ].filter((edge) => !runtimeReplacedEdgeIds.has(edge.id));
   const loopEdgeIds = topologyDerivedLoopEdgeIds({ ...preview, edges: sourceEdges });
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
@@ -840,16 +835,16 @@ export function projectGraphToCanvas(
 
   const proxyEdges = new Map<string, ProjectedDomainEdge[]>();
   const edges: CanvasFlowEdge[] = [];
-  const canvasEdgesReconnectable = graph.status === 'draft' && !visibleProposal;
+  const canvasEdgesReconnectable = accepted.status === 'draft' && !reviewProjection;
   const edgePresentation = (
     edge: GraphEdge,
     group: readonly GraphEdge[] = [edge],
-    review: CanvasEdgeReviewProjection = reviewProjectionForEdges(group, visibleProposal),
+    review: CanvasEdgeReviewProjection = reviewProjectionForEdges(group, edgeReviewStates),
   ): CanvasEdgePresentation => ({
     mode: edge.mode,
     loop: group.some((candidate) => loopEdgeIds.has(candidate.id)),
     invalid: group.some((candidate) => isEdgeInvalid(candidate, preview, validationIssues)),
-    frozen: graph.status === 'frozen',
+    frozen: accepted.status === 'frozen',
     proposalState: review.aggregate === 'unchanged' ? undefined : review.aggregate,
     provenance: edge.provenance?.representation ?? 'declared',
     scenarioState: scenarioElementState(
@@ -866,7 +861,7 @@ export function projectGraphToCanvas(
       domainEdge.source !== domainEdge.edge.source || domainEdge.target !== domainEdge.edge.target;
     if (!isProxy) {
       const group = [domainEdge.edge];
-      const review = reviewProjectionForEdges(group, visibleProposal);
+      const review = reviewProjectionForEdges(group, edgeReviewStates);
       edges.push(
         projectEdge(
           domainEdge,
@@ -887,7 +882,7 @@ export function projectGraphToCanvas(
   for (const groupedEdges of proxyEdges.values()) {
     const [first] = groupedEdges;
     const group = groupedEdges.map(({ edge }) => edge);
-    const review = reviewProjectionForEdges(group, visibleProposal);
+    const review = reviewProjectionForEdges(group, edgeReviewStates);
     edges.push(
       projectEdge(
         first,
@@ -1033,14 +1028,14 @@ export function projectGraphToCanvas(
   // records are retained strictly as removed ghosts; selection can still
   // inspect those accepted records, but no relationship ever becomes native.
   const previewRelationships = preview.relationships ?? [];
-  const acceptedRelationships = graph.relationships ?? [];
+  const acceptedRelationships = accepted.relationships ?? [];
   const previewRelationshipIds = new Set(previewRelationships.map((relationship) => relationship.id));
   const systemRelationships = [
     ...previewRelationships,
     ...acceptedRelationships.filter((relationship) => !previewRelationshipIds.has(relationship.id)),
   ].sort((left, right) => left.id.localeCompare(right.id));
   for (const relationship of systemRelationships) {
-    const proposalState = proposalStateForRelationship(relationship.id, visibleProposal);
+    const proposalState = proposalVisualState(relationshipReviewStates[relationship.id]);
     const externalEndpoint = relationship.source.kind === 'external'
       ? relationship.source
       : relationship.target.kind === 'external'

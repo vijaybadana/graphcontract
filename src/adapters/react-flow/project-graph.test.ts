@@ -9,8 +9,10 @@ import {
   isCanvasEdgeSelected,
   isSubgraphProxyEdge,
   projectGraphToCanvas,
+  proposalReviewToCanvasProjection,
   topologyDerivedLoopEdgeIds,
 } from '@/src/adapters/react-flow/project-graph';
+import { deriveProposalComparison } from '@/src/application/proposal-comparison';
 import type { ScenarioPresentation } from '@/src/features/scenarios/scenario-presentation';
 import {
   createProposal,
@@ -19,6 +21,7 @@ import {
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   sampleGraph,
+  type GraphProposal,
   validateGraph,
   WorkflowGraph,
 } from '@/src/domain';
@@ -26,6 +29,10 @@ import {
   dynamicParallelismDemoGraph,
   runtimeFixtureForLoadedDynamicParallelismDemo,
 } from '@/src/application/package-three-demo';
+
+function proposalProjection(graph: WorkflowGraph, proposal: GraphProposal) {
+  return proposalReviewToCanvasProjection(deriveProposalComparison(graph, proposal));
+}
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
@@ -449,7 +456,8 @@ describe('projectGraphToCanvas', () => {
       ],
     }).proposal!;
 
-    const canvas = projectGraphToCanvas(graph, proposal);
+    const projection = proposalProjection(graph, proposal);
+    const canvas = projectGraphToCanvas(graph, projection);
     const relationship = (id: string) =>
       canvas.edges.find(
         (edge) => isCanvasSystemRelationshipEdge(edge) && edge.data.relationship.id === id,
@@ -478,7 +486,7 @@ describe('projectGraphToCanvas', () => {
     });
     expect(graph.relationships.map((entry) => entry.label)).toEqual(['Accepted runner', 'Accepted archive']);
 
-    const repeat = projectGraphToCanvas(graph, proposal);
+    const repeat = projectGraphToCanvas(graph, projection);
     expect(repeat.nodes.filter((node) => node.type === 'externalSystemTile').map((node) => ({ id: node.id, position: node.position }))).toEqual(
       canvas.nodes.filter((node) => node.type === 'externalSystemTile').map((node) => ({ id: node.id, position: node.position })),
     );
@@ -533,13 +541,70 @@ describe('projectGraphToCanvas', () => {
         { type: 'update_edge', edgeId: 'clarify-write-brief', patch: { label: 'approved' } },
       ],
     }).proposal!;
-    const proposedEdge = projectGraphToCanvas(researchIntakeRoutingGraph, proposal)
+    const proposedEdge = projectGraphToCanvas(
+      researchIntakeRoutingGraph,
+      proposalProjection(researchIntakeRoutingGraph, proposal),
+    )
       .edges.find((edge) => edge.id === 'clarify-write-brief')!;
 
     expect(invalidEdge.data.presentation.invalid).toBe(true);
     expect(frozenEdge.data.presentation).toMatchObject({ frozen: true, invalid: false });
     expect(frozenEdge.reconnectable).toBe(false);
     expect(proposedEdge.data.presentation.proposalState).toBe('updated');
+  });
+
+  it('projects net-zero progressive operations as unchanged final review truth', () => {
+    const graph = structuredClone(sampleGraph);
+    const acceptedLabel = graph.nodes.find((node) => node.id === 'diagnostic')!.label;
+    const proposal = createProposal(graph, {
+      rationale: 'Temporarily rename a step and then restore the accepted label.',
+      operations: [
+        { type: 'update_node', nodeId: 'diagnostic', patch: { label: 'Temporary label' } },
+        { type: 'update_node', nodeId: 'diagnostic', patch: { label: acceptedLabel } },
+      ],
+    }).proposal!;
+    // Stored operation summaries are intentionally not final review truth.
+    proposal.diff.updatedNodeIds = ['diagnostic'];
+
+    const review = deriveProposalComparison(graph, proposal);
+    const projection = proposalReviewToCanvasProjection(review);
+    const canvas = projectGraphToCanvas(graph, projection);
+    const diagnostic = canvas.nodes.find((node) => node.id === 'diagnostic');
+
+    expect(review.kind).toBe('comparable');
+    expect(projection).toMatchObject({
+      kind: 'comparable',
+      states: { nodes: { diagnostic: 'unchanged' } },
+    });
+    expect(diagnostic?.data).toMatchObject({ label: acceptedLabel });
+    expect(diagnostic?.data.proposalState).toBeUndefined();
+  });
+
+  it('projects a stale review from accepted-only state without synthesizing a candidate', () => {
+    const base = structuredClone(sampleGraph);
+    const proposal = createProposal(base, {
+      rationale: 'This candidate must not be replayed against a newer accepted graph.',
+      operations: [
+        { type: 'update_node', nodeId: 'diagnostic', patch: { label: 'Synthetic stale label' } },
+      ],
+    }).proposal!;
+    const accepted = structuredClone(base);
+    accepted.updatedAt = '2099-01-01T00:00:00.000Z';
+    accepted.nodes.find((node) => node.id === 'diagnostic')!.label = 'Accepted newer label';
+
+    const projection = proposalReviewToCanvasProjection(
+      deriveProposalComparison(accepted, proposal),
+    );
+    const canvas = projectGraphToCanvas(base, projection);
+    const diagnostic = canvas.nodes.find((node) => node.id === 'diagnostic');
+
+    expect(projection).toMatchObject({ kind: 'stale' });
+    expect(projection).not.toHaveProperty('candidate');
+    expect(diagnostic?.data).toMatchObject({ label: 'Accepted newer label' });
+    expect(diagnostic?.data.proposalState).toBeUndefined();
+    expect(JSON.stringify(canvas)).not.toContain('Synthetic stale label');
+    expect(canvas.edges.find((edge) => edge.data?.projection === 'domain')?.reconnectable)
+      .toBe(false);
   });
 
   it('keeps v3 HITL outcomes and sensitive policy in a read-only proposal preview', () => {
@@ -560,7 +625,10 @@ describe('projectGraphToCanvas', () => {
         },
       ],
     }).proposal!;
-    const preview = projectGraphToCanvas(humanControlHitlDemoGraph, proposal);
+    const preview = projectGraphToCanvas(
+      humanControlHitlDemoGraph,
+      proposalProjection(humanControlHitlDemoGraph, proposal),
+    );
     const deploy = preview.nodes.find((node) => node.id === 'deploy-change');
 
     expect(deploy?.data).toMatchObject({
@@ -637,7 +705,7 @@ describe('projectGraphToCanvas', () => {
     }).proposal!;
 
     const acceptedCanvas = projectGraphToCanvas(graph, null);
-    const proposalCanvas = projectGraphToCanvas(graph, proposal);
+    const proposalCanvas = projectGraphToCanvas(graph, proposalProjection(graph, proposal));
     const acceptedNode = acceptedCanvas.nodes.find((node) => node.id === 'diagnostic');
     const proposedNode = proposalCanvas.nodes.find((node) => node.id === 'diagnostic');
 
@@ -674,7 +742,7 @@ describe('projectGraphToCanvas', () => {
       ],
     }).proposal!;
 
-    const canvas = projectGraphToCanvas(graph, proposal);
+    const canvas = projectGraphToCanvas(graph, proposalProjection(graph, proposal));
     const billing = canvas.nodes.find((node) => node.id === 'billing');
 
     expect(canvas.nodes.find((node) => node.id === 'billing-review')).toMatchObject({
@@ -728,11 +796,17 @@ describe('projectGraphToCanvas', () => {
       ],
     }).proposal!;
 
-    const added = projectGraphToCanvas(sampleGraph, addedProposal)
+    const added = projectGraphToCanvas(sampleGraph, proposalProjection(sampleGraph, addedProposal))
       .nodes.find((node) => node.id === 'new-review-group');
-    const updated = projectGraphToCanvas(updatedGraph, updatedProposal)
+    const updated = projectGraphToCanvas(
+      updatedGraph,
+      proposalProjection(updatedGraph, updatedProposal),
+    )
       .nodes.find((node) => node.id === 'review-group');
-    const membership = projectGraphToCanvas(membershipGraph, membershipProposal);
+    const membership = projectGraphToCanvas(
+      membershipGraph,
+      proposalProjection(membershipGraph, membershipProposal),
+    );
 
     expect(added).toMatchObject({ type: 'subgraph', data: { proposalState: 'added' } });
     expect(updated).toMatchObject({
@@ -754,7 +828,7 @@ describe('projectGraphToCanvas', () => {
       operations: [{ type: 'dissolve_subgraph', subgraphId: 'review-group' }],
     }).proposal!;
 
-    const canvas = projectGraphToCanvas(graph, proposal);
+    const canvas = projectGraphToCanvas(graph, proposalProjection(graph, proposal));
     const ghost = canvas.nodes.find((node) => node.id === 'review-group');
     const review = canvas.nodes.find((node) => node.id === 'review');
 
@@ -933,7 +1007,10 @@ describe('projectGraphToCanvas', () => {
       ],
     }).proposal!;
 
-    const incoming = projectGraphToCanvas(graph, proposal).edges.find(
+    const incoming = projectGraphToCanvas(
+      graph,
+      proposalProjection(graph, proposal),
+    ).edges.find(
       (edge) => isSubgraphProxyEdge(edge) && edge.source === 'start',
     )!;
 
@@ -958,7 +1035,7 @@ describe('projectGraphToCanvas', () => {
       ],
     }).proposal!;
 
-    const collapsed = projectGraphToCanvas(graph, proposal);
+    const collapsed = projectGraphToCanvas(graph, proposalProjection(graph, proposal));
     const container = collapsed.nodes.find((node) => node.id === 'review-group');
 
     expect(container).toMatchObject({
