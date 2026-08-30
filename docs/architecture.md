@@ -37,11 +37,20 @@ Both the human interface and WebMCP adapter enter through the same application/s
 
 Owns the canonical accepted workflow:
 
-- Nodes, edges, positions, labels, optional embedded HITL configuration, and one-level subgraph containers
+- Schema-v5 nodes, edges, positions, labels, optional embedded HITL configuration, and one-level subgraph containers
+- Explicit graph capabilities for working State, Checkpointer, long-term Store, and runtime mode; these records are not nodes or edges
+- Supported State/Checkpointer/Store subgraph overrides with deterministic inherited-versus-overridden effective scope
+- Direct Step Store read/write declarations and internal Retry/fallback policy metadata
 - Subgraph membership through a node `parentId`; child positions are relative to their container and collapse never rewrites canonical edges
 - Structural validation: IDs, scope-aware entry/exit routing, reachability, Command routes, and topology-derived return loops
 - Import/export serialization
 - Path enumeration after the graph is frozen
+
+### Durability scope
+
+State, Checkpointer, Store, and Runtime are deliberately separate. State is per-run fields and reducers. A Checkpointer is durable thread/resume metadata and may require a thread ID. A Store is cross-thread knowledge availability; only a Step with explicit direct access displays Store `R` or `W`. Runtime mode applies to the whole graph and is not inherited or overridden by a subgraph.
+
+The graph is the default capability owner. Subgraphs inherit State, Checkpointer, and Store until they replace that individual record with an explicit override; the UI projects whether each effective value comes from the graph, inheritance, or an override. Backend, namespace, reducers, retention, and thread-ID source remain inspector details. Retry/fallback is internal Step metadata and never creates an edge, an execution path, or a loop marker; only authored graph topology can do that.
 
 ### Editor and interaction layer
 
@@ -102,7 +111,7 @@ A frozen graph is immutable in normal UI flow. The user must explicitly unfreeze
 
 ## Persistence
 
-`localStorage` stores the current accepted graph, pending proposal metadata, and frozen state on the local browser/device. Persisted graphs created before subgraphs are normalized with an empty `subgraphs` collection. No account, authentication, or server-side project database is needed for the MVP.
+`localStorage` stores the current accepted graph, pending proposal metadata, and frozen state on the local browser/device. Persistence version 6 migrates schema-v1 through schema-v4 graphs into schema v5, adding explicit default capability records without inventing topology; legacy direct Store summary flags become direct Store access only when that evidence exists. No account, authentication, or server-side project database is needed for the MVP.
 
 Persisted data is convenience storage, not a collaboration or security mechanism. The page remains fully functional when storage is empty by loading the predefined sample graph.
 
@@ -148,4 +157,4 @@ ChatGPT Sites hosts the public application. The initial deployment should verify
 
 ## Non-goals
 
-The MVP does not include repository parsing, agent-code generation, implementation verification, authentication, retry-policy execution, parallel branches, deeply nested subgraphs, LangSmith integration, or an embedded chatbot. Return loops are represented only when derived from authored topology.
+The MVP does not include repository parsing, agent-code generation, implementation verification, authentication, retry-policy execution, deeply nested subgraphs, LangSmith integration, or an embedded chatbot. Return loops are represented only when derived from authored topology; a Retry policy is not a loop.

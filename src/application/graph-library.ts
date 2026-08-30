@@ -4,6 +4,7 @@ import {
   normalizeWorkflowGraph,
   validateGraph,
   type GraphNode,
+  type GraphCapabilities,
   type StepExecutor,
   type WorkflowGraph,
 } from '@/src/domain';
@@ -57,16 +58,27 @@ const graph = (
   nodes: GraphNode[],
   edges: WorkflowGraph['edges'],
   subgraphs: WorkflowGraph['subgraphs'] = [],
+  capabilities: GraphCapabilities = createDefaultGraphCapabilities(),
 ): WorkflowGraph => normalizeWorkflowGraph({
   schemaVersion: '5',
   id,
   name,
   status: 'draft',
   updatedAt: UPDATED_AT,
-  capabilities: createDefaultGraphCapabilities(),
+  capabilities,
   nodes,
   edges,
   subgraphs,
+});
+
+/**
+ * Library durability records reflect verified source behavior only. They are
+ * design-time capability declarations, not a claim that opening a template
+ * connects to, or executes against, its source repository.
+ */
+const durability = (patch: Partial<GraphCapabilities>): GraphCapabilities => ({
+  ...createDefaultGraphCapabilities(),
+  ...patch,
 });
 
 const definitions: readonly GraphLibraryDefinition[] = [
@@ -105,6 +117,9 @@ const definitions: readonly GraphLibraryDefinition[] = [
         { id: 'brief-complete', source: 'write-brief', target: 'research-complete', mode: 'normal' },
       ],
       [{ id: 'research-cell', label: 'Research cell', position: { x: 160, y: 40 }, dimensions: { width: 660, height: 230 }, collapsed: false }],
+      durability({
+        state: { enabled: true, schema: { fields: ['researchBrief', 'evidence'], summary: 'Per-run research brief and evidence.' }, reducers: [] },
+      }),
     ),
   },
   {
@@ -138,6 +153,12 @@ const definitions: readonly GraphLibraryDefinition[] = [
         { id: 'agent-publish', source: 'coding-agent', target: 'publish-change', mode: 'normal' },
         { id: 'publish-delivered', source: 'publish-change', target: 'coding-delivered', mode: 'normal' },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['task', 'plan', 'workspace'], summary: 'Per-run coding task and workspace context.' }, reducers: [] },
+        checkpointer: { enabled: true, backend: 'Deployment checkpointer', durableThread: { required: true, threadIdSource: 'deployment.threadId' } },
+        store: { available: true, namespace: 'organization/user skills', retention: 'deployment-managed' },
+      }),
     ),
   },
   {
@@ -159,7 +180,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
         start('content-start', 40, 230),
         step('collect-evidence', 'Collect approved evidence', 'tool', 220, 230),
         step('map-evidence', 'Map evidence to drafts', 'ai', 440, 230),
-        step('draft-template', 'Draft post template', 'ai', 650, 230),
+        step('draft-template', 'Draft post template', 'ai', 650, 230, { storeAccess: { read: { namespace: 'saved_data', key: 'used_urls' }, write: { namespace: 'saved_data', key: 'used_urls' } } }),
         { id: 'draft-merge', kind: 'merge', label: 'Combine candidate drafts', position: { x: 870, y: 230 }, merge: { reducer: { name: 'combine_drafts', aggregateState: 'drafts' }, completion: { mode: 'all' }, continuation: { mode: 'once' }, waitingForDynamicInputs: true } },
         step('polish-content', 'Polish content set', 'ai', 1080, 230),
         step('content-review', 'Editorial review', 'human', 1290, 230, { hitl: { enabled: true, timing: 'inside', response: { type: 'selection', selectionChoices: [{ id: 'approve', label: 'Approve' }, { id: 'revise', label: 'Revise' }], allowedOutcomes: [{ id: 'approve', label: 'Approve draft', resumeNodeId: 'schedule-post' }, { id: 'revise', label: 'Request revision', resumeNodeId: 'revise-content' }] } } }),
@@ -179,6 +200,11 @@ const definitions: readonly GraphLibraryDefinition[] = [
         { id: 'revise-review', source: 'revise-content', target: 'content-review', mode: 'normal', loopCap: 2 },
         { id: 'schedule-published', source: 'schedule-post', target: 'content-published', mode: 'normal' },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['evidence', 'drafts', 'review'], summary: 'Per-run evidence and draft set.' }, reducers: [{ key: 'drafts', summary: 'Aggregate candidate drafts' }] },
+        store: { available: true, namespace: 'saved_data', retention: 'cross-thread dedupe and preferences' },
+      }),
     ),
   },
   {
@@ -188,7 +214,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'analysis',
     complexity: 'advanced',
     concepts: ['tool loop', 'debate loop', 'multi-stage review'],
-    source: source('TauricResearch', 'TradingAgents', 'Persistent decision history and runtime analyst selection are intentionally omitted.'),
+    source: source('TauricResearch', 'TradingAgents', 'Verified optional checkpointing and decision-log availability are represented as capabilities; runtime analyst selection remains omitted.'),
     graph: graph(
       'library-multi-stage-expert-review',
       'Multi-Stage Expert Review',
@@ -198,6 +224,12 @@ const definitions: readonly GraphLibraryDefinition[] = [
       [
         { id: 'review-gather', source: 'review-start', target: 'gather-signals', mode: 'normal' }, { id: 'gather-inspect', source: 'gather-signals', target: 'inspect-signals', mode: 'conditional', label: 'inspect data', condition: 'signals.needEvidence' }, { id: 'gather-support', source: 'gather-signals', target: 'support-case', mode: 'conditional', label: 'sufficient evidence', condition: 'signals.ready' }, { id: 'inspect-gather', source: 'inspect-signals', target: 'gather-signals', mode: 'normal', loopCap: 2 }, { id: 'support-challenge', source: 'support-case', target: 'challenge-case', mode: 'normal' }, { id: 'challenge-judge', source: 'challenge-case', target: 'review-judge', mode: 'normal' }, { id: 'judge-risk-challenge', source: 'review-judge', target: 'risk-challenge', mode: 'normal' }, { id: 'risk-challenge-balance', source: 'risk-challenge', target: 'risk-balance', mode: 'normal' }, { id: 'risk-balance-challenge', source: 'risk-balance', target: 'risk-challenge', mode: 'conditional', label: 'recheck risk', condition: 'risk.needsRecheck', loopCap: 2 }, { id: 'risk-balance-final', source: 'risk-balance', target: 'final-review', mode: 'conditional', label: 'risk accepted', condition: 'risk.accepted' }, { id: 'final-complete', source: 'final-review', target: 'review-complete', mode: 'normal' },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['reports', 'debate', 'decision'], summary: 'Per-run analyst reports and debate state.' }, reducers: [{ key: 'messages', summary: 'Append debate messages' }] },
+        checkpointer: { enabled: true, backend: 'SqliteSaver (optional)', durableThread: { required: false, threadIdSource: 'ticker/date/graph signature' } },
+        store: { available: true, namespace: 'decision log', retention: 'cross-run reflections' },
+      }),
     ),
   },
   {
@@ -207,16 +239,22 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'data',
     complexity: 'intermediate',
     concepts: ['guardrail', 'conditional repair', 'approval gate'],
-    source: source('tharunramavath', 'AI-Powered-SQL-Agent', 'Database state, checkpointing, and live execution details are intentionally outside this schema-v5 graph.'),
+    source: source('tharunramavath', 'AI-Powered-SQL-Agent', 'Verified state, MemorySaver checkpointing, and bounded conversation memory are represented as capabilities; live database execution details remain inspector-only.'),
     graph: graph(
       'library-guarded-natural-language-to-sql',
       'Guarded Natural-Language-to-SQL',
       [
-        start('sql-start', 40, 220), step('check-request', 'Check request policy', 'deterministic', 220, 220, { modifiers: { guardrail: true } }), step('shape-query', 'Shape analytical query', 'ai', 450, 220), step('validate-query', 'Validate query', 'tool', 680, 220), step('run-query', 'Run approved query', 'tool', 930, 140, { sensitive: { target: 'Analytical database read', authorization: 'Data steward', approvalRequired: true, idempotency: 'Query request key' }, hitl: { enabled: true, timing: 'before', response: { type: 'approval', allowedOutcomes: [{ id: 'approve', label: 'Approve query', resumeNodeId: 'sql-complete' }] } } }), end('sql-rejected', 'Request rejected', 450, 420), end('sql-complete', 'Query complete', 1180, 140),
+        start('sql-start', 40, 220), step('check-request', 'Check request policy', 'deterministic', 220, 220, { modifiers: { guardrail: true } }), step('shape-query', 'Shape analytical query', 'ai', 450, 220, { storeAccess: { read: { namespace: 'conversation', key: 'recent_messages' } } }), step('validate-query', 'Validate query', 'tool', 680, 220), step('run-query', 'Run approved query', 'tool', 930, 140, { sensitive: { target: 'Analytical database read', authorization: 'Data steward', approvalRequired: true, idempotency: 'Query request key' }, hitl: { enabled: true, timing: 'before', response: { type: 'approval', allowedOutcomes: [{ id: 'approve', label: 'Approve query', resumeNodeId: 'sql-complete' }] } } }), end('sql-rejected', 'Request rejected', 450, 420), end('sql-complete', 'Query complete', 1180, 140),
       ],
       [
         { id: 'sql-check', source: 'sql-start', target: 'check-request', mode: 'normal' }, { id: 'check-shape', source: 'check-request', target: 'shape-query', mode: 'conditional', label: 'permitted', condition: 'policy.permitted' }, { id: 'check-reject', source: 'check-request', target: 'sql-rejected', mode: 'conditional', label: 'reject', condition: 'policy.rejected' }, { id: 'shape-validate', source: 'shape-query', target: 'validate-query', mode: 'normal' }, { id: 'validate-run', source: 'validate-query', target: 'run-query', mode: 'conditional', label: 'valid', condition: 'query.valid' }, { id: 'validate-repair', source: 'validate-query', target: 'shape-query', mode: 'conditional', label: 'repair', condition: 'query.needsRepair', loopCap: 3 }, { id: 'run-complete', source: 'run-query', target: 'sql-complete', mode: 'normal' },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['query', 'attempts', 'approval', 'result'], summary: 'Per-run SQL request and result.' }, reducers: [{ key: 'attempts', summary: 'Accumulate generation attempts' }] },
+        checkpointer: { enabled: true, backend: 'MemorySaver', durableThread: { required: true, threadIdSource: 'request.threadId' } },
+        store: { available: true, namespace: 'conversation', retention: 'bounded in-process history' },
+      }),
     ),
   },
   {
@@ -226,17 +264,21 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'communications',
     complexity: 'advanced',
     concepts: ['command routing', 'subgraph', 'human review'],
-    source: source('langchain-ai', 'agents-from-scratch-ts', 'Preference-store behavior and runtime tool inventories are deferred; this graph keeps only schema-v5 control flow.'),
+    source: source('langchain-ai', 'agents-from-scratch-ts', 'Verified in-process preference Store access is represented; runtime tool inventories remain deferred.'),
     graph: graph(
       'library-email-triage-with-human-review',
       'Email Triage with Human Review',
       [
-        start('email-start', 40, 220), step('classify-message', 'Classify message', 'ai', 220, 220), step('notification-review', 'Review notification', 'human', 470, 350, { hitl: { enabled: true, timing: 'inside', response: { type: 'selection', selectionChoices: [{ id: 'respond', label: 'Respond' }, { id: 'dismiss', label: 'Dismiss' }], allowedOutcomes: [{ id: 'respond', label: 'Prepare response', resumeNodeId: 'enter-response-cell' }, { id: 'dismiss', label: 'Dismiss message', resumeNodeId: 'email-dismissed' }] } } }), step('enter-response-cell', 'Enter response assistant', 'deterministic', 470, 100), start('response-start', 650, 100, 'response-cell'), step('decide-response', 'Decide next response action', 'ai', 840, 100, { parentId: 'response-cell' }), step('review-response-action', 'Review response action', 'human', 1060, 100, { parentId: 'response-cell', hitl: { enabled: true, timing: 'inside', response: { type: 'text', allowedOutcomes: [{ id: 'continue', label: 'Continue response', resumeNodeId: 'decide-response' }] } } }), end('response-end', 'Response complete', 1280, 100, 'response-cell'), end('email-dismissed', 'Message dismissed', 760, 420), end('email-complete', 'Email handled', 1540, 220),
+        start('email-start', 40, 220), step('classify-message', 'Classify message', 'ai', 220, 220, { storeAccess: { read: { namespace: 'preferences', key: 'profile' } } }), step('notification-review', 'Review notification', 'human', 470, 350, { storeAccess: { write: { namespace: 'preferences', key: 'triage' } }, hitl: { enabled: true, timing: 'inside', response: { type: 'selection', selectionChoices: [{ id: 'respond', label: 'Respond' }, { id: 'dismiss', label: 'Dismiss' }], allowedOutcomes: [{ id: 'respond', label: 'Prepare response', resumeNodeId: 'enter-response-cell' }, { id: 'dismiss', label: 'Dismiss message', resumeNodeId: 'email-dismissed' }] } } }), step('enter-response-cell', 'Enter response assistant', 'deterministic', 470, 100), start('response-start', 650, 100, 'response-cell'), step('decide-response', 'Decide next response action', 'ai', 840, 100, { parentId: 'response-cell', storeAccess: { read: { namespace: 'preferences', key: 'profile' } } }), step('review-response-action', 'Review response action', 'human', 1060, 100, { parentId: 'response-cell', storeAccess: { write: { namespace: 'preferences', key: 'profile' } }, hitl: { enabled: true, timing: 'inside', response: { type: 'text', allowedOutcomes: [{ id: 'continue', label: 'Continue response', resumeNodeId: 'decide-response' }] } } }), end('response-end', 'Response complete', 1280, 100, 'response-cell'), end('email-dismissed', 'Message dismissed', 760, 420), end('email-complete', 'Email handled', 1540, 220),
       ],
       [
         { id: 'email-classify', source: 'email-start', target: 'classify-message', mode: 'normal' }, { id: 'classify-ignore', source: 'classify-message', target: 'email-dismissed', mode: 'command', label: 'ignore', condition: 'triage.ignore' }, { id: 'classify-notify', source: 'classify-message', target: 'notification-review', mode: 'command', label: 'notify', condition: 'triage.notify' }, { id: 'classify-respond', source: 'classify-message', target: 'enter-response-cell', mode: 'command', label: 'respond', condition: 'triage.respond' }, { id: 'notification-response', source: 'notification-review', target: 'enter-response-cell', mode: 'conditional', label: 'respond', condition: 'review.respond' }, { id: 'notification-dismiss', source: 'notification-review', target: 'email-dismissed', mode: 'conditional', label: 'dismiss', condition: 'review.dismiss' }, { id: 'enter-response', source: 'enter-response-cell', target: 'response-start', mode: 'normal' }, { id: 'response-decide', source: 'response-start', target: 'decide-response', mode: 'normal' }, { id: 'decide-review', source: 'decide-response', target: 'review-response-action', mode: 'conditional', label: 'review action', condition: 'response.needsReview' }, { id: 'decide-finish', source: 'decide-response', target: 'response-end', mode: 'conditional', label: 'finish', condition: 'response.complete' }, { id: 'review-decide', source: 'review-response-action', target: 'decide-response', mode: 'normal', loopCap: 2 }, { id: 'response-exit', source: 'response-end', target: 'email-complete', mode: 'normal' },
       ],
       [{ id: 'response-cell', label: 'Response assistant', position: { x: 420, y: 40 }, dimensions: { width: 790, height: 220 }, collapsed: false }],
+      durability({
+        state: { enabled: true, schema: { fields: ['email', 'messages', 'classification'], summary: 'Per-run email and response context.' }, reducers: [{ key: 'messages', summary: 'Append conversation messages' }] },
+        store: { available: true, namespace: 'preferences', retention: 'running graph instance' },
+      }),
     ),
   },
   {
@@ -256,6 +298,11 @@ const definitions: readonly GraphLibraryDefinition[] = [
       [
         { id: 'incident-triage', source: 'incident-start', target: 'triage-alert', mode: 'normal' }, { id: 'triage-close', source: 'triage-alert', target: 'incident-auto-closed', mode: 'conditional', label: 'low impact', condition: 'triage.autoClose' }, { id: 'triage-research', source: 'triage-alert', target: 'research-incident', mode: 'conditional', label: 'investigate', condition: 'triage.requiresResearch' }, { id: 'research-draft', source: 'research-incident', target: 'draft-response', mode: 'normal' }, { id: 'draft-apply', source: 'draft-response', target: 'apply-response', mode: 'normal' }, { id: 'apply-complete', source: 'apply-response', target: 'incident-resolved', mode: 'normal' },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['alert', 'approval', 'action'], summary: 'Per-run incident and approval state.' }, reducers: [] },
+        checkpointer: { enabled: true, backend: 'RedisSaver with MemorySaver fallback', durableThread: { required: true, threadIdSource: 'run_id' } },
+      }),
     ),
   },
   {
@@ -265,7 +312,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'support',
     complexity: 'intermediate',
     concepts: ['specialist routing', 'safe/sensitive tools', 'handoff loop'],
-    source: source('ro-anderson', 'multi-agent-rag-customer-support', 'Checkpoint state, dialog-stack reducers, and concrete tool fallbacks are intentionally deferred.'),
+    source: source('ro-anderson', 'multi-agent-rag-customer-support', 'Verified MemorySaver and dialog-stack reducer scope are represented; concrete tool fallbacks remain deferred.'),
     graph: graph(
       'library-specialist-travel-support',
       'Specialist Travel Support',
@@ -275,6 +322,11 @@ const definitions: readonly GraphLibraryDefinition[] = [
       [
         { id: 'travel-triage', source: 'travel-start', target: 'travel-triage', mode: 'normal' }, { id: 'triage-account', source: 'travel-triage', target: 'answer-account-question', mode: 'conditional', label: 'account question', condition: 'request.account' }, { id: 'triage-change', source: 'travel-triage', target: 'plan-itinerary-change', mode: 'conditional', label: 'itinerary change', condition: 'request.change' }, { id: 'triage-complete', source: 'travel-triage', target: 'travel-complete', mode: 'conditional', label: 'complete', condition: 'request.complete' }, { id: 'account-triage', source: 'answer-account-question', target: 'travel-triage', mode: 'command', label: 'continue support', condition: 'support.needsFollowUp', loopCap: 2 }, { id: 'account-complete', source: 'answer-account-question', target: 'travel-complete', mode: 'command', label: 'answer delivered', condition: 'support.resolved' }, { id: 'plan-apply', source: 'plan-itinerary-change', target: 'apply-itinerary-change', mode: 'normal' }, { id: 'apply-complete', source: 'apply-itinerary-change', target: 'travel-complete', mode: 'normal' },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['messages', 'userInfo', 'dialogState'], summary: 'Per-run traveler and dialog state.' }, reducers: [{ key: 'dialogState', summary: 'Push and pop specialist context' }] },
+        checkpointer: { enabled: true, backend: 'MemorySaver', durableThread: { required: true, threadIdSource: 'configurable.thread_id' } },
+      }),
     ),
   },
   {
@@ -284,7 +336,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'voice support',
     complexity: 'advanced',
     concepts: ['command handoff', 'opaque agent', 'end of turn'],
-    source: source('langchain-ai', 'pipecat-langgraph-example', 'Generated agent internals, transcript reconstruction, and cross-turn persistence are intentionally omitted.'),
+    source: source('langchain-ai', 'pipecat-langgraph-example', 'Voice-mode transcript-derived state is represented as runtime metadata; generated agent internals remain omitted.'),
     graph: graph(
       'library-voice-specialist-handoffs',
       'Voice Specialist Handoffs',
@@ -294,6 +346,11 @@ const definitions: readonly GraphLibraryDefinition[] = [
       [
         { id: 'voice-triage', source: 'voice-start', target: 'voice-triage', mode: 'conditional', label: 'default owner', condition: 'owner.default' }, { id: 'voice-membership', source: 'voice-start', target: 'membership-specialist', mode: 'conditional', label: 'membership owner', condition: 'owner.membership' }, { id: 'voice-credit', source: 'voice-start', target: 'credit-specialist', mode: 'conditional', label: 'credit owner', condition: 'owner.credit' }, { id: 'voice-booking', source: 'voice-start', target: 'booking-specialist', mode: 'conditional', label: 'booking owner', condition: 'owner.booking' }, { id: 'triage-membership', source: 'voice-triage', target: 'membership-specialist', mode: 'command', label: 'handoff membership', condition: 'handoff.membership' }, { id: 'triage-credit', source: 'voice-triage', target: 'credit-specialist', mode: 'command', label: 'handoff credit', condition: 'handoff.credit' }, { id: 'triage-booking', source: 'voice-triage', target: 'booking-specialist', mode: 'command', label: 'handoff booking', condition: 'handoff.booking' }, { id: 'triage-end', source: 'voice-triage', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' }, { id: 'membership-triage', source: 'membership-specialist', target: 'voice-triage', mode: 'command', label: 'return to triage', condition: 'handoff.triage' }, { id: 'membership-end', source: 'membership-specialist', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' }, { id: 'credit-triage', source: 'credit-specialist', target: 'voice-triage', mode: 'command', label: 'return to triage', condition: 'handoff.triage' }, { id: 'credit-end', source: 'credit-specialist', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' }, { id: 'booking-triage', source: 'booking-specialist', target: 'voice-triage', mode: 'command', label: 'return to triage', condition: 'handoff.triage' }, { id: 'booking-end', source: 'booking-specialist', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['messages', 'activeAgent'], summary: 'Voice-mode transcript-derived conversation context.' }, reducers: [{ key: 'messages', summary: 'Append transcript messages' }] },
+        runtimeMode: { mode: 'voice', input: 'audio' },
+      }),
     ),
   },
   {
@@ -303,7 +360,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'research',
     complexity: 'advanced',
     concepts: ['send fan-out', 'merge', 'reflection loop'],
-    source: source('google-gemini', 'gemini-fullstack-langgraph-quickstart', 'Live web retrieval, state reducers, and runtime worker cardinality are intentionally deferred.'),
+    source: source('google-gemini', 'gemini-fullstack-langgraph-quickstart', 'Reducer-backed working state is represented as a capability; live web retrieval and runtime worker cardinality remain deferred.'),
     graph: graph(
       'library-parallel-research-with-reflection',
       'Parallel Research with Reflection',
@@ -313,6 +370,10 @@ const definitions: readonly GraphLibraryDefinition[] = [
       [
         { id: 'parallel-formulate', source: 'parallel-start', target: 'formulate-questions', mode: 'normal' }, { id: 'formulate-dispatch', source: 'formulate-questions', target: 'dispatch-questions', mode: 'normal' }, { id: 'questions-send', source: 'dispatch-questions', target: 'researcher-template', mode: 'send', send: { destinationTemplateId: 'researcher-template', multiplicity: 'dynamic', payloadLabel: 'research question', mergeNodeId: 'research-merge' } }, { id: 'researcher-merge', source: 'researcher-template', target: 'research-merge', mode: 'normal' }, { id: 'merge-synthesize', source: 'research-merge', target: 'synthesize-findings', mode: 'normal' }, { id: 'synthesize-reflect', source: 'synthesize-findings', target: 'reflect-on-answer', mode: 'normal' }, { id: 'reflect-complete', source: 'reflect-on-answer', target: 'research-answer-complete', mode: 'conditional', label: 'answer sufficient', condition: 'reflection.complete' }, { id: 'reflect-refine', source: 'reflect-on-answer', target: 'formulate-questions', mode: 'conditional', label: 'refine research', condition: 'reflection.refine', loopCap: 2 },
       ],
+      [],
+      durability({
+        state: { enabled: true, schema: { fields: ['searchQuery', 'webResearchResult', 'sourcesGathered', 'followUpQueries'], summary: 'Per-run research aggregate.' }, reducers: [{ key: 'webResearchResult', summary: 'Append research results' }, { key: 'sourcesGathered', summary: 'Append cited sources' }] },
+      }),
     ),
   },
 ];

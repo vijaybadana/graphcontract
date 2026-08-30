@@ -23,6 +23,45 @@ describe('graph library registry', () => {
     }
   });
 
+  it('declares source-backed durability without turning it into topology', () => {
+    const entry = (id: string) => graphLibraryEntries.find((candidate) => candidate.id === id)!.graph;
+
+    const deepResearch = entry('hierarchical-deep-research');
+    expect(deepResearch.capabilities).toMatchObject({
+      state: { enabled: true },
+      checkpointer: { enabled: false },
+      store: { available: false },
+    });
+
+    const social = entry('evidence-to-approved-social-content');
+    expect(social.capabilities.store).toMatchObject({ available: true, namespace: 'saved_data' });
+    expect(social.nodes.find((node) => node.id === 'draft-template')).toMatchObject({
+      storeAccess: { read: { namespace: 'saved_data' }, write: { namespace: 'saved_data' } },
+    });
+
+    const email = entry('email-triage-with-human-review');
+    expect(email.capabilities.store).toMatchObject({ available: true, namespace: 'preferences' });
+    expect(email.nodes.find((node) => node.id === 'classify-message')).toMatchObject({
+      storeAccess: { read: { key: 'profile' } },
+    });
+
+    const sql = entry('guarded-natural-language-to-sql');
+    expect(sql.capabilities.checkpointer).toMatchObject({
+      enabled: true,
+      backend: 'MemorySaver',
+      durableThread: { required: true },
+    });
+
+    const voice = entry('voice-specialist-handoffs');
+    expect(voice.capabilities).toMatchObject({
+      runtimeMode: { mode: 'voice', input: 'audio' },
+      checkpointer: { enabled: false },
+      store: { available: false },
+    });
+    expect(voice.edges.some((edge) => edge.loopCap !== undefined)).toBe(false);
+    expect(voice.nodes.some((node) => node.kind === 'step' && node.retry !== undefined)).toBe(false);
+  });
+
   it('rejects duplicate IDs, unsafe sources, and invalid graph inputs', () => {
     const duplicate = structuredClone(graphLibraryEntries[0]!);
     const unsafe = structuredClone(graphLibraryEntries[1]!);

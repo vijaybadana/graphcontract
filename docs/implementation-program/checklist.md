@@ -47,7 +47,7 @@
   Acceptance: Switching views never mutates the graph; frozen/proposal/selection states work; downloads retain dynamic annotations.
   Verify: Projection/DOM tests and real Chromium design/runtime/loop-cap journey.
 
-- [ ] **7. Implement State, Checkpoint and Store scope**
+- [x] **7. Implement State, Checkpoint and Store scope**
   Spec ref: `lead-handover.md > Package 4 — state, checkpoint and Store scope`
   What to build: Add graph/subgraph capability metadata, inheritance, header strip, inspector and Step Store R/W modifiers; distinguish retry policy from loop topology.
   Acceptance: State, Checkpoint and Store remain separate in schema and UI; inheritance and validation are deterministic.

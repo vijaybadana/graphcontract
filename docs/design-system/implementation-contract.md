@@ -165,6 +165,7 @@ These concepts must never collapse into a generic brain icon:
 - Working state: per-run data and reducers; graph/subgraph scope.
 - Checkpointer: durable thread and resume; graph/subgraph compile/runtime scope.
 - Long-term Store: cross-thread knowledge; graph capability plus Step read/write.
+- Runtime: graph-level text/voice operating mode; it is neither State nor a Checkpointer.
 
 Rules:
 
@@ -173,6 +174,9 @@ Rules:
 - Step rail shows only Store read/write when that Step directly accesses the Store.
 - Backend, namespace, thread ID, TTL, reducers and schema live in inspector.
 - Runtime mode is graph-level unless verified otherwise.
+- A missing supported subgraph override means inherited, not disabled. An override replaces only its own State, Checkpointer, or Store record.
+- Store availability is not a Step access claim. Direct access must name `storeAccess.read` and/or `storeAccess.write`, and is invalid when the effective Store is unavailable.
+- Retry/fallback is an internal Step policy. It is never a loop glyph or canvas return edge; only authored topology with a bounded loop cap is a loop.
 
 ## 7. Provenance and system boundaries
 

@@ -18,7 +18,7 @@ Create one typed, data-driven registry. A library entry must contain:
 - repository owner/name and canonical HTTPS URL;
 - the visible attribution `Inspired by <owner/repo>`;
 - the visible disclaimer `Normalized — no source code copied`;
-- a canonical schema-v4 `WorkflowGraph` factory or immutable fixture;
+- a canonical schema-v5 `WorkflowGraph` factory or immutable fixture;
 - deterministic scenario summary data derived through the ordinary scenario service;
 - compact topology-thumbnail data derived from the graph rather than a copied image.
 
@@ -41,7 +41,7 @@ Repository metadata is display-only, safely rendered as untrusted text. Only exp
 
 Use the evidence corpus at `/Users/vijaybadana/Documents/Codex/2026-08-27/what-are-some-interesting-opportunities-to-2/research/langgraph-evidence/`, especially `selection.md`, `owner-graphs.md`, `finance-sql.md`, `hitl-ops.md`, `product-graphs.md`, and `synthesis.md`. Evidence informs topology only. Do not copy source implementation.
 
-Where a repository demonstrates a deferred Package 4 or 5 concept, normalize only behavior that schema v4 can represent truthfully. Describe omitted/deferred concepts in the source note; never fabricate State, Store, opaque topology, spawned runs, external orchestration, live execution, or runtime evidence.
+Where a repository demonstrates a durability concept, normalize only verified schema-v5 State, Checkpointer, Store, runtime-mode, and direct Step Store access records. Describe omitted or unresolved behavior in the source note; never fabricate a checkpointer, Store access, opaque topology, spawned run, external orchestration, live execution, or runtime evidence.
 
 Existing built-in demos may become registry entries or provide validated graph foundations when their meaning matches. Remove duplicated demo buttons once every equivalent workflow is reachable from the library. Preserve current demo IDs and migrations when changing them would break saved-state compatibility.
 
@@ -63,7 +63,7 @@ Existing built-in demos may become registry entries or provide validated graph f
 
 Every graph must:
 
-- parse and validate under canonical schema v4;
+- parse and validate under canonical schema v5;
 - use original IDs, labels, positions, descriptions and deterministic data;
 - demonstrate a distinct topology/pattern supported by Packages 1–3;
 - preserve Start/End, routing, subgraph, Step, HITL, Send/Merge and loop invariants as applicable;
@@ -76,7 +76,7 @@ The registry must reject duplicate IDs, unsafe source URLs and invalid graphs in
 
 ## Explicit exclusions
 
-- No Package 4 State/Checkpoint/Store schema.
+- No Package 5 provenance/system-boundary schema or fabricated runtime evidence.
 - No full Package 5 provenance overlay, opaque topology, spawned-run or external-orchestration relationship.
 - No live GitHub import, repository parsing, authentication, API, stars, popularity ranking or network fetch.
 - No copied repository code/assets or claims that the normalized graph is the repository's exact runtime graph.
@@ -106,4 +106,3 @@ Use direct clean commits and owner acceptance. Do not initialize Gastown/lead-sc
 - Full Vitest, warning-free ESLint, production build and `git diff --check` pass.
 - Cold Chromium has zero skip/fixme/only and zero unexpected console warning/error/pageerror.
 - Working tree is clean and a manual library-review checklist is recorded.
-
