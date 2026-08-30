@@ -35,13 +35,13 @@
   Acceptance: Human-owned versus HITL is unambiguous; only human UI can respond/resume preview; WebMCP can propose but not exercise authority.
   Verify: Domain/WebMCP/scenario/DOM tests and real Chromium before/inside/after plus approval/change/reject preview.
 
-- [ ] **5. Add Send/map and Merge domain semantics**
+- [x] **5. Add Send/map and Merge domain semantics**
   Spec ref: `lead-handover.md > Package 3 — Send/map, merge/reducer and runtime projection`
   What to build: Add strict Send/map control semantics, first-class Merge junction, reducer/completion metadata and cycle-safe path behavior.
   Acceptance: Dynamic multiplicity is retained without fabricated workers; invalid fork/join structures fail with actionable errors.
   Verify: Domain, validation, migration, proposal and deterministic scenario tests.
 
-- [ ] **6. Build parallel design/runtime projections**
+- [x] **6. Build parallel design/runtime projections**
   Spec ref: `docs/design-system/implementation-contract.md > Dynamic parallelism and merge`
   What to build: Implement `Send ×N`, stacked worker template, Merge marker, inspector and read-only runtime-instance projection driven only by supplied trace/fixture evidence.
   Acceptance: Switching views never mutates the graph; frozen/proposal/selection states work; downloads retain dynamic annotations.
