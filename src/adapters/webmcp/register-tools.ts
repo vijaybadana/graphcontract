@@ -84,6 +84,53 @@ const runtimeModeCapabilitySchema = {
   additionalProperties: false,
 };
 
+const provenanceEvidenceSchema = {
+  type: 'object',
+  required: ['source', 'evidenceClass', 'confidence'],
+  properties: {
+    source: { type: 'string', minLength: 1 },
+    evidenceClass: { type: 'string', minLength: 1 },
+    confidence: { enum: ['low', 'medium', 'high'] },
+    details: { type: 'string' },
+    timestamp: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+
+const webMcpProvenanceSchema = {
+  description:
+    'WebMCP may declare direct, derived-semantic, or external-orchestration provenance. Derived-semantic claims require supplied evidence. Runtime-generated provenance is read-only here and must arrive through the separate runtime-evidence ingestion path.',
+  oneOf: [
+    {
+      type: 'object',
+      required: ['representation'],
+      properties: { representation: { const: 'declared' }, evidence: provenanceEvidenceSchema },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['representation', 'evidence'],
+      properties: { representation: { const: 'derived-semantic' }, evidence: provenanceEvidenceSchema },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['representation'],
+      properties: { representation: { const: 'external-orchestration' }, evidence: provenanceEvidenceSchema },
+      additionalProperties: false,
+    },
+  ],
+};
+
+const webMcpProvenanceCapabilitiesSchema = {
+  type: 'object',
+  description:
+    'Declares whether verified external orchestration is available. Evidence-overlay visibility is UI-only and is not a WebMCP control.',
+  required: ['externalOrchestrationAvailable'],
+  properties: { externalOrchestrationAvailable: { type: 'boolean' } },
+  additionalProperties: false,
+};
+
 const graphCapabilitiesPatchSchema = {
   type: 'object',
   description: 'Replaces supplied complete graph-level capability records. State, Checkpointer, Store, and runtime mode remain distinct.',
@@ -92,6 +139,7 @@ const graphCapabilitiesPatchSchema = {
     checkpointer: checkpointerCapabilitySchema,
     store: longTermStoreCapabilitySchema,
     runtimeMode: runtimeModeCapabilitySchema,
+    provenance: webMcpProvenanceCapabilitiesSchema,
   },
   additionalProperties: false,
 };
@@ -219,6 +267,54 @@ const stepModifierSchema = {
   additionalProperties: false,
 };
 
+const stepReadinessSchema = {
+  type: 'object',
+  required: ['state'],
+  properties: {
+    state: { enum: ['ready', 'degraded', 'unimplemented'] },
+    detail: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+
+const opaqueInterfacePortSchema = {
+  type: 'object',
+  required: ['name'],
+  properties: { name: { type: 'string', minLength: 1 }, description: { type: 'string' } },
+  additionalProperties: false,
+};
+
+const opaqueStepMetadataSchema = {
+  type: 'object',
+  description:
+    'Declared prebuilt-Step boundary only. Runtime inspection is unavailable through WebMCP; this tool cannot fabricate runtime evidence or internal topology.',
+  required: ['factoryLabel', 'inputPorts', 'outputPorts', 'runtimeInspection'],
+  properties: {
+    factoryLabel: { type: 'string', minLength: 1 },
+    inputPorts: { type: 'array', items: opaqueInterfacePortSchema },
+    outputPorts: { type: 'array', items: opaqueInterfacePortSchema },
+    runtimeInspection: {
+      type: 'object',
+      required: ['available'],
+      properties: { available: { const: false } },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const endOutcomeSchema = {
+  type: 'object',
+  required: ['kind'],
+  properties: {
+    kind: {
+      enum: ['completed', 'awaiting-reply', 'failure', 'partial-result', 'cancelled', 'domain-specific'],
+    },
+    detail: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+
 const stepStoreAccessSchema = {
   type: 'object',
   description: 'Direct Step Store access. It is valid only when Store is available in the Step’s effective graph or subgraph scope.',
@@ -326,6 +422,7 @@ const nodeBaseProperties = {
   description: { type: 'string' },
   position: positionSchema,
   config: { type: 'object' },
+  provenance: webMcpProvenanceSchema,
 };
 
 const stepProperties = {
@@ -336,6 +433,8 @@ const stepProperties = {
   modifiers: stepModifierSchema,
   storeAccess: stepStoreAccessSchema,
   retry: retryPolicySchema,
+  readiness: stepReadinessSchema,
+  opaque: opaqueStepMetadataSchema,
 };
 
 const nodePatchSchema = {
@@ -345,6 +444,10 @@ const nodePatchSchema = {
     ...stepProperties,
     storeAccess: { anyOf: [stepStoreAccessSchema, { type: 'null' }] },
     retry: { anyOf: [retryPolicySchema, { type: 'null' }] },
+    readiness: stepReadinessSchema,
+    opaque: { anyOf: [opaqueStepMetadataSchema, { type: 'null' }] },
+    outcome: endOutcomeSchema,
+    provenance: webMcpProvenanceSchema,
     merge: mergeConfigSchema,
     sensitive: {
       anyOf: [sensitiveEffectPolicySchema, { type: 'null' }],
@@ -403,6 +506,7 @@ const addNodeSchema = {
         kind: { const: 'end' },
         ...nodeBaseProperties,
         parentId: { type: 'string' },
+        outcome: endOutcomeSchema,
       },
       additionalProperties: false,
     },
@@ -431,6 +535,7 @@ const nonSendEdgeSchema = {
     label: { type: 'string' },
     condition: { type: 'string' },
     loopCap: { type: 'integer', minimum: 1, maximum: 10 },
+    provenance: webMcpProvenanceSchema,
   },
   additionalProperties: false,
 };
@@ -446,6 +551,7 @@ const sendEdgeSchema = {
     label: { type: 'string' },
     loopCap: { type: 'integer', minimum: 1, maximum: 10 },
     send: sendMapConfigSchema,
+    provenance: webMcpProvenanceSchema,
   },
   additionalProperties: false,
 };
@@ -461,6 +567,7 @@ const nonSendEdgePatchSchema = {
     label: { type: 'string' },
     condition: { type: 'string' },
     loopCap: { type: 'integer', minimum: 1, maximum: 10 },
+    provenance: webMcpProvenanceSchema,
   },
   additionalProperties: false,
 };
@@ -475,11 +582,61 @@ const sendEdgePatchSchema = {
     label: { type: 'string' },
     loopCap: { type: 'integer', minimum: 1, maximum: 10 },
     send: sendMapConfigSchema,
+    provenance: webMcpProvenanceSchema,
   },
   additionalProperties: false,
 };
 
 const edgePatchSchema = { oneOf: [nonSendEdgePatchSchema, sendEdgePatchSchema] };
+
+const relationshipEndpointSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      required: ['kind', 'nodeId'],
+      properties: { kind: { const: 'node' }, nodeId: { type: 'string', minLength: 1 } },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['kind', 'externalId', 'label'],
+      properties: {
+        kind: { const: 'external' },
+        externalId: { type: 'string', minLength: 1 },
+        label: { type: 'string', minLength: 1 },
+      },
+      additionalProperties: false,
+    },
+  ],
+};
+
+const nonNativeRelationshipSchema = {
+  type: 'object',
+  description:
+    'A non-native boundary relationship, never a control-flow edge. Ordinary scenario paths enumerate native edges only.',
+  required: ['id', 'kind', 'source', 'target', 'provenance'],
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    kind: { enum: ['spawned-run', 'spawned-thread', 'external-orchestration'] },
+    source: relationshipEndpointSchema,
+    target: relationshipEndpointSchema,
+    label: { type: 'string' },
+    provenance: webMcpProvenanceSchema,
+  },
+  additionalProperties: false,
+};
+
+const nonNativeRelationshipPatchSchema = {
+  type: 'object',
+  properties: {
+    kind: { enum: ['spawned-run', 'spawned-thread', 'external-orchestration'] },
+    source: relationshipEndpointSchema,
+    target: relationshipEndpointSchema,
+    label: { type: 'string' },
+    provenance: webMcpProvenanceSchema,
+  },
+  additionalProperties: false,
+};
 
 const operationSchema = {
   oneOf: [
@@ -490,21 +647,25 @@ const operationSchema = {
         type: { const: 'add_node' },
         node: addNodeSchema,
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
       required: ['type', 'nodeId', 'patch'],
       properties: { type: { const: 'update_node' }, nodeId: { type: 'string' }, patch: nodePatchSchema },
+      additionalProperties: false,
     },
     {
       type: 'object',
       required: ['type', 'nodeId'],
       properties: { type: { const: 'remove_node' }, nodeId: { type: 'string' } },
+      additionalProperties: false,
     },
     {
       type: 'object',
       required: ['type', 'subgraph'],
       properties: { type: { const: 'add_subgraph' }, subgraph: subgraphSchema },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -514,6 +675,7 @@ const operationSchema = {
         subgraphId: { type: 'string' },
         patch: subgraphPatchSchema,
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -522,6 +684,7 @@ const operationSchema = {
         type: { const: 'update_graph_capabilities' },
         patch: graphCapabilitiesPatchSchema,
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -531,6 +694,7 @@ const operationSchema = {
         subgraphId: { type: 'string' },
         override: singleSubgraphCapabilityOverrideSchema,
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -540,6 +704,7 @@ const operationSchema = {
         subgraphId: { type: 'string' },
         capability: { enum: ['state', 'checkpointer', 'store'] },
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -549,6 +714,7 @@ const operationSchema = {
         subgraphId: { type: 'string' },
         nodeIds: { type: 'array', minItems: 1, items: { type: 'string' } },
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -557,11 +723,13 @@ const operationSchema = {
         type: { const: 'remove_nodes_from_subgraph' },
         nodeIds: { type: 'array', minItems: 1, items: { type: 'string' } },
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
       required: ['type', 'subgraphId'],
       properties: { type: { const: 'dissolve_subgraph' }, subgraphId: { type: 'string' } },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -570,6 +738,7 @@ const operationSchema = {
         type: { const: 'add_edge' },
         edge: edgeSchema,
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
@@ -579,14 +748,120 @@ const operationSchema = {
         edgeId: { type: 'string' },
         patch: edgePatchSchema,
       },
+      additionalProperties: false,
     },
     {
       type: 'object',
       required: ['type', 'edgeId'],
       properties: { type: { const: 'remove_edge' }, edgeId: { type: 'string' } },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['type', 'relationship'],
+      properties: { type: { const: 'add_relationship' }, relationship: nonNativeRelationshipSchema },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['type', 'relationshipId', 'patch'],
+      properties: {
+        type: { const: 'update_relationship' },
+        relationshipId: { type: 'string', minLength: 1 },
+        patch: nonNativeRelationshipPatchSchema,
+      },
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      required: ['type', 'relationshipId'],
+      properties: { type: { const: 'remove_relationship' }, relationshipId: { type: 'string', minLength: 1 } },
+      additionalProperties: false,
     },
   ],
 };
+
+type AuthorityIssue = { code: string; message: string; path: string };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+function validateWebMcpAuthority(input: unknown): AuthorityIssue[] {
+  if (!isRecord(input) || !Array.isArray(input.operations)) return [];
+
+  const issues: AuthorityIssue[] = [];
+  const rejectRuntimeProvenance = (value: unknown, path: string) => {
+    if (isRecord(value) && value.representation === 'runtime-generated') {
+      issues.push({
+        code: 'WEBMCP_RUNTIME_PROVENANCE_UNSUPPORTED',
+        message: 'Runtime-generated provenance must be supplied by the separate runtime-evidence ingestion path, not WebMCP.',
+        path,
+      });
+    }
+  };
+  const rejectRuntimeInspection = (value: unknown, path: string) => {
+    if (isRecord(value) && isRecord(value.runtimeInspection) && value.runtimeInspection.available === true) {
+      issues.push({
+        code: 'WEBMCP_RUNTIME_INSPECTION_UNSUPPORTED',
+        message: 'WebMCP cannot claim that runtime inspection is available; runtime evidence must be ingested separately.',
+        path: `${path}.runtimeInspection.available`,
+      });
+    }
+  };
+
+  for (const [index, operation] of input.operations.entries()) {
+    if (!isRecord(operation)) continue;
+    const path = `operations.${index}`;
+    if (operation.type === 'add_node' && isRecord(operation.node)) {
+      rejectRuntimeProvenance(operation.node.provenance, `${path}.node.provenance.representation`);
+      rejectRuntimeInspection(operation.node.opaque, `${path}.node.opaque`);
+    }
+    if (operation.type === 'update_node' && isRecord(operation.patch)) {
+      rejectRuntimeProvenance(operation.patch.provenance, `${path}.patch.provenance.representation`);
+      rejectRuntimeInspection(operation.patch.opaque, `${path}.patch.opaque`);
+    }
+    if (operation.type === 'add_edge' && isRecord(operation.edge)) {
+      rejectRuntimeProvenance(operation.edge.provenance, `${path}.edge.provenance.representation`);
+    }
+    if (operation.type === 'update_edge' && isRecord(operation.patch)) {
+      rejectRuntimeProvenance(operation.patch.provenance, `${path}.patch.provenance.representation`);
+    }
+    if (operation.type === 'add_relationship' && isRecord(operation.relationship)) {
+      rejectRuntimeProvenance(operation.relationship.provenance, `${path}.relationship.provenance.representation`);
+    }
+    if (operation.type === 'update_relationship' && isRecord(operation.patch)) {
+      rejectRuntimeProvenance(operation.patch.provenance, `${path}.patch.provenance.representation`);
+    }
+    if (operation.type === 'update_graph_capabilities' && isRecord(operation.patch) && isRecord(operation.patch.provenance) && 'evidenceOverlayAvailable' in operation.patch.provenance) {
+      issues.push({
+        code: 'WEBMCP_EVIDENCE_OVERLAY_CONTROL_UNSUPPORTED',
+        message: 'Evidence-overlay visibility is UI-only and cannot be controlled through WebMCP.',
+        path: `${path}.patch.provenance.evidenceOverlayAvailable`,
+      });
+    }
+  }
+  return issues;
+}
+
+function preserveGraphProvenanceCapability(input: unknown, graph: WorkflowGraph): unknown {
+  if (!isRecord(input) || !Array.isArray(input.operations)) return input;
+  const operations = input.operations.map((operation) => {
+    if (!isRecord(operation) || operation.type !== 'update_graph_capabilities' || !isRecord(operation.patch) || !isRecord(operation.patch.provenance)) {
+      return operation;
+    }
+    return {
+      ...operation,
+      patch: {
+        ...operation.patch,
+        provenance: {
+          evidenceOverlayAvailable: graph.capabilities.provenance.evidenceOverlayAvailable,
+          externalOrchestrationAvailable: operation.patch.provenance.externalOrchestrationAvailable,
+        },
+      },
+    };
+  });
+  return { ...input, operations };
+}
 
 export async function registerWebMcpTools(
   modelContext: ModelContext,
@@ -599,7 +874,7 @@ export async function registerWebMcpTools(
         name: 'get_graph',
         title: 'Read the accepted workflow graph',
         description:
-          'Returns the accepted GraphContract graph and validation state. Proposed changes are reported separately and never treated as accepted.',
+          'Returns the accepted schema-v6 GraphContract graph, including provenance, Step readiness/opaque metadata, End outcomes, and a separate non-native relationships collection. Proposed changes are reported separately and never treated as accepted.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false },
         execute: async () => {
@@ -629,7 +904,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. State, Checkpointer, Store, and runtime-mode records are distinct graph capabilities; set or remove one supported subgraph override at a time, and declare direct Step Store read/write only where Store is available in effective scope. Retry is an internal Step policy, never a topology loop or runtime authority. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, mutate runtime projections, or directly modify accepted state.',
+          'Creates a review-only schema-v6 proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. State, Checkpointer, Store, runtime mode, and external-orchestration capability records are distinct. Native control paths are only normal, conditional, command, fallback, and Send edges; spawned-run, spawned-thread, and external-orchestration relationships are separate non-native boundary records, so ordinary scenarios enumerate native paths only. WebMCP may author declared, derived-semantic (with explicit evidence), and external-orchestration provenance, but it cannot fabricate runtime-generated provenance or runtime inspection availability. Opaque Steps expose only their declared factory and interface. Retry is an internal Step policy, never a topology loop or runtime authority. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, unfreeze, inspect runtime, toggle evidence overlay, mutate runtime projections, or directly modify accepted state.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],
@@ -641,7 +916,21 @@ export async function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, destructiveHint: false },
-        execute: async (input) => port.submitProposal(input),
+        execute: async (input) => {
+          const authorityIssues = validateWebMcpAuthority(input);
+          if (authorityIssues.length > 0) {
+            return {
+              ok: false,
+              error: {
+                code: 'WEBMCP_RUNTIME_AUTHORITY_REJECTED',
+                message:
+                  'WebMCP cannot create runtime evidence, runtime inspection availability, or evidence-overlay controls.',
+                issues: authorityIssues,
+              },
+            };
+          }
+          return port.submitProposal(preserveGraphProvenanceCapability(input, port.getSnapshot().graph));
+        },
       },
       { signal },
     ),
@@ -650,7 +939,7 @@ export async function registerWebMcpTools(
         name: 'get_branch_scenarios',
         title: 'Read frozen graph branch scenarios',
         description:
-          'Returns every reachable Start-to-End scenario. The human must freeze a valid graph in the UI first.',
+          'Returns every reachable native-control Start-to-End scenario. Non-native spawned and external relationships remain separate annotations. The human must freeze a valid graph in the UI first.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false },
         execute: async () => {

@@ -93,6 +93,8 @@ describe('WebMCP adapter', () => {
     const updateNode = variants.find((variant) => variant.properties?.type?.const === 'update_node');
     const addEdge = variants.find((variant) => variant.properties?.type?.const === 'add_edge');
     const updateEdge = variants.find((variant) => variant.properties?.type?.const === 'update_edge');
+    const addRelationship = variants.find((variant) => variant.properties?.type?.const === 'add_relationship');
+    const updateRelationship = variants.find((variant) => variant.properties?.type?.const === 'update_relationship');
     const addNodeVariants = addNode?.properties?.node?.oneOf ?? [];
     const nodeKind = (variant: JsonSchema) => variant.properties?.kind?.const;
     const startNode = addNodeVariants.find((variant) => nodeKind(variant) === 'start');
@@ -117,7 +119,11 @@ describe('WebMCP adapter', () => {
       'update_graph_capabilities',
       'set_subgraph_capability_override',
       'remove_subgraph_capability_override',
+      'add_relationship',
+      'update_relationship',
+      'remove_relationship',
     ]));
+    expect(variants.every((variant) => variant.additionalProperties === false)).toBe(true);
     expect(addNodeVariants).toHaveLength(4);
     expect([nodeKind(startNode!), nodeKind(stepNode!), nodeKind(mergeNode!), nodeKind(endNode!)]).toEqual([
       'start',
@@ -138,6 +144,11 @@ describe('WebMCP adapter', () => {
           opaque: { const: true },
           readiness: { enum: ['degraded', 'unimplemented'] },
         },
+      },
+      provenance: {
+        oneOf: expect.arrayContaining([
+          expect.objectContaining({ required: ['representation', 'evidence'] }),
+        ]),
       },
     });
     expect(stepNode?.properties?.hitl?.properties).toMatchObject({
@@ -191,6 +202,10 @@ describe('WebMCP adapter', () => {
       merge: expect.any(Object),
       storeAccess: expect.any(Object),
       retry: expect.any(Object),
+      readiness: { required: ['state'], properties: { state: { enum: ['ready', 'degraded', 'unimplemented'] } } },
+      opaque: expect.any(Object),
+      outcome: expect.any(Object),
+      provenance: expect.any(Object),
     });
     expect(updateNode?.properties?.patch?.description).toContain('Merge-only');
     expect(proposalTool.description).toContain('Start, Step, Merge, or End');
@@ -220,6 +235,29 @@ describe('WebMCP adapter', () => {
           multiplicity: { const: 'dynamic' },
         },
       },
+    });
+    expect(addEdge?.properties?.edge?.oneOf?.every((variant) =>
+      variant.properties?.provenance !== undefined && variant.additionalProperties === false,
+    )).toBe(true);
+    expect(updateEdge?.properties?.patch?.oneOf?.every((variant) =>
+      variant.properties?.provenance !== undefined && variant.additionalProperties === false,
+    )).toBe(true);
+    expect(addRelationship?.additionalProperties).toBe(false);
+    expect(addRelationship?.properties?.relationship).toMatchObject({
+      required: ['id', 'kind', 'source', 'target', 'provenance'],
+      properties: {
+        kind: { enum: ['spawned-run', 'spawned-thread', 'external-orchestration'] },
+        provenance: expect.any(Object),
+      },
+      additionalProperties: false,
+    });
+    expect(updateRelationship?.properties?.patch?.additionalProperties).toBe(false);
+    expect(proposalSchema.properties?.operations?.items?.oneOf).toHaveLength(17);
+    expect((variants.find((variant) => variant.properties?.type?.const === 'update_graph_capabilities')
+      ?.properties?.patch?.properties?.provenance)).toMatchObject({
+      required: ['externalOrchestrationAvailable'],
+      properties: { externalOrchestrationAvailable: { type: 'boolean' } },
+      additionalProperties: false,
     });
     expect(sendEdgePatch?.required).toEqual(['mode', 'send']);
     expect(nonSendEdgePatch?.properties?.mode?.enum).toEqual([
@@ -835,5 +873,189 @@ describe('WebMCP adapter', () => {
     expect(first).toMatchObject({ ok: true, proposal: { status: 'pending' } });
     expect(pending).toMatchObject({ ok: false, error: { code: 'PENDING_PROPOSAL_EXISTS' } });
     expect([...registered.keys()]).toEqual(['get_graph', 'propose_graph_changes', 'get_branch_scenarios']);
+  });
+
+  it('keeps schema-v6 provenance, opaque boundaries, outcomes, and non-native relationships review-only', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-31T16:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+
+    await registerWebMcpTools(
+      { registerTool: async (tool: RegisteredTool) => { registered.set(tool.name, tool); } } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const acceptedBefore = structuredClone(state.graph);
+    const response = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Record declared boundaries and a verified external orchestration candidate for human review.',
+      expectedGraphUpdatedAt: acceptedBefore.updatedAt,
+      operations: [
+        {
+          type: 'update_graph_capabilities',
+          patch: { provenance: { externalOrchestrationAvailable: true } },
+        },
+        {
+          type: 'update_node',
+          nodeId: 'classifier',
+          patch: {
+            provenance: { representation: 'declared' },
+            readiness: { state: 'degraded', detail: 'Falls back to deterministic classification.' },
+            opaque: {
+              factoryLabel: 'create_support_classifier',
+              inputPorts: [{ name: 'request' }],
+              outputPorts: [{ name: 'route' }],
+              runtimeInspection: { available: false },
+            },
+          },
+        },
+        {
+          type: 'update_node',
+          nodeId: 'end',
+          patch: { outcome: { kind: 'completed' } },
+        },
+        {
+          type: 'update_edge',
+          edgeId: 'start-classifier',
+          patch: {
+            provenance: {
+              representation: 'derived-semantic',
+              evidence: {
+                source: 'docs/support-routing.md',
+                evidenceClass: 'reviewed-design',
+                confidence: 'high',
+              },
+            },
+          },
+        },
+        {
+          type: 'add_relationship',
+          relationship: {
+            id: 'classifier-external-dispatch',
+            kind: 'external-orchestration',
+            source: { kind: 'node', nodeId: 'classifier' },
+            target: { kind: 'external', externalId: 'dispatch-system', label: 'Dispatch system' },
+            provenance: {
+              representation: 'external-orchestration',
+              evidence: {
+                source: 'https://example.test/dispatch-contract',
+                evidenceClass: 'external-contract',
+                confidence: 'medium',
+              },
+            },
+          },
+        },
+        {
+          type: 'update_relationship',
+          relationshipId: 'classifier-external-dispatch',
+          patch: { label: 'Dispatches reviewed classification' },
+        },
+        { type: 'remove_relationship', relationshipId: 'classifier-external-dispatch' },
+      ],
+    });
+
+    expect(response).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(state.graph).toEqual(acceptedBefore);
+    const read = await registered.get('get_graph')!.execute({}) as {
+      graph: typeof state.graph;
+      pendingProposal: { operations: unknown[]; diff: Record<string, string[]> };
+    };
+    expect(read.graph).toMatchObject({ schemaVersion: '6', relationships: [] });
+    expect(read.pendingProposal.operations).toHaveLength(7);
+    expect(read.pendingProposal.diff).toMatchObject({
+      addedRelationshipIds: ['classifier-external-dispatch'],
+      updatedRelationshipIds: ['classifier-external-dispatch'],
+      removedRelationshipIds: ['classifier-external-dispatch'],
+      changedReadinessNodeIds: ['classifier'],
+      changedOpaqueNodeIds: ['classifier'],
+      changedEndOutcomeNodeIds: ['end'],
+    });
+    expect(read.pendingProposal.diff.changedProvenancePaths).toEqual(expect.arrayContaining([
+      'capabilities.provenance',
+      'nodes.classifier.provenance',
+      'edges.start-classifier.provenance',
+      'relationships.classifier-external-dispatch.provenance',
+    ]));
+
+    state = service.rejectProposal(state).state;
+    const missingEvidence = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Try a derived claim without evidence.',
+      operations: [{
+        type: 'update_node', nodeId: 'classifier',
+        patch: { provenance: { representation: 'derived-semantic' } },
+      }],
+    });
+    expect(missingEvidence).toMatchObject({
+      ok: true,
+      proposal: { status: 'invalid', validationErrors: expect.arrayContaining([
+        expect.objectContaining({ code: 'PROVENANCE_EVIDENCE_REQUIRED' }),
+      ]) },
+    });
+    expect(state.graph).toEqual(acceptedBefore);
+
+    state = service.rejectProposal(state).state;
+    const missingExternalCapability = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Try an external relationship without its graph capability.',
+      operations: [{
+        type: 'add_relationship',
+        relationship: {
+          id: 'missing-external-capability',
+          kind: 'external-orchestration',
+          source: { kind: 'node', nodeId: 'classifier' },
+          target: { kind: 'external', externalId: 'dispatch', label: 'Dispatch' },
+          provenance: { representation: 'declared' },
+        },
+      }],
+    });
+    expect(missingExternalCapability).toMatchObject({
+      ok: true,
+      proposal: { status: 'invalid', validationErrors: expect.arrayContaining([
+        expect.objectContaining({ code: 'EXTERNAL_RELATIONSHIP_PROVENANCE_REQUIRED' }),
+        expect.objectContaining({ code: 'EXTERNAL_ORCHESTRATION_CAPABILITY_REQUIRED' }),
+      ]) },
+    });
+    expect(state.graph).toEqual(acceptedBefore);
+
+    state = service.rejectProposal(state).state;
+    const runtimeClaim = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Try to fabricate runtime provenance through WebMCP.',
+      operations: [{
+        type: 'update_node', nodeId: 'classifier',
+        patch: {
+          provenance: {
+            representation: 'runtime-generated',
+            evidence: { source: 'claimed trace', evidenceClass: 'runtime', confidence: 'high' },
+          },
+          opaque: {
+            factoryLabel: 'claimed_factory', inputPorts: [], outputPorts: [],
+            runtimeInspection: {
+              available: true,
+              evidence: { source: 'claimed trace', evidenceClass: 'runtime', confidence: 'high' },
+            },
+          },
+        },
+      }],
+    });
+    expect(runtimeClaim).toMatchObject({
+      ok: false,
+      error: {
+        code: 'WEBMCP_RUNTIME_AUTHORITY_REJECTED',
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: 'WEBMCP_RUNTIME_PROVENANCE_UNSUPPORTED' }),
+          expect.objectContaining({ code: 'WEBMCP_RUNTIME_INSPECTION_UNSUPPORTED' }),
+        ]),
+      },
+    });
+    expect(state.graph).toEqual(acceptedBefore);
   });
 });
