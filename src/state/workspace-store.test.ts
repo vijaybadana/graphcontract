@@ -296,6 +296,66 @@ describe('workspace subgraph actions', () => {
 });
 
 describe('workspace persistence reload', () => {
+  it('keeps canonical F3 opaque, readiness, End, and provenance edits through undo/redo and persists no UI-only state', async () => {
+    const evidence = {
+      source: 'runtime/opaque-inspection.json',
+      evidenceClass: 'operator-observed',
+      confidence: 'high' as const,
+    };
+    useGraphStore.getState().updateGraphCapabilities({
+      provenance: { evidenceOverlayAvailable: true, externalOrchestrationAvailable: true },
+    });
+    useGraphStore.getState().updateNode('classifier', {
+      provenance: { representation: 'runtime-generated', evidence },
+      readiness: { state: 'degraded', detail: 'Inspection endpoint is rate limited.' },
+      opaque: {
+        factoryLabel: 'ClassifierFactory',
+        inputPorts: [{ name: 'request' }],
+        outputPorts: [{ name: 'classification' }],
+        runtimeInspection: { available: true, evidence },
+      },
+    });
+    useGraphStore.getState().updateNode('end', {
+      provenance: { representation: 'derived-semantic', evidence },
+      outcome: { kind: 'partial-result', detail: 'Downstream reconciliation remains pending.' },
+    });
+    const canonicalGraph = structuredClone(useGraphStore.getState().graph);
+
+    useGraphStore.getState().undo();
+    useGraphStore.getState().undo();
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.capabilities.provenance.externalOrchestrationAvailable).toBe(false);
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('opaque');
+
+    useGraphStore.getState().redo();
+    useGraphStore.getState().redo();
+    useGraphStore.getState().redo();
+    expect(useGraphStore.getState().graph).toEqual(canonicalGraph);
+
+    useGraphStore.setState({
+      runtimeProjectionFixture: {
+        graphId: canonicalGraph.id,
+        graphUpdatedAt: canonicalGraph.updatedAt,
+        instances: [],
+      },
+      clipboardNodeIds: ['classifier'],
+      selection: {
+        nodeIds: ['classifier'],
+        subgraphIds: [],
+        edgeIds: [],
+        primary: { type: 'node', id: 'classifier' },
+      },
+    });
+    const serialized = JSON.parse(persisted.get('graphcontract-workspace-v1')!);
+    expect(serialized.state).toEqual({ graph: canonicalGraph, proposal: null, scenarios: [] });
+    expect(serialized.state).not.toHaveProperty('selection');
+    expect(serialized.state).not.toHaveProperty('runtimeProjectionFixture');
+    expect(serialized.state).not.toHaveProperty('clipboardNodeIds');
+
+    await useGraphStore.persist.rehydrate();
+    expect(useGraphStore.getState().graph).toEqual(canonicalGraph);
+  });
+
   it('keeps canonical Step fields through copy/paste, undo/redo, and persisted rehydration', async () => {
     useGraphStore.getState().addNode('agent', { x: 900, y: 120 });
     const originalId = useGraphStore.getState().selection.primary!.id;

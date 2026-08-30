@@ -333,6 +333,148 @@ describe('workspace persistence migration', () => {
     });
   });
 
+  it('rehydrates active v6 relationships, provenance, opaque boundaries, readiness, and End outcome exactly', () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    const end = graph.nodes.find((node) => node.id === 'end');
+    if (!classifier || classifier.kind !== 'step' || !end || end.kind !== 'end') {
+      throw new Error('Expected the v6 fixture nodes.');
+    }
+
+    const evidence = {
+      source: 'runtime/contract-observation.json',
+      evidenceClass: 'observed-contract',
+      confidence: 'high' as const,
+      details: 'Captured from the configured runtime.',
+      timestamp: '2026-08-28T12:00:00.000Z',
+    };
+    graph.capabilities.provenance = {
+      evidenceOverlayAvailable: true,
+      externalOrchestrationAvailable: true,
+    };
+    classifier.provenance = { representation: 'runtime-generated', evidence };
+    classifier.readiness = { state: 'degraded', detail: 'The fallback provider is warming.' };
+    classifier.opaque = {
+      factoryLabel: 'SupportClassifierFactory',
+      inputPorts: [{ name: 'request', description: 'Inbound support request.' }],
+      outputPorts: [{ name: 'classification', description: 'Selected support route.' }],
+      runtimeInspection: { available: true, evidence },
+    };
+    end.outcome = { kind: 'domain-specific', detail: 'Ticket routed to a specialist queue.' };
+    graph.relationships = [
+      {
+        id: 'classifier-spawns-triage',
+        kind: 'external-orchestration',
+        source: { kind: 'node', nodeId: 'classifier' },
+        target: { kind: 'external', externalId: 'triage-runner', label: 'Triage runner' },
+        label: 'spawns triage run',
+        provenance: { representation: 'external-orchestration', evidence },
+      },
+      {
+        id: 'triage-returns-classifier',
+        kind: 'external-orchestration',
+        source: { kind: 'external', externalId: 'triage-runner', label: 'Triage runner' },
+        target: { kind: 'node', nodeId: 'classifier' },
+        label: 'returns triage result',
+        provenance: { representation: 'external-orchestration', evidence },
+      },
+    ];
+
+    const migrated = migrateWorkspaceV6(
+      { graph, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph).toMatchObject({
+      schemaVersion: '6',
+      capabilities: { provenance: graph.capabilities.provenance },
+      relationships: graph.relationships,
+    });
+    expect(migrated.graph?.nodes.find((node) => node.id === 'classifier')).toMatchObject({
+      provenance: { representation: 'runtime-generated', evidence },
+      readiness: classifier.readiness,
+      opaque: classifier.opaque,
+    });
+    expect(migrated.graph?.nodes.find((node) => node.id === 'end')).toMatchObject({
+      outcome: end.outcome,
+    });
+    expect(migrated.graph?.relationships.map((relationship) => [relationship.source, relationship.target])).toEqual(
+      graph.relationships.map((relationship) => [relationship.source, relationship.target]),
+    );
+  });
+
+  it('restores a pending v6 proposal without applying relationship or F3 node operations to the accepted graph', () => {
+    const graph = structuredClone(sampleGraph);
+    const evidence = {
+      source: 'runtime/proposal-observation.json',
+      evidenceClass: 'proposed-contract',
+      confidence: 'medium' as const,
+    };
+    const proposal = createProposal(graph, {
+      rationale: 'Add the observed external review boundary without changing the accepted draft.',
+      operations: [
+        {
+          type: 'update_graph_capabilities',
+          patch: {
+            provenance: {
+              evidenceOverlayAvailable: true,
+              externalOrchestrationAvailable: true,
+            },
+          },
+        },
+        {
+          type: 'add_relationship',
+          relationship: {
+            id: 'classifier-review-run',
+            kind: 'external-orchestration',
+            source: { kind: 'node', nodeId: 'classifier' },
+            target: { kind: 'external', externalId: 'review-runner', label: 'Review runner' },
+            provenance: { representation: 'external-orchestration', evidence },
+          },
+        },
+        {
+          type: 'update_node',
+          nodeId: 'classifier',
+          patch: {
+            opaque: {
+              factoryLabel: 'ReviewClassifierFactory',
+              inputPorts: [{ name: 'request' }],
+              outputPorts: [{ name: 'review' }],
+              runtimeInspection: { available: true, evidence },
+            },
+            readiness: { state: 'degraded', detail: 'Review runner capacity is limited.' },
+          },
+        },
+        {
+          type: 'update_node',
+          nodeId: 'end',
+          patch: { outcome: { kind: 'partial-result', detail: 'Awaiting review-run reconciliation.' } },
+        },
+      ],
+    }).proposal;
+    expect(proposal?.status).toBe('pending');
+
+    const migrated = migrateWorkspaceV6(
+      { graph, proposal, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.proposal).toMatchObject({
+      status: 'pending',
+      operations: expect.arrayContaining([
+        expect.objectContaining({ type: 'add_relationship' }),
+        expect.objectContaining({ type: 'update_node', nodeId: 'classifier' }),
+        expect.objectContaining({ type: 'update_node', nodeId: 'end' }),
+      ]),
+    });
+    expect(migrated.graph?.relationships).toEqual([]);
+    expect(migrated.graph?.capabilities.provenance.externalOrchestrationAvailable).toBe(false);
+    expect(migrated.graph?.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('opaque');
+    expect(migrated.graph?.nodes.find((node) => node.id === 'end')).toMatchObject({
+      outcome: { kind: 'completed' },
+    });
+  });
+
   it('advances v3 to v6 without changing ordinary topology, policies, or pending proposal meaning', () => {
     const { capabilities, relationships, ...legacyGraph } = structuredClone(sampleGraph);
     void capabilities;
