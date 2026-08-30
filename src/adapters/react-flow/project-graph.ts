@@ -39,6 +39,8 @@ export type CanvasEdgeData = {
   edge: GraphEdge;
   domainEdgeIds: string[];
   projection: 'domain' | 'subgraph-proxy' | 'runtime-instance';
+  /** Review metadata stays keyed by canonical edges even when endpoints collapse. */
+  review?: CanvasEdgeReviewProjection;
   runtimeInstanceId?: string;
   /** Evidence markers are an optional, workspace-only overlay. */
   evidenceMarker?: number;
@@ -49,12 +51,26 @@ export type CanvasEdgeData = {
 
 export type CanvasNativeEdge = Edge<CanvasEdgeData, 'routing'>;
 
+export type ProposalVisualState = 'added' | 'updated' | 'removed';
+export type CanvasReviewState = ProposalVisualState | 'unchanged';
+export type CanvasReviewAggregate = CanvasReviewState | 'mixed';
+export type CanvasEdgeReviewProjection = {
+  aggregate: CanvasReviewAggregate;
+  byDomainEdgeId: Readonly<Record<string, CanvasReviewState>>;
+};
+
+export type CanvasSystemRelationshipEndpointAliases = Partial<
+  Record<'source' | 'target', string>
+>;
+
 /** A projected system relationship is never a GraphEdge or a routing endpoint. */
 export type CanvasSystemRelationshipEdgeData = {
   relationship: NonNativeRelationship;
   projection: 'system-relationship';
+  /** React Flow-only aliases for canonical node endpoints hidden by collapse. */
+  endpointAliases?: CanvasSystemRelationshipEndpointAliases;
   /** Proposal visuals are review-only and never change canonical routing. */
-  proposalState?: 'added' | 'updated' | 'removed';
+  proposalState?: ProposalVisualState;
   /** Removed accepted records remain inspectable but never editable. */
   readOnly?: boolean;
   evidenceMarker?: number;
@@ -78,7 +94,7 @@ export type CanvasEdgePresentation = {
   loop: boolean;
   invalid: boolean;
   frozen: boolean;
-  proposalState?: 'added' | 'updated' | 'removed';
+  proposalState?: ProposalVisualState | 'mixed';
   /** Runtime-only lines visually attach observed instances without becoming routes. */
   runtimeInstance?: boolean;
   /** Provenance changes the treatment, but never the native route semantics. */
@@ -233,14 +249,35 @@ function edgeVisualState(
   };
 }
 
-function proposalStateForEdges(
+function proposalStateForEdge(
+  edgeId: string,
+  proposal: GraphProposal | null,
+): ProposalVisualState | undefined {
+  const state = edgeVisualState(edgeId, proposal);
+  if (state.removed) return 'removed';
+  if (state.added) return 'added';
+  if (state.updated) return 'updated';
+  return undefined;
+}
+
+function aggregateReviewStates(
+  states: readonly CanvasReviewState[],
+): CanvasReviewAggregate {
+  if (states.length === 0) return 'unchanged';
+  return new Set(states).size === 1 ? states[0] : 'mixed';
+}
+
+function reviewProjectionForEdges(
   edges: readonly GraphEdge[],
   proposal: GraphProposal | null,
-): CanvasEdgePresentation['proposalState'] {
-  if (edges.some((edge) => edgeVisualState(edge.id, proposal).removed)) return 'removed';
-  if (edges.some((edge) => edgeVisualState(edge.id, proposal).added)) return 'added';
-  if (edges.some((edge) => edgeVisualState(edge.id, proposal).updated)) return 'updated';
-  return undefined;
+): CanvasEdgeReviewProjection {
+  const entries = edges
+    .map((edge) => [edge.id, proposalStateForEdge(edge.id, proposal) ?? 'unchanged'] as const)
+    .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+  return {
+    aggregate: aggregateReviewStates(entries.map(([, state]) => state)),
+    byDomainEdgeId: Object.fromEntries(entries),
+  };
 }
 
 function proposalStateForRelationship(
@@ -337,6 +374,10 @@ function projectEdge(
   domainEdgeIds: string[],
   projection: CanvasEdgeData['projection'],
   presentation: CanvasEdgePresentation,
+  review: CanvasEdgeReviewProjection = {
+    aggregate: 'unchanged',
+    byDomainEdgeId: {},
+  },
 ): CanvasNativeEdge {
   const color = presentation.frozen
     ? '#9ca3af'
@@ -397,17 +438,16 @@ function projectEdge(
     labelBgStyle: { fill: '#ffffff', fillOpacity: 1 },
     labelBgPadding: [5, 3] as [number, number],
     labelBgBorderRadius: 6,
-    data: { edge, domainEdgeIds, projection, presentation },
+    data: { edge, domainEdgeIds, projection, presentation, review },
   };
 }
-
-type ProposalVisualState = 'added' | 'updated' | 'removed';
 
 function subgraphFlowNode(
   subgraph: GraphSubgraph,
   graph: WorkflowGraph,
   proposalState?: ProposalVisualState,
   scenarioState?: ScenarioElementState,
+  descendantReviewState?: CanvasReviewAggregate,
 ): CanvasFlowNode {
   const width = subgraph.collapsed ? CONTRACT_NODE_WIDTH : subgraph.dimensions.width;
   const height = subgraph.collapsed ? CONTRACT_NODE_HEIGHT : subgraph.dimensions.height;
@@ -437,6 +477,7 @@ function subgraphFlowNode(
       proposalState,
       durability: resolveEffectiveCapabilities(graph, subgraph.id),
       scenarioState,
+      descendantReviewState,
     },
   };
 }
@@ -513,6 +554,63 @@ function nodeProposalState(
     return 'updated';
   }
   return undefined;
+}
+
+function descendantReviewStateForSubgraph(
+  graph: WorkflowGraph,
+  preview: WorkflowGraph,
+  subgraphId: string,
+  proposal: GraphProposal | null,
+): CanvasReviewAggregate {
+  if (!proposal) return 'unchanged';
+
+  const descendantNodeIds = new Set(
+    [...graph.nodes, ...preview.nodes]
+      .filter((node) => node.parentId === subgraphId)
+      .map((node) => node.id),
+  );
+  const states: ProposalVisualState[] = [];
+  for (const nodeId of [...descendantNodeIds].sort()) {
+    const state = nodeProposalState(nodeId, proposal.diff);
+    if (state) states.push(state);
+  }
+
+  const changedEdgeIds = new Set([
+    ...proposal.diff.addedEdgeIds,
+    ...proposal.diff.updatedEdgeIds,
+    ...proposal.diff.removedEdgeIds,
+  ]);
+  for (const edgeId of [...changedEdgeIds].sort()) {
+    const touchesDescendant = [...graph.edges, ...preview.edges].some(
+      (edge) =>
+        edge.id === edgeId &&
+        (descendantNodeIds.has(edge.source) || descendantNodeIds.has(edge.target)),
+    );
+    const state = proposalStateForEdge(edgeId, proposal);
+    if (touchesDescendant && state) states.push(state);
+  }
+
+  const changedRelationshipIds = new Set([
+    ...proposal.diff.addedRelationshipIds,
+    ...proposal.diff.updatedRelationshipIds,
+    ...proposal.diff.removedRelationshipIds,
+  ]);
+  for (const relationshipId of [...changedRelationshipIds].sort()) {
+    const touchesDescendant = [
+      ...(graph.relationships ?? []),
+      ...(preview.relationships ?? []),
+    ].some(
+      (relationship) =>
+        relationship.id === relationshipId &&
+        [relationship.source, relationship.target].some(
+          (endpoint) => endpoint.kind === 'node' && descendantNodeIds.has(endpoint.nodeId),
+        ),
+    );
+    const state = proposalStateForRelationship(relationshipId, proposal);
+    if (touchesDescendant && state) states.push(state);
+  }
+
+  return aggregateReviewStates(states);
 }
 
 function sendTemplateData(
@@ -643,13 +741,25 @@ export function projectGraphToCanvas(
   const membershipAffectedSubgraphs = visibleProposal
     ? membershipAffectedSubgraphIds(graph, visibleProposal.operations)
     : new Set<string>();
-  const subgraphProposalState = (subgraphId: string): ProposalVisualState | undefined => {
-    if (diff?.removedSubgraphIds?.includes(subgraphId)) return 'removed';
-    if (diff?.addedSubgraphIds?.includes(subgraphId)) return 'added';
-    if (diff?.updatedSubgraphIds?.includes(subgraphId) || membershipAffectedSubgraphs.has(subgraphId)) {
-      return 'updated';
+  const subgraphReviewProjection = (subgraph: GraphSubgraph) => {
+    let proposalState: ProposalVisualState | undefined;
+    if (diff?.removedSubgraphIds?.includes(subgraph.id)) proposalState = 'removed';
+    else if (diff?.addedSubgraphIds?.includes(subgraph.id)) proposalState = 'added';
+    else if (
+      diff?.updatedSubgraphIds?.includes(subgraph.id) ||
+      membershipAffectedSubgraphs.has(subgraph.id)
+    ) {
+      proposalState = 'updated';
     }
-    return undefined;
+    const descendantReviewState = subgraph.collapsed
+      ? descendantReviewStateForSubgraph(graph, preview, subgraph.id, visibleProposal)
+      : undefined;
+    return {
+      proposalState:
+        proposalState ??
+        (descendantReviewState && descendantReviewState !== 'unchanged' ? 'updated' : undefined),
+      descendantReviewState,
+    };
   };
 
   // Candidate containers drive membership and edge projection. Base-only
@@ -685,12 +795,16 @@ export function projectGraphToCanvas(
   const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const validationIssues = validateGraph(preview);
   const nodes: CanvasFlowNode[] = [
-    ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(
-      subgraph,
-      preview,
-      subgraphProposalState(subgraph.id),
-      subgraphScenarioState(subgraph.id),
-    )),
+    ...sourceSubgraphs.map((subgraph) => {
+      const review = subgraphReviewProjection(subgraph);
+      return subgraphFlowNode(
+        subgraph,
+        preview,
+        review.proposalState,
+        subgraphScenarioState(subgraph.id),
+        review.descendantReviewState,
+      );
+    }),
     ...sourceNodes.map((node) =>
       projectDomainNode(
         node,
@@ -730,12 +844,13 @@ export function projectGraphToCanvas(
   const edgePresentation = (
     edge: GraphEdge,
     group: readonly GraphEdge[] = [edge],
+    review: CanvasEdgeReviewProjection = reviewProjectionForEdges(group, visibleProposal),
   ): CanvasEdgePresentation => ({
     mode: edge.mode,
     loop: group.some((candidate) => loopEdgeIds.has(candidate.id)),
     invalid: group.some((candidate) => isEdgeInvalid(candidate, preview, validationIssues)),
     frozen: graph.status === 'frozen',
-    proposalState: proposalStateForEdges(group, visibleProposal),
+    proposalState: review.aggregate === 'unchanged' ? undefined : review.aggregate,
     provenance: edge.provenance?.representation ?? 'declared',
     scenarioState: scenarioElementState(
       scenarioPresentation,
@@ -750,13 +865,16 @@ export function projectGraphToCanvas(
     const isProxy =
       domainEdge.source !== domainEdge.edge.source || domainEdge.target !== domainEdge.edge.target;
     if (!isProxy) {
+      const group = [domainEdge.edge];
+      const review = reviewProjectionForEdges(group, visibleProposal);
       edges.push(
         projectEdge(
           domainEdge,
           canvasEdgesReconnectable,
           [domainEdge.edge.id],
           'domain',
-          edgePresentation(domainEdge.edge),
+          edgePresentation(domainEdge.edge, group, review),
+          review,
         ),
       );
       continue;
@@ -768,13 +886,16 @@ export function projectGraphToCanvas(
 
   for (const groupedEdges of proxyEdges.values()) {
     const [first] = groupedEdges;
+    const group = groupedEdges.map(({ edge }) => edge);
+    const review = reviewProjectionForEdges(group, visibleProposal);
     edges.push(
       projectEdge(
         first,
         false,
-        groupedEdges.map(({ edge }) => edge.id),
+        group.map((edge) => edge.id),
         'subgraph-proxy',
-        edgePresentation(first.edge, groupedEdges.map(({ edge }) => edge)),
+        edgePresentation(first.edge, group, review),
+        review,
       ),
     );
   }
@@ -888,10 +1009,12 @@ export function projectGraphToCanvas(
     }
   }
 
-  // Relationships intentionally bypass every native-edge branch above: they
-  // never collapse into proxy endpoints, affect reachability, or inherit a
-  // reconnection/delete affordance. External tiles exist only in this canvas
-  // projection and are deterministically positioned from their node endpoint.
+  // Relationships intentionally bypass every native-edge branch above. A
+  // hidden child endpoint may alias its collapsed card in React Flow, but the
+  // relationship payload remains canonical and never gains domain-edge IDs,
+  // reachability, or a reconnection/delete affordance. External tiles exist
+  // only in this canvas projection and are deterministically positioned from
+  // their node endpoint.
   const externalTileIds = new Set<string>();
   const externalTileWidth = 192;
   const externalTileHeight = 72;
@@ -900,6 +1023,12 @@ export function projectGraphToCanvas(
     endpoint.kind === 'node'
       ? endpoint.nodeId
       : `external-system:${encodeURIComponent(endpoint.externalId)}`;
+  const visibleRelationshipEndpointId = (endpoint: NonNativeRelationship['source']) => {
+    if (endpoint.kind === 'external') return relationshipEndpointId(endpoint);
+    const node = sourceNodes.find((candidate) => candidate.id === endpoint.nodeId);
+    const parent = node?.parentId ? subgraphsById.get(node.parentId) : undefined;
+    return parent?.collapsed ? parent.id : endpoint.nodeId;
+  };
   // Candidate relationships are authoritative during review. Base-only
   // records are retained strictly as removed ghosts; selection can still
   // inspect those accepted records, but no relationship ever becomes native.
@@ -928,9 +1057,12 @@ export function projectGraphToCanvas(
     if (!externalTileIds.has(tileId)) {
       externalTileIds.add(tileId);
       const anchor = sourceNodes.find((node) => node.id === nodeEndpoint.nodeId);
-      const anchorPosition = anchor
-        ? absolutePosition(anchor, subgraphsById)
-        : { x: 0, y: 0 };
+      const anchorParent = anchor?.parentId ? subgraphsById.get(anchor.parentId) : undefined;
+      const anchorPosition = anchorParent?.collapsed
+        ? anchorParent.position
+        : anchor
+          ? absolutePosition(anchor, subgraphsById)
+          : { x: 0, y: 0 };
       const externalIsSource = relationship.source.kind === 'external';
       nodes.push({
         id: tileId,
@@ -965,6 +1097,14 @@ export function projectGraphToCanvas(
         },
       });
     }
+    const canonicalSource = relationshipEndpointId(relationship.source);
+    const canonicalTarget = relationshipEndpointId(relationship.target);
+    const source = visibleRelationshipEndpointId(relationship.source);
+    const target = visibleRelationshipEndpointId(relationship.target);
+    const endpointAliases: CanvasSystemRelationshipEndpointAliases = {
+      ...(source !== canonicalSource ? { source } : {}),
+      ...(target !== canonicalTarget ? { target } : {}),
+    };
     edges.push({
       id: `system-relationship:${encodeURIComponent(relationship.id)}`,
       type: 'systemRelationship',
@@ -972,8 +1112,8 @@ export function projectGraphToCanvas(
         scenarioPresentation,
         Boolean(scenarioPresentation?.activeRelationshipIds.has(relationship.id)),
       )),
-      source: relationshipEndpointId(relationship.source),
-      target: relationshipEndpointId(relationship.target),
+      source,
+      target,
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color: relationship.kind === 'external-orchestration' ? '#6b7280' : '#6d28d9',
@@ -986,6 +1126,7 @@ export function projectGraphToCanvas(
       data: {
         relationship,
         projection: 'system-relationship',
+        ...(Object.keys(endpointAliases).length > 0 ? { endpointAliases } : {}),
         proposalState,
         readOnly: proposalState === 'removed',
         scenarioState: scenarioElementState(

@@ -193,10 +193,17 @@ describe('projectGraphToCanvas', () => {
     ]);
     expect(relationship).toMatchObject({
       type: 'systemRelationship',
-      source: 'classifier',
+      source: 'collapsed-review',
       target: 'external-system:background-runner',
       reconnectable: false,
-      data: { projection: 'system-relationship', relationship: { id: 'notify-external-runner' } },
+      data: {
+        projection: 'system-relationship',
+        endpointAliases: { source: 'collapsed-review' },
+        relationship: {
+          id: 'notify-external-runner',
+          source: { kind: 'node', nodeId: 'classifier' },
+        },
+      },
     });
     expect(domainEdgeIdsForCanvasEdge(relationship)).toEqual([]);
     expect(canReconnectCanvasEdge(relationship)).toBe(false);
@@ -206,8 +213,90 @@ describe('projectGraphToCanvas', () => {
       data: { label: 'Background runner' },
     });
     expect(native.source).toBe('collapsed-review');
-    expect(relationship.source).toBe('classifier');
     expect(native.data.presentation.provenance).toBe('derived-semantic');
+  });
+
+  it('aliases incoming and outgoing system relationships to a collapsed card and restores canonical endpoints on expand', () => {
+    const graph = graphWithSubgraph(true);
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    graph.relationships = [
+      {
+        id: 'outgoing-review-notification',
+        kind: 'external-orchestration',
+        source: { kind: 'node', nodeId: 'review' },
+        target: { kind: 'external', externalId: 'notifier', label: 'Notifier' },
+        provenance: { representation: 'external-orchestration' },
+      },
+      {
+        id: 'incoming-review-signal',
+        kind: 'external-orchestration',
+        source: { kind: 'external', externalId: 'signal', label: 'Signal' },
+        target: { kind: 'node', nodeId: 'approve' },
+        provenance: { representation: 'external-orchestration' },
+      },
+    ];
+    const before = structuredClone(graph);
+
+    const collapsed = projectGraphToCanvas(graph, null);
+    const outgoing = collapsed.edges.find(
+      (edge) =>
+        isCanvasSystemRelationshipEdge(edge) &&
+        edge.data.relationship.id === 'outgoing-review-notification',
+    )!;
+    const incoming = collapsed.edges.find(
+      (edge) =>
+        isCanvasSystemRelationshipEdge(edge) &&
+        edge.data.relationship.id === 'incoming-review-signal',
+    )!;
+
+    expect(outgoing).toMatchObject({
+      source: 'review-group',
+      target: 'external-system:notifier',
+      data: {
+        projection: 'system-relationship',
+        endpointAliases: { source: 'review-group' },
+        relationship: {
+          source: { kind: 'node', nodeId: 'review' },
+          target: { kind: 'external', externalId: 'notifier' },
+        },
+      },
+    });
+    expect(incoming).toMatchObject({
+      source: 'external-system:signal',
+      target: 'review-group',
+      data: {
+        projection: 'system-relationship',
+        endpointAliases: { target: 'review-group' },
+        relationship: {
+          source: { kind: 'external', externalId: 'signal' },
+          target: { kind: 'node', nodeId: 'approve' },
+        },
+      },
+    });
+    expect(domainEdgeIdsForCanvasEdge(outgoing)).toEqual([]);
+    expect(domainEdgeIdsForCanvasEdge(incoming)).toEqual([]);
+    expect(isSubgraphProxyEdge(outgoing)).toBe(false);
+    expect(isSubgraphProxyEdge(incoming)).toBe(false);
+
+    const expandedGraph = structuredClone(graph);
+    expandedGraph.subgraphs[0].collapsed = false;
+    const expanded = projectGraphToCanvas(expandedGraph, null);
+    const expandedOutgoing = expanded.edges.find(
+      (edge) =>
+        isCanvasSystemRelationshipEdge(edge) &&
+        edge.data.relationship.id === 'outgoing-review-notification',
+    )!;
+    const expandedIncoming = expanded.edges.find(
+      (edge) =>
+        isCanvasSystemRelationshipEdge(edge) &&
+        edge.data.relationship.id === 'incoming-review-signal',
+    )!;
+
+    expect(expandedOutgoing).toMatchObject({ source: 'review', target: 'external-system:notifier' });
+    expect(expandedIncoming).toMatchObject({ source: 'external-system:signal', target: 'approve' });
+    expect(expandedOutgoing.data.endpointAliases).toBeUndefined();
+    expect(expandedIncoming.data.endpointAliases).toBeUndefined();
+    expect(graph).toEqual(before);
   });
 
   it('projects exact scenario states and activates a collapsed proxy when any represented edge is active', () => {
@@ -825,6 +914,65 @@ describe('projectGraphToCanvas', () => {
     expect(canReconnectCanvasEdge(incoming!)).toBe(false);
     expect(isCanvasEdgeSelected(incoming!, ['enter-approve'])).toBe(true);
     expect(isCanvasEdgeSelected(incoming!, ['subgraph-proxy:start:review-group'])).toBe(false);
+  });
+
+  it('retains per-domain-edge review states and exposes mixed state on a collapsed proxy', () => {
+    const graph = graphWithSubgraph(true);
+    graph.edges.push({
+      id: 'enter-approve',
+      source: 'start',
+      target: 'approve',
+      mode: 'conditional',
+      label: 'approve',
+    });
+    const proposal = createProposal(graph, {
+      rationale: 'Review different changes represented by one collapsed boundary.',
+      operations: [
+        { type: 'update_edge', edgeId: 'enter-review', patch: { label: 'review' } },
+        { type: 'remove_edge', edgeId: 'enter-approve' },
+      ],
+    }).proposal!;
+
+    const incoming = projectGraphToCanvas(graph, proposal).edges.find(
+      (edge) => isSubgraphProxyEdge(edge) && edge.source === 'start',
+    )!;
+
+    expect(domainEdgeIdsForCanvasEdge(incoming)).toEqual(['enter-review', 'enter-approve']);
+    expect(incoming.data.review).toEqual({
+      aggregate: 'mixed',
+      byDomainEdgeId: {
+        'enter-approve': 'removed',
+        'enter-review': 'updated',
+      },
+    });
+    expect(incoming.data.presentation.proposalState).toBe('mixed');
+  });
+
+  it('aggregates changed descendant review state onto a collapsed subgraph without mutating the graph', () => {
+    const graph = graphWithSubgraph(true);
+    const before = structuredClone(graph);
+    const proposal = createProposal(graph, {
+      rationale: 'Rename a child while its review container is collapsed.',
+      operations: [
+        { type: 'update_node', nodeId: 'review', patch: { label: 'Updated review' } },
+      ],
+    }).proposal!;
+
+    const collapsed = projectGraphToCanvas(graph, proposal);
+    const container = collapsed.nodes.find((node) => node.id === 'review-group');
+
+    expect(container).toMatchObject({
+      type: 'subgraph',
+      data: {
+        proposalState: 'updated',
+        descendantReviewState: 'updated',
+      },
+    });
+    expect(collapsed.nodes.find((node) => node.id === 'review')).toMatchObject({
+      hidden: true,
+      data: { proposalState: 'updated' },
+    });
+    expect(graph).toEqual(before);
   });
 
   it('restores canonical edge ids and allows only visible graph-node endpoints after expansion', () => {
