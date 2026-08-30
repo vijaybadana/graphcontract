@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
+import type { CanvasFlowEdge } from '@/src/adapters/react-flow/project-graph';
 import { workspaceSelectionFromCanvas } from './canvas-selection';
 
 describe('workspaceSelectionFromCanvas', () => {
@@ -27,6 +28,32 @@ describe('workspaceSelectionFromCanvas', () => {
       subgraphIds: [],
       edgeIds: [],
       primary: { type: 'node', id: 'billing' },
+    });
+  });
+
+  it('does not promote a non-native system relationship into canonical selection', () => {
+    const relationships = [{
+      id: 'system-relationship:notify-runner',
+      type: 'systemRelationship',
+      source: 'classifier',
+      target: 'external-system:runner',
+      data: {
+        projection: 'system-relationship',
+        relationship: {
+          id: 'notify-runner',
+          kind: 'external-orchestration',
+          source: { kind: 'node', nodeId: 'classifier' },
+          target: { kind: 'external', externalId: 'runner', label: 'Runner' },
+          provenance: { representation: 'external-orchestration' },
+        },
+      },
+    }] as CanvasFlowEdge[];
+
+    expect(workspaceSelectionFromCanvas([], relationships, null)).toEqual({
+      nodeIds: [],
+      subgraphIds: [],
+      edgeIds: [],
+      primary: null,
     });
   });
 });

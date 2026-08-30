@@ -23,6 +23,9 @@ import {
   canReconnectCanvasEdge,
   CanvasFlowEdge,
   domainEdgeIdsForCanvasEdge,
+  evidenceMarkersForGraph,
+  EvidenceMarker,
+  isCanvasSystemRelationshipEdge,
   projectGraphToCanvas,
 } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
@@ -40,6 +43,8 @@ import {
 import { MergeNode } from '@/src/features/canvas/merge-node';
 import { RuntimeInstanceNode, type RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
 import { RoutingEdge } from '@/src/features/canvas/routing-edge';
+import { ExternalSystemTile } from '@/src/features/canvas/external-system-tile';
+import { SystemRelationshipEdge } from '@/src/features/canvas/system-relationship-edge';
 import {
   NodePalette,
   PaletteKind,
@@ -85,8 +90,9 @@ const nodeTypes = {
   mergeJunction: MergeNode,
   runtimeInstance: RuntimeInstanceNode,
   subgraph: SubgraphNode,
+  externalSystemTile: ExternalSystemTile,
 };
-const edgeTypes = { routing: RoutingEdge };
+const edgeTypes = { routing: RoutingEdge, systemRelationship: SystemRelationshipEdge };
 const snapGrid: [number, number] = [12, 12];
 const panOnDrag = [1];
 const defaultEdgeOptions: DefaultEdgeOptions = {
@@ -144,6 +150,10 @@ export function GraphWorkspace() {
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
   const [viewMode, setViewMode] = useState<'design' | 'runtime'>('design');
   const [runtimeSelection, setRuntimeSelection] = useState<RuntimeInstanceNodeData | null>(null);
+  // These are projection selections, deliberately absent from workspace history/persistence.
+  const [evidenceOverlayVisible, setEvidenceOverlayVisible] = useState(false);
+  const [selectedEvidence, setSelectedEvidence] = useState<EvidenceMarker | null>(null);
+  const [selectedRelationshipId, setSelectedRelationshipId] = useState<string | null>(null);
   const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
   const [graphSettingsRequest, setGraphSettingsRequest] = useState<GraphSettingsRequest | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -166,6 +176,17 @@ export function GraphWorkspace() {
       : runtimeAvailability.reason;
   const activeViewMode = viewMode === 'runtime' && runtimeAvailable ? 'runtime' : 'design';
   const canvasEditable = editable && activeViewMode === 'design';
+  const evidenceMarkers = useMemo(
+    () => graph.capabilities.provenance.evidenceOverlayAvailable ? evidenceMarkersForGraph(graph) : [],
+    [graph],
+  );
+  const evidenceMarkerByTarget = useMemo(
+    () => new Map(evidenceMarkers.map((marker) => [`${marker.target}:${marker.id}`, marker])),
+    [evidenceMarkers],
+  );
+  const selectedRelationship = selectedRelationshipId
+    ? graph.relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null
+    : null;
 
   useEffect(() => {
     if (viewMode !== 'runtime' || runtimeAvailable) return;
@@ -184,6 +205,23 @@ export function GraphWorkspace() {
       setCompactPanelPreference('inspector');
     }
   }, [isCompactWorkspace]);
+  const activateEvidence = useCallback((target: EvidenceMarker['target'], id: string) => {
+    const marker = evidenceMarkerByTarget.get(`${target}:${id}`);
+    if (!marker) return;
+    setRuntimeSelection(null);
+    setSelectedEvidence(marker);
+    if (target === 'relationship') {
+      setSelectedRelationshipId(id);
+      clearSelection();
+    } else if (target === 'node') {
+      setSelectedRelationshipId(null);
+      setSelection({ nodeIds: [id], subgraphIds: [], edgeIds: [], primary: { type: 'node', id } });
+    } else {
+      setSelectedRelationshipId(null);
+      setSelection({ nodeIds: [], subgraphIds: [], edgeIds: [id], primary: { type: 'edge', id } });
+    }
+    openInspectorForSelection();
+  }, [clearSelection, evidenceMarkerByTarget, openInspectorForSelection, setSelection]);
   const openGraphSettings = useCallback((tab: GraphSettingsRequest['tab'] = 'state') => {
     setRuntimeSelection(null);
     clearSelection();
@@ -219,8 +257,8 @@ export function GraphWorkspace() {
     compactPreference: compactPanelPreference,
     proposalPending: Boolean(proposal),
   });
-  const inspectorTab = proposal || selection.primary ? 'review' : rightTab;
-  const inspectorSelectionKey = `${graph.status}:${proposal?.id ?? ''}:${activeViewMode}:${selection.primary?.type ?? ''}:${selection.primary?.id ?? ''}:${runtimeSelection?.runtimeId ?? ''}`;
+  const inspectorTab = proposal || selection.primary || selectedRelationship ? 'review' : rightTab;
+  const inspectorSelectionKey = `${graph.status}:${proposal?.id ?? ''}:${activeViewMode}:${selection.primary?.type ?? ''}:${selection.primary?.id ?? ''}:${runtimeSelection?.runtimeId ?? ''}:${selectedRelationship?.id ?? ''}:${selectedEvidence?.number ?? ''}`;
   const toggleSubgraphCollapse = useCallback(
     (subgraphId: string, collapsed: boolean) => {
       if (canvasEditable) setSubgraphCollapsed(subgraphId, collapsed);
@@ -251,6 +289,37 @@ export function GraphWorkspace() {
           data: {
             ...node.data,
             onModifierActivate: activateStepModifier,
+            ...(evidenceOverlayVisible && evidenceMarkerByTarget.get(`node:${node.id}`)
+              ? {
+                  evidenceMarker: evidenceMarkerByTarget.get(`node:${node.id}`)!.number,
+                  onEvidenceActivate: (nodeId: string) => activateEvidence('node', nodeId),
+                }
+              : {}),
+          },
+        };
+      }),
+      edges: projected.edges.map((edge) => {
+        const target = isCanvasSystemRelationshipEdge(edge)
+          ? `relationship:${edge.data.relationship.id}`
+          : `edge:${edge.id}`;
+        const marker = evidenceOverlayVisible ? evidenceMarkerByTarget.get(target) : undefined;
+        if (!marker) return edge;
+        if (isCanvasSystemRelationshipEdge(edge)) {
+          return {
+            ...edge,
+            data: {
+              ...edge.data,
+              evidenceMarker: marker.number,
+              onEvidenceActivate: (relationshipId: string) => activateEvidence('relationship', relationshipId),
+            },
+          };
+        }
+        return {
+          ...edge,
+          data: {
+            ...edge.data,
+            evidenceMarker: marker.number,
+            onEvidenceActivate: (edgeId: string) => activateEvidence('edge', edgeId),
           },
         };
       }),
@@ -263,6 +332,9 @@ export function GraphWorkspace() {
     runtimeProjectionFixture,
     toggleSubgraphCollapse,
     activeViewMode,
+    activateEvidence,
+    evidenceMarkerByTarget,
+    evidenceOverlayVisible,
   ]);
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
@@ -478,11 +550,22 @@ export function GraphWorkspace() {
 
   const handleSelectionChange = useCallback(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
+      const selectedSystemRelationship = edges.find(isCanvasSystemRelationshipEdge);
+      if (selectedSystemRelationship) {
+        const relationship = selectedSystemRelationship.data.relationship;
+        setRuntimeSelection(null);
+        setSelectedRelationshipId(relationship.id);
+        setSelectedEvidence(evidenceMarkerByTarget.get(`relationship:${relationship.id}`) ?? null);
+        setSelection({ nodeIds: [], subgraphIds: [], edgeIds: [], primary: null });
+        openInspectorForSelection();
+        return;
+      }
       const selectedRuntimeNode = nodes.find(
         (node): node is Extract<CanvasFlowNode, { type: 'runtimeInstance' }> =>
           node.type === 'runtimeInstance',
       );
       setRuntimeSelection(selectedRuntimeNode?.data ?? null);
+      setSelectedRelationshipId(null);
       const nextSelection = workspaceSelectionFromCanvas(
         nodes,
         edges,
@@ -491,9 +574,16 @@ export function GraphWorkspace() {
       if (nextSelection.primary || selectedRuntimeNode) {
         openInspectorForSelection();
       }
+      if (nextSelection.primary?.type === 'node' && evidenceOverlayVisible) {
+        setSelectedEvidence(evidenceMarkerByTarget.get(`node:${nextSelection.primary.id}`) ?? null);
+      } else if (nextSelection.primary?.type === 'edge' && evidenceOverlayVisible) {
+        setSelectedEvidence(evidenceMarkerByTarget.get(`edge:${nextSelection.primary.id}`) ?? null);
+      } else {
+        setSelectedEvidence(null);
+      }
       setSelection(nextSelection);
     },
-    [openInspectorForSelection, setSelection],
+    [evidenceMarkerByTarget, evidenceOverlayVisible, openInspectorForSelection, setSelection],
   );
 
   const makePrimary = useCallback((primary: { type: 'node' | 'edge' | 'subgraph'; id: string }) => {
@@ -518,6 +608,7 @@ export function GraphWorkspace() {
         return;
       }
       setRuntimeSelection(null);
+      setSelectedRelationshipId(null);
       makePrimary({ type: node.type === 'subgraph' ? 'subgraph' : 'node', id: node.id });
     },
     [makePrimary, openInspectorForSelection],
@@ -525,10 +616,19 @@ export function GraphWorkspace() {
 
   const handleEdgeClick = useCallback<EdgeMouseHandler<CanvasFlowEdge>>(
     (_, edge) => {
+      if (isCanvasSystemRelationshipEdge(edge)) {
+        const relationship = edge.data.relationship;
+        setRuntimeSelection(null);
+        setSelectedRelationshipId(relationship.id);
+        setSelectedEvidence(evidenceMarkerByTarget.get(`relationship:${relationship.id}`) ?? null);
+        clearSelection();
+        openInspectorForSelection();
+        return;
+      }
       const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
       if (domainEdgeId) makePrimary({ type: 'edge', id: domainEdgeId });
     },
-    [makePrimary],
+    [clearSelection, evidenceMarkerByTarget, makePrimary, openInspectorForSelection],
   );
 
   const addPalettePayload = useCallback(
@@ -602,7 +702,7 @@ export function GraphWorkspace() {
   }
 
   const selectionCount =
-    selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length + (runtimeSelection ? 1 : 0);
+    selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length + (runtimeSelection ? 1 : 0) + (selectedRelationship ? 1 : 0);
   const hasDeletableSelection =
     selection.nodeIds.length > 0 ||
     selection.subgraphIds.length > 0 ||
@@ -709,7 +809,28 @@ export function GraphWorkspace() {
               onExpand={toggleInspector}
             />
           )}
-          <GraphCapabilityStrip graph={graph} onOpenSettings={openGraphSettings} />
+          <GraphCapabilityStrip
+            graph={graph}
+            onOpenSettings={openGraphSettings}
+            evidenceOverlayVisible={evidenceOverlayVisible}
+            onToggleEvidenceOverlay={() => {
+              if (!graph.capabilities.provenance.evidenceOverlayAvailable) return;
+              setEvidenceOverlayVisible((visible) => !visible);
+              setSelectedEvidence(null);
+            }}
+          />
+          {evidenceOverlayVisible && (
+            <aside className="workspace-evidence-legend" aria-label="Evidence overlay legend">
+              <strong>Evidence overlay</strong>
+              <span>Numbered markers open supplied evidence; they do not change topology.</span>
+              <ul>
+                <li data-provenance="declared">Declared</li>
+                <li data-provenance="runtime-generated">Runtime generated</li>
+                <li data-provenance="derived-semantic">Derived semantic</li>
+                <li data-provenance="external-orchestration">External orchestration</li>
+              </ul>
+            </aside>
+          )}
           <ReactFlow<CanvasFlowNode, CanvasFlowEdge>
             nodes={canvasInteractions.nodes}
             edges={canvasInteractions.edges}
@@ -727,6 +848,8 @@ export function GraphWorkspace() {
             onEdgeClick={handleEdgeClick}
             onPaneClick={() => {
               setRuntimeSelection(null);
+              setSelectedEvidence(null);
+              setSelectedRelationshipId(null);
               clearSelection();
             }}
             onNodeDragStart={canvasInteractions.onNodeDragStart}
@@ -821,7 +944,7 @@ export function GraphWorkspace() {
               aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} readOnly={activeViewMode === 'runtime'} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} relationship={selectedRelationship} evidence={selectedEvidence} readOnly={activeViewMode === 'runtime'} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
             </div>
             <PanelResizer
               side="right"

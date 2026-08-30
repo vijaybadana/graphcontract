@@ -16,6 +16,10 @@
 .context-inspector__group { border: 1px solid rgb(20 31 27 / 10%); border-radius: 10px; padding: 11px; }
 .context-inspector__group + .context-inspector__group, .context-inspector__actions { margin-top: 10px; }
 .context-inspector__group--tinted { background: #f7f8f5; }
+.context-inspector__group--evidence { border-color: rgb(37 99 235 / 30%); background: #f6f9ff; }
+.context-inspector__group--relationship { border-style: dashed; border-color: rgb(107 114 128 / 45%); background: #fafafa; }
+.context-inspector__group--opaque { border-style: dashed; border-color: #94a3b8; background: #f8fafc; }
+.context-inspector__group--outcome { border-color: #cbd5e1; background: #fafcff; }
 .context-inspector__group h3 { margin: 0 0 10px; color: #35453c; font-size: 11px; font-weight: 750; }
 .context-inspector__fields { display: grid; gap: 10px; }
 .context-inspector__field { display: block; }
@@ -54,6 +58,9 @@
 .context-inspector__validation--invalid ul { display: grid; gap: 3px; margin: 4px 0 0; padding-left: 16px; }
 .context-inspector__read-only { margin: 10px 0 0; border: 1px solid #c7d4ea; border-radius: 8px; background: #f3f7ff; color: #315792; padding: 8px 9px; font-size: 10px; font-weight: 700; line-height: 1.45; }
 .context-inspector__read-only-value { margin: 0; overflow-wrap: anywhere; color: #475569; font-size: .74rem; line-height: 1.35; }
+.context-inspector__opaque-evidence { display: grid; gap: 4px; margin-top: 9px; border: 1px solid #c7d4ea; border-radius: 8px; background: #fff; padding: 8px 9px; color: #475569; font-size: 10px; line-height: 1.4; }
+.context-inspector__opaque-evidence strong { color: #334155; font-size: 10px; }
+.context-inspector__opaque-evidence p, .context-inspector__opaque-evidence small { margin: 0; overflow-wrap: anywhere; }
 .context-inspector__durability-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; margin-top: 10px; border: 1px solid rgb(20 31 27 / 10%); border-radius: 8px; background: #eef2ee; padding: 3px; }
 .context-inspector__durability-tabs button { min-height: 27px; border-radius: 6px; color: #617068; font-size: 10px; font-weight: 760; }
 .context-inspector__durability-tabs button.is-active { border: 1px solid rgb(20 31 27 / 10%); background: #fff; box-shadow: 0 1px 4px rgb(20 31 27 / 8%); color: #17211c; }

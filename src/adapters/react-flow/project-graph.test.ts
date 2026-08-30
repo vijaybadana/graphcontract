@@ -4,6 +4,8 @@ import {
   canConnectCanvasEndpoints,
   canReconnectCanvasEdge,
   domainEdgeIdsForCanvasEdge,
+  evidenceMarkersForGraph,
+  isCanvasSystemRelationshipEdge,
   isCanvasEdgeSelected,
   isSubgraphProxyEdge,
   projectGraphToCanvas,
@@ -141,6 +143,69 @@ describe('projectGraphToCanvas', () => {
     expect(projectGraphToCanvas(revised, null, { mode: 'runtime', runtimeFixture: fixture }).nodes.some(
       (node) => node.type === 'runtimeInstance',
     )).toBe(false);
+  });
+
+  it('projects evidence and system relationships without turning them into native or collapsed-proxy edges', () => {
+    const graph = structuredClone(sampleGraph);
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    graph.subgraphs = [{
+      id: 'collapsed-review',
+      label: 'Collapsed review',
+      position: { x: 180, y: 80 },
+      dimensions: { width: 480, height: 260 },
+      collapsed: true,
+    }];
+    const classifier = graph.nodes.find((node) => node.id === 'classifier')!;
+    classifier.parentId = 'collapsed-review';
+    classifier.position = { x: 72, y: 88 };
+    classifier.provenance = {
+      representation: 'runtime-generated',
+      evidence: { source: '<script>untrusted</script>', evidenceClass: 'Factory record', confidence: 'high' },
+    };
+    const route = graph.edges.find((edge) => edge.source === 'classifier')!;
+    route.provenance = {
+      representation: 'derived-semantic',
+      evidence: { source: 'verified behavior', evidenceClass: 'Semantic inference', confidence: 'medium' },
+    };
+    graph.relationships = [{
+      id: 'notify-external-runner',
+      kind: 'external-orchestration',
+      source: { kind: 'node', nodeId: 'classifier' },
+      target: { kind: 'external', externalId: 'background-runner', label: 'Background runner' },
+      label: 'Notify background runner',
+      provenance: {
+        representation: 'external-orchestration',
+        evidence: { source: 'runner config', evidenceClass: 'System boundary', confidence: 'high' },
+      },
+    }];
+
+    const canvas = projectGraphToCanvas(graph, null);
+    const relationship = canvas.edges.find(isCanvasSystemRelationshipEdge)!;
+    const native = canvas.edges.find((edge) => domainEdgeIdsForCanvasEdge(edge).includes(route.id))!;
+    const markers = evidenceMarkersForGraph(graph);
+
+    expect(markers.map((marker) => `${marker.number}:${marker.target}:${marker.id}`)).toEqual([
+      `1:edge:${route.id}`,
+      '2:node:classifier',
+      '3:relationship:notify-external-runner',
+    ]);
+    expect(relationship).toMatchObject({
+      type: 'systemRelationship',
+      source: 'classifier',
+      target: 'external-system:background-runner',
+      reconnectable: false,
+      data: { projection: 'system-relationship', relationship: { id: 'notify-external-runner' } },
+    });
+    expect(domainEdgeIdsForCanvasEdge(relationship)).toEqual([]);
+    expect(canReconnectCanvasEdge(relationship)).toBe(false);
+    expect(canvas.nodes.find((node) => node.id === 'external-system:background-runner')).toMatchObject({
+      type: 'externalSystemTile',
+      selectable: false,
+      data: { label: 'Background runner' },
+    });
+    expect(native.source).toBe('collapsed-review');
+    expect(relationship.source).toBe('classifier');
+    expect(native.data.presentation.provenance).toBe('derived-semantic');
   });
 
   it('projects routing semantics into reusable edge presentation without storing loop mode', () => {

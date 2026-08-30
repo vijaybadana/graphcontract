@@ -69,6 +69,9 @@ export type ContractNodeData = GraphNode & {
   frozen?: boolean;
   /** Projection-only warning for a node visually inside, but not assigned to, a subgraph. */
   outsideSubgraph?: boolean;
+  /** Optional evidence marker; visibility and focus stay in workspace UI state. */
+  evidenceMarker?: number;
+  onEvidenceActivate?: (nodeId: string) => void;
   /** A canonical Step is the single design-time worker template for Send/map. */
   sendTemplate?: {
     edgeId: string;
@@ -201,7 +204,7 @@ export function stepModifierPresentations(
       inspectorSection: 'retry',
     });
   }
-  if (node.modifiers?.opaque) {
+  if (node.opaque || node.modifiers?.opaque) {
     modifiers.push({
       id: 'opaque',
       label: 'Opaque',
@@ -210,8 +213,9 @@ export function stepModifierPresentations(
       inspectorSection: 'modifiers',
     });
   }
-  if (node.modifiers?.readiness) {
-    const label = node.modifiers.readiness === 'degraded' ? 'Degraded' : 'Unready';
+  const readiness = node.readiness?.state ?? node.modifiers?.readiness;
+  if (readiness && readiness !== 'ready') {
+    const label = readiness === 'degraded' ? 'Degraded' : 'Unimplemented';
     modifiers.push({
       id: 'readiness',
       label,
@@ -383,6 +387,14 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
   const rendersSourceHandle = data.kind !== 'end' || Boolean(data.parentId);
   const modifierData = data.kind === 'step' ? data : null;
   const sendTemplate = modifierData ? data.sendTemplate : undefined;
+  const provenance = data.provenance?.representation ?? 'declared';
+  const readiness = modifierData?.readiness?.state ?? modifierData?.modifiers?.readiness ?? 'ready';
+  const outcome = data.kind === 'end' ? data.outcome : undefined;
+  const outcomeLabel = outcome
+    ? outcome.kind === 'domain-specific'
+      ? outcome.detail || 'Domain outcome'
+      : outcome.kind.replace('-', ' ')
+    : undefined;
 
   return (
     <div
@@ -391,9 +403,24 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
       data-invalid={invalid || undefined}
       data-frozen={frozen || undefined}
       data-send-template={sendTemplate ? 'true' : undefined}
-      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${frozen ? 'is-frozen' : ''} ${proposalClass} ${sendTemplate ? 'is-send-template' : ''}`}
+      data-provenance={provenance}
+      data-readiness={readiness !== 'ready' ? readiness : undefined}
+      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${frozen ? 'is-frozen' : ''} ${proposalClass} ${sendTemplate ? 'is-send-template' : ''} provenance--${provenance}`}
     >
       {modifierData && <HitlTimingMarker data={modifierData} />}
+      {data.evidenceMarker && (
+        <button
+          type="button"
+          className="contract-node-evidence-marker nodrag nopan"
+          aria-label={`Evidence marker ${data.evidenceMarker} for ${data.label}. Open evidence details.`}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onEvidenceActivate?.(data.id);
+          }}
+        >
+          {data.evidenceMarker}
+        </button>
+      )}
       {rendersTargetHandle && (
         <Handle type="target" position={Position.Left} className="contract-node-handle" />
       )}
@@ -419,6 +446,18 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
               Template ×N
             </span>
           )}
+          {provenance !== 'declared' && (
+            <span className="contract-node-provenance" aria-label={`${provenance.replace('-', ' ')} provenance`}>
+              {provenance === 'runtime-generated' ? 'Runtime' : provenance === 'derived-semantic' ? 'Derived' : 'External'}
+            </span>
+          )}
+          {outcomeLabel && <span className="contract-node-outcome">{outcomeLabel}</span>}
+          {readiness !== 'ready' && (
+            <span className={`contract-node-status contract-node-status--${readiness}`}>
+              <WarningCircleIcon aria-hidden="true" size={12} weight="bold" />
+              {readiness === 'degraded' ? 'Degraded' : 'Unimplemented'}
+            </span>
+          )}
           {invalid && (
             <span className="contract-node-status contract-node-status--invalid">
               <WarningCircleIcon aria-hidden="true" size={12} weight="bold" />
@@ -434,7 +473,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
           {data.proposalState && (
             <span className="contract-node-proposal-status">Proposed {data.proposalState}</span>
           )}
-          {!invalid && !frozen && !data.proposalState && (
+          {!invalid && !frozen && !data.proposalState && readiness === 'ready' && (
             <span className="contract-node-status contract-node-status--ready">Ready</span>
           )}
           {data.outsideSubgraph && (

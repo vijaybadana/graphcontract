@@ -161,6 +161,59 @@ describe('ContextInspector routing details', () => {
     expect(screen.getByText(/not part of the accepted graph/)).toBeTruthy();
   });
 
+  it('keeps provenance text inert and exposes opaque, readiness, outcome, and non-native relationship detail', () => {
+    const graph = structuredClone(sampleGraph);
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    const classifier = graph.nodes.find((node) => node.id === 'classifier')!;
+    if (classifier.kind !== 'step') throw new Error('Expected classifier Step fixture');
+    classifier.opaque = {
+      factoryLabel: 'create_prebuilt_agent',
+      inputPorts: [{ name: 'request' }],
+      outputPorts: [{ name: 'result' }],
+      runtimeInspection: { available: false },
+    };
+    classifier.readiness = { state: 'unimplemented', detail: 'Pending provider integration' };
+    classifier.provenance = {
+      representation: 'runtime-generated',
+      evidence: {
+        source: '<img src=x onerror=alert(1)>',
+        evidenceClass: 'Factory record',
+        confidence: 'high',
+        details: 'Read-only source text',
+      },
+    };
+    useGraphStore.setState({ graph });
+    selectNode('classifier');
+    render(
+      <ReactFlowProvider>
+        <ContextInspector
+          evidence={{ number: 2, target: 'node', id: 'classifier', label: 'Classifier', provenance: classifier.provenance, nativeControlEdge: false }}
+          relationship={{
+            id: 'background-notify',
+            kind: 'external-orchestration',
+            source: { kind: 'node', nodeId: 'classifier' },
+            target: { kind: 'external', externalId: 'background-runner', label: 'Background runner' },
+            label: 'Notify runner',
+            provenance: {
+              representation: 'external-orchestration',
+              evidence: { source: 'runner config', evidenceClass: 'System boundary', confidence: 'high' },
+            },
+          }}
+        />
+      </ReactFlowProvider>,
+    );
+
+    expect(screen.getByText('Evidence details · #2')).toBeTruthy();
+    expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeTruthy();
+    expect(document.querySelector('img')).toBeNull();
+    expect(screen.getByText('External orchestration')).toBeTruthy();
+    expect(screen.getByText(/Not a native control edge/)).toBeTruthy();
+    expect(screen.getByText('Opaque / prebuilt Step')).toBeTruthy();
+    expect(screen.getByText('Unimplemented')).toBeTruthy();
+    expect((screen.getByRole('textbox', { name: 'Readiness detail' }) as HTMLTextAreaElement).value).toBe('Pending provider integration');
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Inspect at runtime' }).disabled).toBe(true);
+  });
+
   it('edits the v3 HITL response contract and sensitive policy independently', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     selectNode('classifier');
@@ -393,7 +446,7 @@ describe('ContextInspector routing details', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Routing mode' }));
     fireEvent.click(screen.getByRole('option', { name: 'Fallback' }));
-    expect(useGraphStore.getState().graph.edges.find((edge) => edge.id === 'clarify-write-brief')).toEqual({
+    expect(useGraphStore.getState().graph.edges.find((edge) => edge.id === 'clarify-write-brief')).toMatchObject({
       id: 'clarify-write-brief',
       source: 'clarify-request',
       target: 'write-research-brief',

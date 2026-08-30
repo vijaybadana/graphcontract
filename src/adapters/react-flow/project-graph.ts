@@ -6,6 +6,9 @@ import {
   GraphNode,
   GraphProposal,
   GraphSubgraph,
+  NonNativeRelationship,
+  Provenance,
+  ProvenanceRepresentation,
   resolveEffectiveCapabilities,
   RuntimeProjectionFixture,
   validateGraph,
@@ -31,11 +34,30 @@ export type CanvasEdgeData = {
   domainEdgeIds: string[];
   projection: 'domain' | 'subgraph-proxy' | 'runtime-instance';
   runtimeInstanceId?: string;
+  /** Evidence markers are an optional, workspace-only overlay. */
+  evidenceMarker?: number;
+  onEvidenceActivate?: (edgeId: string) => void;
   presentation: CanvasEdgePresentation;
   [key: string]: unknown;
 };
 
-export type CanvasFlowEdge = Edge<CanvasEdgeData>;
+export type CanvasNativeEdge = Edge<CanvasEdgeData, 'routing'>;
+
+/** A projected system relationship is never a GraphEdge or a routing endpoint. */
+export type CanvasSystemRelationshipEdgeData = {
+  relationship: NonNativeRelationship;
+  projection: 'system-relationship';
+  evidenceMarker?: number;
+  onEvidenceActivate?: (relationshipId: string) => void;
+  [key: string]: unknown;
+};
+
+export type CanvasSystemRelationshipEdge = Edge<
+  CanvasSystemRelationshipEdgeData,
+  'systemRelationship'
+>;
+
+export type CanvasFlowEdge = CanvasNativeEdge | CanvasSystemRelationshipEdge;
 
 export type CanvasEdgePresentation = {
   /** The stored routing mode; loop remains a derived presentation only. */
@@ -46,6 +68,20 @@ export type CanvasEdgePresentation = {
   proposalState?: 'added' | 'updated' | 'removed';
   /** Runtime-only lines visually attach observed instances without becoming routes. */
   runtimeInstance?: boolean;
+  /** Provenance changes the treatment, but never the native route semantics. */
+  provenance: ProvenanceRepresentation;
+};
+
+export type EvidenceMarkerTarget = 'node' | 'edge' | 'relationship';
+
+export type EvidenceMarker = {
+  number: number;
+  target: EvidenceMarkerTarget;
+  id: string;
+  label: string;
+  provenance: Provenance;
+  /** Explicit because only native edges participate in compiled routing. */
+  nativeControlEdge: boolean;
 };
 
 export type CanvasProjectionMode = 'design' | 'runtime';
@@ -53,6 +89,57 @@ export type CanvasProjectionOptions = {
   mode?: CanvasProjectionMode;
   runtimeFixture?: RuntimeProjectionFixture | null;
 };
+
+export function isCanvasNativeEdge(edge: CanvasFlowEdge): edge is CanvasNativeEdge {
+  return edge.type === 'routing' && edge.data?.projection !== 'system-relationship';
+}
+
+export function isCanvasSystemRelationshipEdge(
+  edge: CanvasFlowEdge,
+): edge is CanvasSystemRelationshipEdge {
+  return edge.type === 'systemRelationship' && edge.data?.projection === 'system-relationship';
+}
+
+/**
+ * Markers are deliberately assigned from stable canonical collections, not
+ * render order or geometry. Only supplied evidence receives a marker.
+ */
+export function evidenceMarkersForGraph(graph: WorkflowGraph): EvidenceMarker[] {
+  const candidates: Array<Omit<EvidenceMarker, 'number'>> = [
+    ...graph.nodes
+      .filter((node) => Boolean(node.provenance?.evidence))
+      .map((node) => ({
+        target: 'node' as const,
+        id: node.id,
+        label: node.label,
+        provenance: node.provenance!,
+        nativeControlEdge: false,
+      })),
+    ...graph.edges
+      .filter((edge) => Boolean(edge.provenance?.evidence))
+      .map((edge) => ({
+        target: 'edge' as const,
+        id: edge.id,
+        label: edge.label?.trim() || `${edge.source} → ${edge.target}`,
+        provenance: edge.provenance!,
+        nativeControlEdge: true,
+      })),
+    ...graph.relationships
+      .filter((relationship) => Boolean(relationship.provenance.evidence))
+      .map((relationship) => ({
+        target: 'relationship' as const,
+        id: relationship.id,
+        label: relationship.label?.trim() || relationship.kind,
+        provenance: relationship.provenance,
+        nativeControlEdge: false,
+      })),
+  ];
+  return candidates
+    .sort((left, right) =>
+      `${left.target}:${left.id}`.localeCompare(`${right.target}:${right.id}`),
+    )
+    .map((marker, index) => ({ ...marker, number: index + 1 }));
+}
 
 type ProjectedDomainEdge = {
   edge: GraphEdge;
@@ -73,6 +160,7 @@ export function domainEdgeIdsForCanvasEdge(edge: CanvasFlowEdge): string[] {
   // React Flow permits an edge without data even when the projected edge type
   // is more specific. Treat that as an unselectable, non-domain edge rather
   // than letting a transient canvas edge break the editor.
+  if (!isCanvasNativeEdge(edge)) return [];
   const domainEdgeIds = edge.data?.domainEdgeIds;
   return Array.isArray(domainEdgeIds)
     ? domainEdgeIds.filter((edgeId): edgeId is string => typeof edgeId === 'string')
@@ -80,7 +168,7 @@ export function domainEdgeIdsForCanvasEdge(edge: CanvasFlowEdge): string[] {
 }
 
 export function isSubgraphProxyEdge(edge: CanvasFlowEdge): boolean {
-  return edge.data?.projection === 'subgraph-proxy';
+  return isCanvasNativeEdge(edge) && edge.data?.projection === 'subgraph-proxy';
 }
 
 /** A collapsed proxy is selected when any canonical edge it represents is selected. */
@@ -114,7 +202,7 @@ export function canConnectCanvasEndpoints(
 
 /** Proxies stand for several or hidden canonical edges and are never reconnectable. */
 export function canReconnectCanvasEdge(edge: CanvasFlowEdge): boolean {
-  return edge.data?.projection === 'domain' && domainEdgeIdsForCanvasEdge(edge).length === 1;
+  return isCanvasNativeEdge(edge) && edge.data?.projection === 'domain' && domainEdgeIdsForCanvasEdge(edge).length === 1;
 }
 
 function edgeVisualState(
@@ -222,7 +310,7 @@ function projectEdge(
   domainEdgeIds: string[],
   projection: CanvasEdgeData['projection'],
   presentation: CanvasEdgePresentation,
-): CanvasFlowEdge {
+): CanvasNativeEdge {
   const color = presentation.frozen
     ? '#9ca3af'
     : presentation.invalid
@@ -592,6 +680,7 @@ export function projectGraphToCanvas(
     invalid: group.some((candidate) => isEdgeInvalid(candidate, preview, validationIssues)),
     frozen: graph.status === 'frozen',
     proposalState: proposalStateForEdges(group, visibleProposal),
+    provenance: edge.provenance?.representation ?? 'declared',
   });
   for (const domainEdge of domainEdges) {
     const collapsedInternal =
@@ -706,6 +795,7 @@ export function projectGraphToCanvas(
             invalid: false,
             frozen: true,
             runtimeInstance: true,
+            provenance: 'runtime-generated',
           },
         ),
       );
@@ -731,10 +821,91 @@ export function projectGraphToCanvas(
             invalid: false,
             frozen: true,
             runtimeInstance: true,
+            provenance: 'runtime-generated',
           },
         ),
       );
     }
+  }
+
+  // Relationships intentionally bypass every native-edge branch above: they
+  // never collapse into proxy endpoints, affect reachability, or inherit a
+  // reconnection/delete affordance. External tiles exist only in this canvas
+  // projection and are deterministically positioned from their node endpoint.
+  const externalTileIds = new Set<string>();
+  const externalTileWidth = 192;
+  const externalTileHeight = 72;
+  const externalTileGap = 168;
+  const relationshipEndpointId = (endpoint: NonNativeRelationship['source']) =>
+    endpoint.kind === 'node'
+      ? endpoint.nodeId
+      : `external-system:${encodeURIComponent(endpoint.externalId)}`;
+  const systemRelationships = [...(preview.relationships ?? [])].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+  for (const relationship of systemRelationships) {
+    const externalEndpoint = relationship.source.kind === 'external'
+      ? relationship.source
+      : relationship.target.kind === 'external'
+        ? relationship.target
+        : null;
+    const nodeEndpoint = relationship.source.kind === 'node'
+      ? relationship.source
+      : relationship.target.kind === 'node'
+        ? relationship.target
+        : null;
+    if (!externalEndpoint || !nodeEndpoint) continue;
+
+    const tileId = relationshipEndpointId(externalEndpoint);
+    if (!externalTileIds.has(tileId)) {
+      externalTileIds.add(tileId);
+      const anchor = preview.nodes.find((node) => node.id === nodeEndpoint.nodeId);
+      const anchorPosition = anchor
+        ? absolutePosition(anchor, subgraphsById)
+        : { x: 0, y: 0 };
+      const externalIsSource = relationship.source.kind === 'external';
+      nodes.push({
+        id: tileId,
+        type: 'externalSystemTile',
+        position: {
+          x: externalIsSource
+            ? Math.max(12, anchorPosition.x - externalTileWidth - externalTileGap)
+            : anchorPosition.x + CONTRACT_NODE_WIDTH + externalTileGap,
+          y: Math.max(12, anchorPosition.y + (CONTRACT_NODE_HEIGHT - externalTileHeight) / 2),
+        },
+        width: externalTileWidth,
+        height: externalTileHeight,
+        initialWidth: externalTileWidth,
+        initialHeight: externalTileHeight,
+        selectable: false,
+        draggable: false,
+        connectable: false,
+        deletable: false,
+        focusable: false,
+        ariaLabel: `External system ${externalEndpoint.label}. Projection-only boundary tile.`,
+        data: {
+          externalId: externalEndpoint.externalId,
+          label: externalEndpoint.label,
+        },
+      });
+    }
+    edges.push({
+      id: `system-relationship:${encodeURIComponent(relationship.id)}`,
+      type: 'systemRelationship',
+      source: relationshipEndpointId(relationship.source),
+      target: relationshipEndpointId(relationship.target),
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: relationship.kind === 'external-orchestration' ? '#6b7280' : '#6d28d9',
+      },
+      selectable: true,
+      reconnectable: false,
+      interactionWidth: 34,
+      data: {
+        relationship,
+        projection: 'system-relationship',
+      },
+    });
   }
 
   return { nodes, edges };

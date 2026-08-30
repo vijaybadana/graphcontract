@@ -45,6 +45,9 @@
 .graph-capability-strip__item--checkpoint { color: #7136cc; }
 .graph-capability-strip__item--store { color: #047857; }
 .graph-capability-strip__item--runtime { color: #475569; }
+.graph-capability-strip__item--evidence { color: #2563eb; }
+.graph-capability-strip__item--external { color: #4b5563; border-style: dashed; }
+.graph-capability-strip__item:disabled { cursor: not-allowed; opacity: .55; }
 
 .graph-capability-strip__item-copy { display: grid; min-width: 0; line-height: 1.08; }
 .graph-capability-strip__item-copy strong { color: #17211c; font-size: 9px; font-weight: 760; }

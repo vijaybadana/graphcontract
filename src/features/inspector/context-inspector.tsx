@@ -22,6 +22,8 @@ import {
   HumanSelectionChoice,
   SensitiveEffectPolicy,
   SendMapConfig,
+  NonNativeRelationship,
+  ProvenanceEvidence,
   StepExecutor,
   StepModifierSummary,
   ValidationIssue,
@@ -29,6 +31,7 @@ import {
   WorkflowGraph,
 } from '@/src/domain';
 import { topologyDerivedLoopEdgeIds } from '@/src/adapters/react-flow/project-graph';
+import type { EvidenceMarker } from '@/src/adapters/react-flow/project-graph';
 import { evaluateConnection } from '@/src/application/connection-policy';
 import type { StepModifierInspectorSection } from '@/src/features/canvas/contract-node';
 import type { RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
@@ -47,8 +50,59 @@ import {
 
 type StepNode = Extract<GraphNode, { kind: 'step' }>;
 type StepHitlConfig = NonNullable<StepNode['hitl']>;
-type StepReadiness = NonNullable<StepNode['modifiers']>['readiness'];
+type StepReadiness = NonNullable<StepNode['readiness']>['state'];
 type StepHitlResponse = NonNullable<StepHitlConfig['response']>;
+
+const provenanceLabel = (value: EvidenceMarker['provenance']['representation']) =>
+  value === 'runtime-generated'
+    ? 'Runtime generated'
+    : value === 'derived-semantic'
+      ? 'Derived semantic'
+      : value === 'external-orchestration'
+        ? 'External orchestration'
+        : 'Declared';
+
+function EvidenceDetails({ evidence, marker }: { evidence: ProvenanceEvidence; marker: EvidenceMarker }) {
+  return (
+    <section className="context-inspector__group context-inspector__group--evidence" aria-labelledby="evidence-details-heading">
+      <h3 id="evidence-details-heading">Evidence details · #{marker.number}</h3>
+      <div className="context-inspector__fields">
+        <Field label="Representation"><p className="context-inspector__read-only-value">{provenanceLabel(marker.provenance.representation)}</p></Field>
+        <Field label="Element"><p className="context-inspector__read-only-value">{marker.label}</p></Field>
+        <Field label="Source"><p className="context-inspector__read-only-value">{evidence.source}</p></Field>
+        <Field label="Evidence class"><p className="context-inspector__read-only-value">{evidence.evidenceClass}</p></Field>
+        <Field label="Confidence"><p className="context-inspector__read-only-value">{evidence.confidence}</p></Field>
+        {evidence.details && <Field label="Notes"><p className="context-inspector__read-only-value">{evidence.details}</p></Field>}
+        {evidence.timestamp && <Field label="Recorded"><p className="context-inspector__read-only-value">{evidence.timestamp}</p></Field>}
+      </div>
+      <p className="context-inspector__read-only" role="status">
+        {marker.nativeControlEdge ? 'Native control edge: yes.' : 'Native control edge: no.'} Source values are shown as inert untrusted text.
+      </p>
+    </section>
+  );
+}
+
+function SystemRelationshipDetails({ relationship }: { relationship: NonNativeRelationship }) {
+  const endpoint = (value: NonNativeRelationship['source']) =>
+    value.kind === 'node' ? `Graph node · ${value.nodeId}` : `External system · ${value.label}`;
+  const kind = relationship.kind === 'spawned-run'
+    ? 'Spawned run'
+    : relationship.kind === 'spawned-thread'
+      ? 'Spawned thread'
+      : 'External orchestration';
+  return (
+    <section className="context-inspector__group context-inspector__group--relationship" aria-labelledby="system-relationship-heading">
+      <h3 id="system-relationship-heading">{kind}</h3>
+      <div className="context-inspector__fields">
+        <Field label="Relationship"><p className="context-inspector__read-only-value">{relationship.label || relationship.id}</p></Field>
+        <Field label="Source"><p className="context-inspector__read-only-value">{endpoint(relationship.source)}</p></Field>
+        <Field label="Target"><p className="context-inspector__read-only-value">{endpoint(relationship.target)}</p></Field>
+        <Field label="Treatment"><p className="context-inspector__read-only-value">{relationship.kind === 'external-orchestration' ? 'Boundary-crossing grey dashed path' : 'Portal / double-line relationship'}</p></Field>
+      </div>
+      <p className="context-inspector__read-only" role="status">Not a native control edge. It cannot reconnect, delete, enter collapsed proxies, or change compiled reachability.</p>
+    </section>
+  );
+}
 
 const executorOptions: readonly InspectorSelectOption<StepExecutor>[] = [
   { value: 'deterministic', label: 'Deterministic' },
@@ -249,11 +303,15 @@ export function ContextInspector({
   focusRequest,
   graphSettingsRequest,
   runtimeInstance,
+  relationship,
+  evidence,
   readOnly = false,
 }: {
   focusRequest?: InspectorFocusRequest | null;
   graphSettingsRequest?: GraphSettingsRequest | null;
   runtimeInstance?: RuntimeInstanceInspectorSelection | null;
+  relationship?: NonNativeRelationship | null;
+  evidence?: EvidenceMarker | null;
   readOnly?: boolean;
 }) {
   const graph = useGraphStore((state) => state.graph);
@@ -271,6 +329,7 @@ export function ContextInspector({
   const updateEdge = useGraphStore((state) => state.updateEdge);
   const removeEdge = useGraphStore((state) => state.removeEdge);
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
+  const [opaqueInspectionOpen, setOpaqueInspectionOpen] = useState(false);
   const previewTriggerRef = useRef<HTMLButtonElement>(null);
   const editable = graph.status === 'draft' && !proposal && !readOnly;
   const { fitView } = useReactFlow();
@@ -334,10 +393,7 @@ export function ContextInspector({
 
   const updateReadiness = (readiness: StepReadiness | 'ready') => {
     if (node?.kind !== 'step') return;
-    const modifiers = { ...node.modifiers };
-    if (readiness === 'ready') delete modifiers.readiness;
-    else modifiers.readiness = readiness;
-    updateNode(node.id, { modifiers });
+    updateNode(node.id, { readiness: { state: readiness } });
   };
 
   const updateHitlResponse = (response: StepHitlResponse) => {
@@ -371,7 +427,9 @@ export function ContextInspector({
         <p className="context-inspector__eyebrow">Context</p>
         <h2>Inspector</h2>
       </header>
-      {!runtimeInstance && !node && !subgraph && !edge && (
+      {evidence?.provenance.evidence && <div className="context-inspector__content"><EvidenceDetails marker={evidence} evidence={evidence.provenance.evidence} /></div>}
+      {relationship && <div className="context-inspector__content"><SystemRelationshipDetails relationship={relationship} /></div>}
+      {!runtimeInstance && !relationship && !node && !subgraph && !edge && (
         <div className="context-inspector__content">
           <p className="context-inspector__empty">
             Select a node, subgraph, or edge to configure it. Shift-click or drag-select multiple nodes.
@@ -566,6 +624,17 @@ export function ContextInspector({
               </Field>
             </div>
           </section>
+          {node.kind === 'end' && (
+            <section className="context-inspector__group context-inspector__group--outcome" aria-labelledby="end-outcome-heading">
+              <h3 id="end-outcome-heading">Terminal outcome</h3>
+              <p className="context-inspector__read-only-value">
+                {node.outcome?.kind === 'domain-specific'
+                  ? node.outcome.detail || 'Domain-specific outcome needs detail'
+                  : node.outcome?.kind?.replace('-', ' ') || 'Completed'}
+              </p>
+              <p className="context-inspector__help">End is a semantic terminal state, not automatically a successful result.</p>
+            </section>
+          )}
           {node.kind === 'step' && (
             <>
             <section
@@ -804,6 +873,36 @@ export function ContextInspector({
               storeAccessRef={(element) => { stepSectionRefs.current.storeAccess = element ?? undefined; }}
               retryRef={(element) => { stepSectionRefs.current.retry = element ?? undefined; }}
             />
+            {node.opaque && (
+              <section className="context-inspector__group context-inspector__group--opaque" aria-labelledby="opaque-step-heading">
+                <h3 id="opaque-step-heading">Opaque / prebuilt Step</h3>
+                <div className="context-inspector__fields">
+                  <Field label="Factory"><p className="context-inspector__read-only-value">{node.opaque.factoryLabel}</p></Field>
+                  <Field label="Known inputs"><p className="context-inspector__read-only-value">{node.opaque.inputPorts.map((port) => port.name).join(', ') || 'No declared input ports'}</p></Field>
+                  <Field label="Known outputs"><p className="context-inspector__read-only-value">{node.opaque.outputPorts.map((port) => port.name).join(', ') || 'No declared output ports'}</p></Field>
+                </div>
+                <p className="context-inspector__help">Only the declared factory and interface are shown. Internal child topology is intentionally unknown.</p>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!node.opaque.runtimeInspection.available}
+                  aria-expanded={node.opaque.runtimeInspection.available ? opaqueInspectionOpen : undefined}
+                  onClick={() => setOpaqueInspectionOpen((open) => !open)}
+                >
+                  Inspect at runtime
+                </button>
+                {!node.opaque.runtimeInspection.available && <p className="context-inspector__read-only" role="status">Runtime inspection is unavailable because the schema provides no inspection evidence.</p>}
+                {node.opaque.runtimeInspection.available && opaqueInspectionOpen && node.opaque.runtimeInspection.evidence && (
+                  <div className="context-inspector__opaque-evidence">
+                    <strong>Supplied inspection evidence</strong>
+                    <p>{node.opaque.runtimeInspection.evidence.source}</p>
+                    <p>{node.opaque.runtimeInspection.evidence.evidenceClass} · {node.opaque.runtimeInspection.evidence.confidence} confidence</p>
+                    {node.opaque.runtimeInspection.evidence.details && <p>{node.opaque.runtimeInspection.evidence.details}</p>}
+                    <small>Existing schema evidence only — this workspace does not perform runtime inspection.</small>
+                  </div>
+                )}
+              </section>
+            )}
             <section
               ref={(element) => { stepSectionRefs.current.modifiers = element ?? undefined; }}
               id="inspector-step-modifiers"
@@ -825,7 +924,7 @@ export function ContextInspector({
                 <Field label="Readiness">
                   <select
                     aria-label="Readiness"
-                    value={node.modifiers?.readiness ?? 'ready'}
+                    value={node.readiness?.state ?? node.modifiers?.readiness ?? 'ready'}
                     disabled={!editable}
                     onChange={(event) => updateReadiness(event.target.value as StepReadiness | 'ready')}
                     className="input"
@@ -835,6 +934,23 @@ export function ContextInspector({
                     <option value="unimplemented">Unimplemented</option>
                   </select>
                 </Field>
+                {node.readiness && node.readiness.state !== 'ready' && (
+                  <Field label="Readiness detail">
+                    <textarea
+                      aria-label="Readiness detail"
+                      value={node.readiness.detail ?? ''}
+                      disabled={!editable}
+                      onChange={(event) => {
+                        const readiness = { ...node.readiness! };
+                        if (event.target.value.trim()) readiness.detail = event.target.value;
+                        else delete readiness.detail;
+                        updateNode(node.id, { readiness });
+                      }}
+                      className="input min-h-16 resize-y"
+                      placeholder="What is degraded or unimplemented?"
+                    />
+                  </Field>
+                )}
               </div>
             </section>
             </>

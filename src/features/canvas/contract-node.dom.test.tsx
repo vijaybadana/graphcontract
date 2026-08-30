@@ -186,4 +186,51 @@ describe('ContractNode Step anatomy', () => {
       expect.objectContaining({ id: 'retryFallback', inspectorSection: 'retry', accessibleLabel: 'Internal retry policy' }),
     ]);
   });
+
+  it('renders v6 provenance, opaque readiness, and semantic outcomes with text cues', async () => {
+    render(
+      <MountedContractNode
+        data={{
+          id: 'prebuilt-agent',
+          kind: 'step',
+          executor: 'ai',
+          label: 'Prebuilt agent',
+          position: { x: 120, y: 80 },
+          provenance: { representation: 'runtime-generated' },
+          readiness: { state: 'degraded', detail: 'Partial retries' },
+          opaque: {
+            factoryLabel: 'create_prebuilt_agent',
+            inputPorts: [{ name: 'request' }],
+            outputPorts: [{ name: 'result' }],
+            runtimeInspection: { available: false },
+          },
+          evidenceMarker: 4,
+        }}
+      />,
+    );
+    const step = (await screen.findByText('Prebuilt agent')).closest('.contract-node-shell')!;
+    expect(step.getAttribute('data-provenance')).toBe('runtime-generated');
+    expect(step.classList.contains('provenance--runtime-generated')).toBe(true);
+    expect(step.getAttribute('data-readiness')).toBe('degraded');
+    expect(step.textContent).toContain('Opaque');
+    expect(step.textContent).toContain('Degraded');
+    expect(step.querySelector('[aria-label^="Evidence marker 4"]')).toBeTruthy();
+
+    cleanup();
+    render(
+      <MountedContractNode
+        data={{
+          id: 'await-reply',
+          kind: 'end',
+          label: 'Await reply',
+          position: { x: 120, y: 80 },
+          provenance: { representation: 'derived-semantic' },
+          outcome: { kind: 'awaiting-reply' },
+        }}
+      />,
+    );
+    const end = (await screen.findByText('Await reply')).closest('.contract-node-shell')!;
+    expect(end.classList.contains('provenance--derived-semantic')).toBe(true);
+    expect(end.textContent).toContain('awaiting reply');
+  });
 });

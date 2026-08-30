@@ -18,7 +18,7 @@ import {
 
 import type {
   CanvasEdgePresentation,
-  CanvasFlowEdge,
+  CanvasNativeEdge,
 } from '@/src/adapters/react-flow/project-graph';
 
 import './routing-edge.css';
@@ -39,6 +39,15 @@ export function routingEdgeTokens(presentation: CanvasEdgePresentation): Routing
   }
   if (presentation.invalid) {
     return { color: '#e0353d', haloColor: 'rgb(224 53 61 / 30%)', dasharray: '4 3' };
+  }
+  if (presentation.provenance === 'runtime-generated') {
+    return { color: '#2563eb', haloColor: 'rgb(37 99 235 / 28%)', dasharray: '2 5' };
+  }
+  if (presentation.provenance === 'derived-semantic') {
+    return { color: '#6d28d9', haloColor: 'rgb(109 40 217 / 28%)', dasharray: '11 4 2 4' };
+  }
+  if (presentation.provenance === 'external-orchestration') {
+    return { color: '#6b7280', haloColor: 'rgb(107 114 128 / 28%)', dasharray: '7 5' };
   }
   if (presentation.loop) {
     return { color: '#ea6a18', haloColor: 'rgb(234 106 24 / 28%)' };
@@ -93,6 +102,11 @@ function semanticName(presentation: CanvasEdgePresentation): string {
   return 'Edge';
 }
 
+function provenanceName(presentation: CanvasEdgePresentation): string | undefined {
+  if (presentation.provenance === 'declared') return undefined;
+  return presentation.provenance.replace('-', ' ');
+}
+
 function proposalDescription(presentation: CanvasEdgePresentation): string | undefined {
   return presentation.proposalState ? `Proposed ${presentation.proposalState}` : undefined;
 }
@@ -111,7 +125,7 @@ export function RoutingEdge({
   targetY,
   targetPosition = Position.Left,
   interactionWidth,
-}: EdgeProps<CanvasFlowEdge>) {
+}: EdgeProps<CanvasNativeEdge>) {
   const presentation = data.presentation;
   const [edgePath, labelX, labelY] = presentation.loop
     ? loopPath(sourceX, sourceY, targetX, targetY)
@@ -130,6 +144,7 @@ export function RoutingEdge({
   const displayLabel = routeLabel || (presentation.loop ? 'continue' : '');
   const semantic = semanticName(presentation);
   const proposal = proposalDescription(presentation);
+  const provenance = provenanceName(presentation);
   const showSourceDot = presentation.mode !== 'normal' && !presentation.loop && !presentation.runtimeInstance;
   const showLabel = Boolean(
     !presentation.runtimeInstance &&
@@ -137,7 +152,9 @@ export function RoutingEdge({
       presentation.mode !== 'normal' ||
       presentation.invalid ||
       presentation.frozen ||
-      proposal),
+      proposal ||
+      provenance ||
+      data.evidenceMarker),
   );
   const pathStyle = {
     ...style,
@@ -159,11 +176,11 @@ export function RoutingEdge({
         path={edgePath}
         markerEnd={markerEnd}
         interactionWidth={interactionWidth ?? 28}
-        className={`routing-edge__path routing-edge--${presentation.mode} ${
+          className={`routing-edge__path routing-edge--${presentation.mode} ${
           presentation.loop ? 'routing-edge--loop' : ''
         } ${presentation.invalid ? 'routing-edge--invalid' : ''} ${
           presentation.frozen ? 'routing-edge--frozen' : ''
-        } ${proposal ? `routing-edge--proposal-${presentation.proposalState}` : ''}`}
+        } ${proposal ? `routing-edge--proposal-${presentation.proposalState}` : ''} provenance--${presentation.provenance}`}
         style={pathStyle}
       />
       {showSourceDot && (
@@ -176,7 +193,7 @@ export function RoutingEdge({
           aria-hidden="true"
         />
       )}
-      {showLabel && (
+      {(showLabel || data.evidenceMarker) && (
         <EdgeLabelRenderer>
           <div
             className={`routing-edge-label routing-edge-label--${presentation.mode} ${
@@ -189,6 +206,7 @@ export function RoutingEdge({
             data-invalid={presentation.invalid || undefined}
             data-frozen={presentation.frozen || undefined}
             data-proposal-state={presentation.proposalState}
+            data-provenance={presentation.provenance}
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)` }}
             aria-label={[
               semantic,
@@ -196,6 +214,7 @@ export function RoutingEdge({
               presentation.invalid ? 'invalid' : undefined,
               presentation.frozen ? 'frozen' : undefined,
               proposal,
+              provenance,
             ]
               .filter(Boolean)
               .join(', ')}
@@ -224,8 +243,22 @@ export function RoutingEdge({
               <span className="routing-edge-label__text">{displayLabel || semantic}</span>
               {presentation.loop && <span className="routing-edge-label__cue">Loop</span>}
               {proposal && <span className="routing-edge-label__proposal">{proposal}</span>}
+              {provenance && <span className="routing-edge-label__provenance">{provenance}</span>}
               {presentation.invalid && <span className="routing-edge-label__state">Invalid</span>}
               {presentation.frozen && <span className="routing-edge-label__state">Frozen</span>}
+              {data.evidenceMarker && (
+                <button
+                  type="button"
+                  className="routing-edge-label__evidence-marker nodrag nopan"
+                  aria-label={`Evidence marker ${data.evidenceMarker} for ${displayLabel || semantic}. Open evidence details.`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    data.onEvidenceActivate?.(id);
+                  }}
+                >
+                  {data.evidenceMarker}
+                </button>
+              )}
             </span>
           </div>
         </EdgeLabelRenderer>

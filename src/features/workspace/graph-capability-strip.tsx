@@ -3,7 +3,9 @@
 import {
   BracketsCurlyIcon,
   DatabaseIcon,
+  EyeIcon,
   FloppyDiskIcon,
+  GlobeHemisphereWestIcon,
   TerminalWindowIcon,
 } from '@phosphor-icons/react';
 import type { Icon } from '@phosphor-icons/react';
@@ -13,23 +15,28 @@ import type { GraphDurabilityTab } from '@/src/features/inspector/durability-set
 
 import './graph-capability-strip.css';
 
-type CapabilityName = 'State' | 'Checkpoint' | 'Store' | 'Runtime';
+type CapabilityName = 'State' | 'Checkpoint' | 'Store' | 'Runtime' | 'Evidence' | 'External';
 
 type CapabilityStripItem = {
   name: CapabilityName;
   status: string;
   detail: string;
-  tab: GraphDurabilityTab;
-  tone: 'state' | 'checkpoint' | 'store' | 'runtime';
+  tab?: GraphDurabilityTab;
+  tone: 'state' | 'checkpoint' | 'store' | 'runtime' | 'evidence' | 'external';
   icon: Icon;
+  action?: 'settings' | 'toggle-evidence';
 };
 
 export function GraphCapabilityStrip({
   graph,
   onOpenSettings,
+  evidenceOverlayVisible,
+  onToggleEvidenceOverlay,
 }: {
   graph: WorkflowGraph;
   onOpenSettings: (tab?: GraphDurabilityTab) => void;
+  evidenceOverlayVisible: boolean;
+  onToggleEvidenceOverlay: () => void;
 }) {
   const items: CapabilityStripItem[] = [
     {
@@ -41,6 +48,7 @@ export function GraphCapabilityStrip({
       tab: 'state',
       tone: 'state',
       icon: BracketsCurlyIcon,
+      action: 'settings',
     },
     {
       name: 'Checkpoint',
@@ -51,6 +59,7 @@ export function GraphCapabilityStrip({
       tab: 'checkpoint',
       tone: 'checkpoint',
       icon: FloppyDiskIcon,
+      action: 'settings',
     },
     {
       name: 'Store',
@@ -59,6 +68,7 @@ export function GraphCapabilityStrip({
       tab: 'store',
       tone: 'store',
       icon: DatabaseIcon,
+      action: 'settings',
     },
     {
       name: 'Runtime',
@@ -69,6 +79,24 @@ export function GraphCapabilityStrip({
       tab: 'runtime',
       tone: 'runtime',
       icon: TerminalWindowIcon,
+      action: 'settings',
+    },
+    {
+      name: 'Evidence',
+      status: graph.capabilities.provenance.evidenceOverlayAvailable
+        ? evidenceOverlayVisible ? 'Showing' : 'Hidden'
+        : 'Unavailable',
+      detail: 'Projection-only overlay',
+      tone: 'evidence',
+      icon: EyeIcon,
+      action: 'toggle-evidence',
+    },
+    {
+      name: 'External',
+      status: graph.capabilities.provenance.externalOrchestrationAvailable ? 'Available' : 'Off',
+      detail: 'System boundary links',
+      tone: 'external',
+      icon: GlobeHemisphereWestIcon,
     },
   ];
 
@@ -78,21 +106,37 @@ export function GraphCapabilityStrip({
       <div className="graph-capability-strip__items">
         {items.map((item) => {
           const IconComponent = item.icon;
-          return (
+          const actionable = Boolean(item.action);
+          const disabled = item.action === 'toggle-evidence' && !graph.capabilities.provenance.evidenceOverlayAvailable;
+          const content = <>
+            <IconComponent aria-hidden="true" size={15} weight="bold" />
+            <span className="graph-capability-strip__item-copy">
+              <strong>{item.name}</strong>
+              <span>{item.status}</span>
+            </span>
+          </>;
+          return actionable ? (
             <button
               key={item.name}
               type="button"
               className={`graph-capability-strip__item graph-capability-strip__item--${item.tone}`}
-              aria-label={`${item.name}: ${item.status}, ${item.detail}. Open graph settings.`}
-              title={`Open ${item.name} settings`}
-              onClick={() => onOpenSettings(item.tab)}
+              aria-label={`${item.name}: ${item.status}, ${item.detail}.${item.action === 'settings' ? ' Open graph settings.' : ' Toggle evidence overlay.'}`}
+              title={item.action === 'settings' ? `Open ${item.name} settings` : 'Toggle evidence overlay'}
+              disabled={disabled}
+              aria-pressed={item.action === 'toggle-evidence' ? evidenceOverlayVisible : undefined}
+              onClick={() => item.action === 'settings' ? onOpenSettings(item.tab) : onToggleEvidenceOverlay()}
             >
-              <IconComponent aria-hidden="true" size={15} weight="bold" />
-              <span className="graph-capability-strip__item-copy">
-                <strong>{item.name}</strong>
-                <span>{item.status}</span>
-              </span>
+              {content}
             </button>
+          ) : (
+            <span
+              key={item.name}
+              className={`graph-capability-strip__item graph-capability-strip__item--${item.tone}`}
+              aria-label={`${item.name}: ${item.status}, ${item.detail}.`}
+              title={item.detail}
+            >
+              {content}
+            </span>
           );
         })}
       </div>

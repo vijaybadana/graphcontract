@@ -74,7 +74,8 @@
 
 .routing-edge-label__cue,
 .routing-edge-label__state,
-.routing-edge-label__proposal {
+.routing-edge-label__proposal,
+.routing-edge-label__provenance {
   border-left: 1px solid currentColor;
   padding-left: 4px;
   font-size: 8px;
@@ -85,6 +86,11 @@
 
 .routing-edge-label__state { text-decoration: underline; }
 .routing-edge-label__proposal { opacity: 0.76; }
+.routing-edge-label__provenance { color: #5b21b6; }
+.routing-edge-label[data-provenance='runtime-generated'] .routing-edge-label__provenance { color: #1d4ed8; }
+.routing-edge-label[data-provenance='external-orchestration'] .routing-edge-label__provenance { color: #4b5563; }
+.routing-edge-label__evidence-marker { display: grid; width: 1.3rem; height: 1.3rem; margin: -2px -3px -2px 0; place-items: center; border: 1px solid #2563eb; border-radius: 999px; background: #fff; color: #1d4ed8; font-size: 9px; font-weight: 850; pointer-events: all; }
+.routing-edge-label__evidence-marker:focus-visible { outline: 2px solid #17211c; outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   .routing-edge__path,
