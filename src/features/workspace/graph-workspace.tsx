@@ -27,7 +27,8 @@ import {
 } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
 import { evaluateConnection } from '@/src/application/connection-policy';
-import { GRAPH_LIBRARY_ENTRY_COUNT } from '@/src/application/graph-library-contract';
+import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
+import { graphLibraryEntries } from '@/src/application/graph-library';
 import { NodeKind, validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
@@ -54,6 +55,7 @@ import {
 } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
+import { GraphLibrarySheet } from '@/src/features/library/graph-library-sheet';
 import {
   PanelExpandButton,
   PanelCollapseButton,
@@ -123,6 +125,7 @@ export function GraphWorkspace() {
   const freezeGraph = useGraphStore((state) => state.freezeGraph);
   const unfreezeGraph = useGraphStore((state) => state.unfreezeGraph);
   const resetGraph = useGraphStore((state) => state.resetGraph);
+  const loadGraphLibraryEntry = useGraphStore((state) => state.loadGraphLibraryEntry);
   const loadResearchSupervisorDemo = useGraphStore((state) => state.loadResearchSupervisorDemo);
   const loadResearchIntakeRoutingDemo = useGraphStore((state) => state.loadResearchIntakeRoutingDemo);
   const loadHumanControlHitlDemo = useGraphStore((state) => state.loadHumanControlHitlDemo);
@@ -257,6 +260,37 @@ export function GraphWorkspace() {
     onCommitPositions: moveCanvasElements,
   });
   const { clearRenderedSelection } = canvasInteractions;
+  const currentLibraryEntryId = useMemo(
+    () => graphLibraryEntries.find((entry) => entry.graph.id === graph.id)?.id ?? null,
+    [graph.id],
+  );
+  const libraryBlockedReason = proposal
+    ? 'Library replacement is blocked while a proposal awaits human review.'
+    : graph.status === 'frozen'
+      ? 'Unfreeze the contract before opening a library graph.'
+      : null;
+  const handleOpenLibraryEntry = useCallback(
+    (entry: GraphLibraryEntry) => {
+      if (libraryBlockedReason) return;
+      const nonEmptyGraph = graph.nodes.length > 0 || graph.edges.length > 0 || graph.subgraphs.length > 0;
+      if (
+        nonEmptyGraph &&
+        !window.confirm(
+          `Replace the current canvas with “${entry.title}”? This opens an editable normalized template; one Undo restores your current workflow.`,
+        )
+      ) {
+        return;
+      }
+      if (!loadGraphLibraryEntry(entry)) return;
+      clearRenderedSelection();
+      setRuntimeSelection(null);
+      setViewMode('design');
+      setInspectorFocusRequest(null);
+      setRightTab('review');
+      setLibraryOpen(false);
+    },
+    [clearRenderedSelection, graph.edges.length, graph.nodes.length, graph.subgraphs.length, libraryBlockedReason, loadGraphLibraryEntry],
+  );
   const fitPadding = useMemo(
     () => ({
       top: '110px' as const,
@@ -583,7 +617,7 @@ export function GraphWorkspace() {
           issueCount={validationIssues.length}
           proposalPending={Boolean(proposal)}
           libraryOpen={libraryOpen}
-          libraryEntryCount={GRAPH_LIBRARY_ENTRY_COUNT}
+          libraryEntryCount={graphLibraryEntries.length}
           paletteOpen={paletteVisible}
           inspectorOpen={inspectorVisible}
           canUndo={canvasEditable && past.length > 0}
@@ -786,6 +820,14 @@ export function GraphWorkspace() {
           </aside>
         )}
       </section>
+      <GraphLibrarySheet
+        open={libraryOpen}
+        entries={graphLibraryEntries}
+        currentLoadedId={currentLibraryEntryId}
+        replacementBlockedReason={libraryBlockedReason}
+        onRequestOpen={handleOpenLibraryEntry}
+        onClose={() => setLibraryOpen(false)}
+      />
     </main>
   );
 }
