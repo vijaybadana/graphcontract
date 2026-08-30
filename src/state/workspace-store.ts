@@ -21,6 +21,7 @@ import {
   WorkflowGraph,
 } from '@/src/domain';
 import { runtimeFixtureForLoadedDynamicParallelismDemo } from '@/src/application/package-three-demo';
+import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
 
 export type WorkspaceSelection = {
   nodeIds: string[];
@@ -73,6 +74,7 @@ type WorkspaceStore = WorkspaceCore & {
   freezeGraph: () => FreezeResult;
   unfreezeGraph: () => void;
   resetGraph: () => void;
+  loadGraphLibraryEntry: (entry: Pick<GraphLibraryEntry, 'title' | 'graph'>) => boolean;
   loadResearchSupervisorDemo: () => void;
   loadResearchIntakeRoutingDemo: () => void;
   loadHumanControlHitlDemo: () => void;
@@ -376,6 +378,21 @@ export const useGraphStore = create<WorkspaceStore>()(
               fitViewRevision: state.fitViewRevision + 1,
             }));
           }
+        },
+
+        loadGraphLibraryEntry: (entry) => {
+          const transition = workspace.loadGraphLibraryEntry(currentCore(), entry);
+          commit(transition, {
+            selection: transition.changed ? emptySelection() : get().selection,
+          });
+          if (transition.changed) {
+            set((state) => ({
+              runtimeProjectionFixture: null,
+              clipboardNodeIds: [],
+              fitViewRevision: state.fitViewRevision + 1,
+            }));
+          }
+          return transition.changed;
         },
 
         loadResearchSupervisorDemo: () => {

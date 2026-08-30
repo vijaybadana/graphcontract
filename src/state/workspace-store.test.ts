@@ -109,6 +109,38 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
   });
 
+  it('loads a library entry as one undoable edit and clears transient canvas state', () => {
+    const previousGraphId = useGraphStore.getState().graph.id;
+    useGraphStore.setState({
+      runtimeProjectionFixture: {
+        graphId: previousGraphId,
+        graphUpdatedAt: useGraphStore.getState().graph.updatedAt,
+        instances: [],
+      },
+      clipboardNodeIds: ['billing'],
+      selection: {
+        nodeIds: ['billing'],
+        subgraphIds: [],
+        edgeIds: [],
+        primary: { type: 'node', id: 'billing' },
+      },
+    });
+    const fitRevision = useGraphStore.getState().fitViewRevision;
+    const graph = { ...structuredClone(sampleGraph), id: 'library-entry-graph', name: 'Library entry' };
+
+    expect(useGraphStore.getState().loadGraphLibraryEntry({ title: 'Library entry', graph })).toBe(true);
+    expect(useGraphStore.getState()).toMatchObject({
+      graph: { id: 'library-entry-graph', status: 'draft' },
+      runtimeProjectionFixture: null,
+      clipboardNodeIds: [],
+      selection: emptySelection(),
+      fitViewRevision: fitRevision + 1,
+    });
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
+  });
+
   it('loads the Human Control & HITL demo as an undoable, explicitly requested replacement', () => {
     const previousGraphId = useGraphStore.getState().graph.id;
     useGraphStore.getState().loadHumanControlHitlDemo();

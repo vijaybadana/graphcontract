@@ -723,6 +723,26 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       };
     },
 
+    loadGraphLibraryEntry(
+      state: WorkspaceCore,
+      entry: { title: string; graph: WorkflowGraph },
+    ): WorkspaceTransition {
+      if (!editable(state)) return blocked(state);
+      const issues = validateGraph(entry.graph);
+      if (issues.length > 0) {
+        return {
+          state,
+          changed: false,
+          notice: `“${entry.title}” cannot be opened because its template is invalid.`,
+        };
+      }
+      return changeGraph(
+        state,
+        () => clone(entry.graph),
+        `“${entry.title}” opened from the Graph Library. One Undo restores your previous workflow.`,
+      );
+    },
+
     loadResearchSupervisorDemo(state: WorkspaceCore): WorkspaceTransition {
       return changeGraph(
         state,

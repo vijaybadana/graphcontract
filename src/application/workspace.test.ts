@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateGraph, workflowGraphSchema } from '@/src/domain';
+import { researchSupervisorGraph, validateGraph, workflowGraphSchema } from '@/src/domain';
 import {
   buildGraphContractDownload,
   buildGraphScenariosDownload,
@@ -676,6 +676,30 @@ describe('workspace application service', () => {
     const frozen = service.freezeGraph(demo.state);
     expect(frozen.result?.ok).toBe(true);
     expect(service.loadResearchIntakeRoutingDemo(frozen.state).changed).toBe(false);
+  });
+
+  it('loads a valid library graph only through the editable accepted-graph boundary', () => {
+    const entry = {
+      title: 'Library workflow',
+      graph: { ...structuredClone(researchSupervisorGraph), id: 'library-workflow' },
+    };
+    const loaded = service.loadGraphLibraryEntry(service.createInitial(), entry);
+    expect(loaded.changed).toBe(true);
+    expect(loaded.state.graph).toMatchObject({
+      id: 'library-workflow',
+      status: 'draft',
+    });
+    expect(loaded.state.scenarios).toEqual([]);
+
+    const proposed = service.submitProposal(loaded.state, {
+      rationale: 'Keep accepted state review-only.',
+      operations: [{ type: 'update_node', nodeId: 'research-supervisor-agent', patch: { label: 'Reviewed supervisor' } }],
+    });
+    expect(service.loadGraphLibraryEntry(proposed.state, entry).changed).toBe(false);
+
+    const frozen = service.freezeGraph(loaded.state);
+    expect(frozen.result?.ok).toBe(true);
+    expect(service.loadGraphLibraryEntry(frozen.state, entry).changed).toBe(false);
   });
 
   it('supports inspector-level subgraph label, size, membership, collapse, and dissolve edits', () => {
