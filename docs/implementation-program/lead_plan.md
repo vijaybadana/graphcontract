@@ -1,65 +1,118 @@
-# Visual Language Package 2 Lead Plan
+# GRAPHCONTRACT-FINAL-PHASE Lead Plan
 
-Contract: `docs/implementation-program/lead-handover.md` Package 2, `docs/design-system/implementation-contract.md` §4, and `docs/design-system/human-control-hitl.png`
-Candidate: `/Users/vijaybadana/graphcontract`, branch `main`, starting SHA `746d367`
-Strategy: evolve schema v2 to v3 at one reviewed domain seam, then implement canvas/preview UI and WebMCP proposal support in parallel, reconcile authority/persistence at integration, and close against the protected Chromium library.
-Dispatch waves: W1 `P2-D`; W2 `P2-U` and `P2-W` in parallel after the schema-v3 seam freezes; W3 `P2-I`; W4 `P2-Q`. Lead owns architecture, progressive integration, final candidate, and owner handoff.
-Concurrency: all product mutation uses fresh embedded `gpt-5.6-terra` workers. Only non-overlapping W2 packages run concurrently. Domain, migration, integration, and browser closure remain sequential ownership gates.
-Scheduling: Gastown/lead-scheduling; reason: five dependent packages with two safe parallel seams and a protected acceptance boundary.
+Contract: owner final-phase handover, `docs/implementation-program/lead-handover.md` Packages 4–6, and `docs/design-system/implementation-contract.md` §§6–8
+Candidate: `/Users/vijaybadana/graphcontract`, branch `main`, starting SHA `c3c2a96`
+Strategy: close deterministic layout first, then advance the canonical schema through separately reviewed durability-v5 and provenance-v6 seams, then add projection-only Scenario/Proposal review views and one integrated acceptance gate.
+Dispatch waves: W1 `F1-L`; W2 `F1-U`; W3 `F2-D`; W4 `F2-U` + `F2-W`; W5 `F2-I`; W6 `F3-D`; W7 `F3-U` + `F3-W`; W8 `F3-I`; W9 `F4-S`; W10 `F4-U`; W11 `F-I`; W12 `F-Q`.
+Concurrency: only the explicitly paired UI/WebMCP seams in W4 and W7 may run concurrently in the shared candidate; every schema, integration, and acceptance boundary is sequential. Lead owns architecture, diff review, merge decisions, protected authority, and the final candidate.
+Scheduling: lead-scheduling/Gastown pilot; reason: fourteen dependent packages, two safe parallel waves, two schema freezes, and material restart-recovery value.
+Scenario coverage: layout journeys → `F1-L/F1-U`; durability and Store access → `F2-D/F2-U/F2-W`; evidence/opaque/system relationships → `F3-D/F3-U/F3-W`; scenario highlighting/downloads/proposal comparison → `F4-S/F4-U`; all-ten-template and protected regressions → `F-I/F-Q`.
+Architecture conformance: one canonical graph remains authoritative; layout, scenario highlighting, proposal overview, collapsed proxies, runtime instances, and evidence markers remain projections. Schema v4 is F1 input, v5 is the F2 capability schema, and v6 is the F3 evidence/relationship schema.
 
-## Frozen semantic seam
+## Frozen semantic seams
 
-- Active graph schema becomes v3. v2 remains read-only migration input; v1 continues through v2 normalization before v3.
-- A human-owned Step remains `kind=step, executor=human`. HITL remains an independent Step modifier and is valid on AI, Tool, deterministic, or human-owned Steps.
-- Active HITL timing is exactly `before | inside | after`. Legacy `conditional` timing migrates deterministically to `inside`; its condition is retained as an activation/reason field rather than discarded.
-- HITL owns a response contract: `approval | text | selection`, optional selection choices, and one or more allowed outcomes. Every outcome has a stable id, human label, and resume destination node id.
-- Resume destinations must correspond to canonical outgoing edges from the gated Step. Scenario enumeration follows those existing edges and annotates the human outcome; it never invents or rewires topology.
-- Sensitive-effect policy is independent of HITL and owns target, authorization, approval-required, and idempotency fields. Presence of a policy renders Sensitive; no policy is inferred from executor or HITL.
-- When sensitive approval is required, canonical validation requires an enabled `before` approval gate with an allowed `approve` outcome. Editing/proposals never auto-create HITL.
-- Preview response/resume is deterministic UI-only state. It may display the configured destination and response payload, but must state that no runtime or accepted graph mutation occurred.
-- WebMCP remains exactly three tools. It may propose v3 configuration but cannot approve, respond, resume, freeze, or mutate accepted state.
+- **F1:** deterministic compound left-to-right layout is an explicit application action. Library load and approved structural replacement invoke it once; ordinary edits and viewport changes never do. Human positions persist afterward. Projection-only loop paths, proxy IDs, runtime instance positions, and highlights never enter the graph.
+- **F2 / schema v5:** every graph owns explicit State, Checkpoint, Store, and runtime-mode capability records. Subgraphs optionally override supported records and otherwise inherit. Direct Step Store read/write is valid only when Store is enabled in effective scope. Retry owns optional internal policy metadata and never creates topology.
+- **F3 / schema v6:** native control remains `edges`. Spawned-run and external-orchestration relationships live in a separate non-native collection and cannot affect native reachability. Optional evidence attaches to graph elements and relationships; the overlay is a persisted graph capability but its visibility is UI state. Runtime-generated evidence cannot be authored through WebMCP without actual runtime evidence. Opaque Steps expose only declared interface/factory metadata. End nodes gain a semantic outcome normalized from their existing label when migrated.
+- **F4:** design-time scenario rows and selected-path highlights are derived from the accepted graph. Official frozen scenarios remain human-generated. Static Send remains `×N`. Per-case/all downloads are human UI only. Proposal view compares the accepted and progressive candidate graphs without creating a second canonical graph.
+- Exactly three WebMCP tools remain: `get_graph`, `propose_graph_changes`, `get_branch_scenarios`. Approve/Reject/Freeze/Unfreeze/preview response/download remain human-only.
 
 ## Contract preservation
 
-- Package 1 is frozen → active paths: migration, Step presets/modifier rail, proposal authority, downloads and 43-case browser library → prohibited failure: active legacy work kinds, lost modifier distinction, reset/freeze bypass, or weakened acceptance → proof: full regression at `P2-Q`.
-- HITL and execution ownership remain orthogonal → path: v3 schema → projection → inspector → prohibited failure: executor changes caused by enabling a gate, or human executor implying HITL → packages: `P2-D`/`P2-U` → proof: canonical combination and DOM fixtures.
-- Human outcome topology remains canonical → path: response outcome resume destination → existing outgoing edge → scenario branch → prohibited failure: invented edge, direct runtime mutation, infinite traversal, or non-deterministic ordering → package: `P2-D` → proof: validation/scenario/export snapshots.
-- Human authority remains UI-only → path: preview sheet local response/resume → prohibited failure: WebMCP authority tool, accepted graph mutation, frozen/proposal bypass, or false live-run claim → packages: `P2-U`/`P2-W`/`P2-I` → proof: adapter, state, DOM, and browser tests.
-- Sensitive approval is explicit → path: policy validation and inspector → prohibited failure: Sensitive silently adds HITL, or approval-required policy validates without an eligible before-approval outcome → packages: `P2-D`/`P2-U` → proof: valid/invalid domain and inspector round trips.
-- Persistence remains draft-safe → path: v1/v2/v3 migration and pending proposal restoration → prohibited failure: parseable draft replacement, lost policy/outcome data, or stale proposal mutation → packages: `P2-D`/`P2-W`/`P2-I` → proof: migration/reload/proposal tests.
+- One canonical graph → production path: domain → application/store → React Flow projection → prohibited: persisted highlight/proxy/runtime/layout-only IDs or duplicated accepted topology → packages `F1-L`, `F4-S`, `F4-U` → proof: projection/state/browser tests.
+- Manual layout remains durable → path: library/approval/Auto-layout only → prohibited: panel resize, reload, ordinary edit, or Fit silently rearranges nodes → packages `F1-L`, `F1-U` → proof: deterministic layout/application/Chromium checks.
+- State, Checkpoint, and Store remain distinct → path: v5 capabilities → effective scope → header/subgraph/Step inspector → prohibited: generic memory flag/icon, Store R/W without availability, or retry drawn as loop → packages `F2-D`, `F2-U`, `F2-W` → proof: migration/validation/DOM/proposal checks.
+- Evidence never strengthens truth silently → path: v6 evidence class + guarded proposal operations + optional overlay → prohibited: untrusted source execution, WebMCP runtime-proof claim, hidden evidence deletion, or invented opaque children → packages `F3-D`, `F3-U`, `F3-W` → proof: domain/adapter/DOM tests.
+- Non-native relationships stay non-native → path: separate system relationship collection → projection/export annotations → prohibited: ordinary path enumeration, native validation, or React Flow control arrow treatment → packages `F3-D`, `F3-U` → proof: scenario/export/projection tests.
+- Human review authority persists → path: Scenario/Proposal UI → application/store actions → prohibited: WebMCP approval/download, pending/frozen bypass, accepted graph mutation from highlight/overview → packages `F4-S`, `F4-U`, `F-Q` → proof: state/WebMCP/browser journeys.
+- Library remains canonical and safe → path: ten registry entries → migration/layout/scenario/export/reload → prohibited: unsafe source link, invalid template, fabricated worker, or lost attribution → packages `F-I`, `F-Q` → proof: all-entry automated journey.
 
 ## Work packages
 
-- `P2-D` — schema v3, migration, validation, deterministic human-outcome scenarios and export truth; owner: embedded Backend Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: none
-  - Inputs: frozen semantic seam, current domain graph/proposal/scenario model, v1→v2 migration, persistence/export adapters, existing tests.
-  - Method: introduce normalized HITL response/outcome and sensitive policy types/schemas; migrate v2 nodes and pending proposals without losing Package 1 meaning; validate timing, selection options, outcome identities/destinations, and approval-required policy; extend cycle-safe scenario conditions with deterministic human outcomes following canonical edges.
-  - Boundary: domain, persistence migration, scenarios/exports, and focused tests only; no React UI or WebMCP JSON schema.
-  - Done: focused domain/migration/scenario/export tests pass; v1/v2 fixtures restore; schema-v3 interface and validation codes are documented in return; diff check clean.
+- `F1-L` — deterministic compound layout engine; owner: embedded Frontend Infrastructure Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: none
+  - Inputs: schema-v4 graph/subgraph/Send/Merge/loop model, existing `layout-workflow.ts`, canvas dimensions, React Flow projection, Graph Library fixtures.
+  - Method: justify and add one focused hierarchical layout dependency; implement deterministic recursive/compound LR layout, ordered branches, subgraph sizing, coherent Send/Merge lanes, and stable loop corridor hints without changing canonical endpoints.
+  - Boundary: dependency manifest, layout application module, focused unit tests; no UI controls, schema change, inspector, WebMCP, or full browser run.
+  - Produces/freeze: synchronous deterministic layout API returning only canonical node/subgraph geometry; representative linear/branch/nested/Send/loop fixtures pass.
 
-- `P2-U` — gate projection, inspector policy editor, and deterministic preview sheet; owner: embedded Frontend Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `P2-D`
-  - Inputs: frozen v3 types, HITL board, existing ContractNode/modifier rail/inspector/workspace.
-  - Method: render before/inside/after markers at the proper node boundaries with icon, position, accessible label, focus state and reduced-motion treatment; edit complete response/outcome and sensitive policy fields; add `Preview input request` sheet with human-only local response/resume and explicit preview/non-runtime language.
-  - Boundary: canvas/inspector/preview components, styles, and DOM tests; no domain, migrations, WebMCP adapter, or scenario algorithm changes.
-  - Done: AI+HITL, Tool+HITL, human-owned-without-HITL, all timings, keyboard interaction, frozen/proposal read-only behavior, and preview non-mutation are mounted-test green.
+- `F1-U` — Auto-layout action and lifecycle integration; owner: embedded Frontend Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `F1-L`
+  - Inputs: frozen layout API, workspace service/store/header, library load and proposal approval paths, fit-view coalescer.
+  - Method: add keyboard-accessible Auto-layout with reduced-motion-safe Fit; invoke layout only after library load or accepted structural replacement; make it undoable and locked during frozen/pending states; preserve manual positions during ordinary edits/reload/panel changes.
+  - Boundary: application/state/workspace UI and focused DOM/store tests; no schema or layout algorithm changes.
+  - Produces/freeze: accepted F1 behavior and focused Chromium coverage for flagship plus representative topologies.
 
-- `P2-W` — schema-v3 WebMCP proposal surface and authority guard; owner: embedded Backend Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `P2-D`
-  - Inputs: frozen v3 graph/operation schemas and existing exactly-three-tool adapter.
-  - Method: expose full HITL response/outcome and sensitive-policy shapes in add/update Step operations and descriptions; exercise progressive candidates, invalid policy rejection, stale/frozen/pending protection, and structured get_graph reporting.
-  - Boundary: WebMCP adapter/tests and proposal-facing documentation only; no UI or authority action.
-  - Done: exactly three tools; no approve/respond/resume/freeze tool; valid proposals remain review-only; invalid candidates do not mutate accepted graph; focused tests pass.
+- `F2-D` — schema-v5 durability capabilities and migration; owner: embedded Backend Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `F1-U`
+  - Inputs: active v4 schemas/migrations/proposals/scenarios, durability board, frozen seam above.
+  - Method: define graph capability records, subgraph overrides/effective inheritance, working-state/reducer summaries, checkpointer/durable-thread metadata, Store availability, runtime mode, Step retry policy and Store access validation; migrate v1–v4 deterministically and advance workspace persistence to 6.
+  - Boundary: domain, migration, exports/scenarios where metadata is retained, focused tests; no canvas/inspector/WebMCP JSON schema.
+  - Produces/freeze: schema v5 and stable validation paths/codes with draft-safe reload.
 
-- `P2-I` — application/workspace integration, fixture, persistence and authority reconciliation; owner: embedded Full-stack Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `P2-U`, `P2-W`
-  - Inputs: accepted domain, UI, and WebMCP seams plus Package 1 regression suite.
-  - Method: reconcile inspector/store updates, undo/redo, proposal preview/diff, reload, freeze/scenarios/downloads, and one compact built-in HITL demonstration with approve/request-changes/reject destinations. Ensure preview state is ephemeral and cleared safely on close/selection/status transitions without changing graph state.
-  - Boundary: integration and focused product tests; no Package 3 Send/merge or runtime simulation.
-  - Done: focused integrated tests and full Vitest/lint/build pass; clean runnable candidate for browser closure.
+- `F2-U` — durability projection and inspector; owner: embedded Frontend Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `F2-D`
+  - Inputs: v5 types/effective capability service, durability board, current node/subgraph/header/inspector components.
+  - Method: graph capability strip; inherited/overridden subgraph cues; State/Checkpoint/Store inspector sections; direct Store R/W and Retry modifier details; semantic zoom, focus, frozen/proposal states.
+  - Boundary: React Flow projection/UI/styles/DOM tests only; no domain migration or WebMCP schema.
+  - Produces/freeze: accessible v5 canvas and inspector treatment with no generic brain conflation.
 
-- `P2-Q` — protected Package 2 browser acceptance; owner: embedded QA Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `P2-I`
-  - Inputs: clean integrated candidate and existing 43-case Playwright library.
-  - Method: search and extend existing cases before adding only distinct journeys for all gate timings, AI/Tool plus HITL, preview approve/request-changes/reject without accepted/runtime mutation, sensitive approval validation, and WebMCP/frozen/proposal authority. Run discovery, focused new cases, then full cold suite.
-  - Boundary: e2e fixtures/specs and locator alignment only; product failures return to the owning package and tests are never weakened.
-  - Done: no skip/fixme/only; all Chromium cases pass with zero unexpected console warning/error/pageerror; full Vitest, lint, build, diff check, and clean tree pass.
+- `F2-W` — durability proposal/WebMCP/export surface; owner: embedded Backend Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `F2-D`
+  - Inputs: frozen v5 schemas and exactly-three-tool adapter.
+  - Method: progressive add/update capability, subgraph override, Store access and Retry proposal support; structured validation, persistence/export round trip, stale/frozen/pending protection.
+  - Boundary: WebMCP/proposal adapters and focused tests; no UI or authority action.
+  - Produces/freeze: review-only complete v5 proposal surface, still exactly three tools.
+
+- `F2-I` — v5 integration and all-template durability closure; owner: embedded Full-stack Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `F2-U`, `F2-W`
+  - Inputs: accepted v5 domain/UI/WebMCP seams and ten library entries.
+  - Method: reconcile store/history/inspector/proposal/persistence/downloads, update templates to active schema truthfully, run focused integrated checks, and close F2 browser journeys.
+  - Boundary: integration corrections only; no F3 evidence semantics.
+  - Produces/freeze: clean F2 commit and owner checkpoint.
+
+- `F3-D` — schema-v6 evidence, outcomes, and non-native relationships; owner: embedded Backend Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `F2-I`
+  - Inputs: accepted v5 graph, provenance board, canonical native edge/scenario/export model.
+  - Method: add optional element evidence, semantic End outcome, opaque interface metadata, and separate spawned/external relationship records; migrate v5 and earlier, advance persistence to 7, keep native validation/enumeration isolated while exports annotate non-native relationships.
+  - Boundary: domain/migrations/scenarios/exports/focused tests; no UI or WebMCP JSON schema.
+  - Produces/freeze: schema v6 with stable evidence and relationship invariants.
+
+- `F3-U` — provenance overlay and system-boundary projection; owner: embedded Frontend Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `F3-D`
+  - Inputs: frozen v6 types, provenance board, React Flow node/edge projection and inspector.
+  - Method: optional numbered evidence overlay/legend; declared/runtime/derived/external treatments; opaque Step interface and evidence-gated Inspect; spawned portal/double-line and external boundary projection; degraded/unimplemented cues; safe evidence inspector.
+  - Boundary: projection/UI/styles/DOM tests only; never create native edges or opaque child topology.
+  - Produces/freeze: accessible evidence/system-boundary visualization with overlay-off preservation.
+
+- `F3-W` — provenance proposal/WebMCP guard; owner: embedded Backend Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `F3-D`
+  - Inputs: frozen v6 schema and progressive proposal adapter.
+  - Method: propose evidence, opaque interface, readiness, semantic outcome, and non-native relationship data; reject unsupported runtime-generated proof claims; retain safe untrusted source text/links; preserve exactly-three-tool authority.
+  - Boundary: WebMCP/proposal/persistence adapter tests only; no visual projection.
+  - Produces/freeze: atomic, review-only v6 proposal surface.
+
+- `F3-I` — v6 integration and library attribution reconciliation; owner: embedded Full-stack Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `F3-U`, `F3-W`
+  - Inputs: accepted v6 domain/UI/WebMCP seams and Graph Library source attribution.
+  - Method: reconcile safe source rendering, registry migrations, history/persistence, downloads and representative browser journeys without claiming repository/runtime evidence.
+  - Boundary: integration corrections only; no F4 scenario/proposal view redesign.
+  - Produces/freeze: clean F3 commit and owner checkpoint.
+
+- `F4-S` — scenario projection and per-case artifacts; owner: embedded Backend/Projection Engineer; model: `gpt-5.6-terra`; effort: High; depends on: `F3-I`
+  - Inputs: v6 graph/scenario service, React Flow projection, ScenarioPanel and download adapter.
+  - Method: derive conditions/path/outcome rows and exact node/edge highlight sets; fade unrelated topology without hiding; retain Send `×N` and non-native annotations; add one-case/all-case human download artifacts.
+  - Boundary: derived services/adapters/scenario UI primitives/focused tests; no workspace view switch or proposal overview.
+  - Produces/freeze: projection-only scenario selection contract and artifacts.
+
+- `F4-U` — Design/Scenario/Proposal modes and Before/Proposed overview; owner: embedded Frontend Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `F4-S`
+  - Inputs: scenario highlight seam, existing proposal diff/panel, workspace view controls, review board.
+  - Method: add accessible mode switch; scenario selection/highlight lifecycle; proposal overview at fit scale with rationale and changed topology; preserve human-only buttons and frozen/pending locks; responsive/reduced-motion behavior.
+  - Boundary: workspace/proposal/scenario UI and DOM tests; no canonical graph or WebMCP authority change.
+  - Produces/freeze: complete final review projection.
+
+- `F-I` — final integration across ten templates; owner: embedded Full-stack Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `F4-U`
+  - Inputs: accepted F1–F4 seams, ten-entry registry, all existing package tests.
+  - Method: load → auto-layout → validate → scenario-select → persist/reload every template; reconcile migrations, inspectors, exports, undo/redo, freeze/proposal/download authority, responsive behavior; record final manual checklist/result draft.
+  - Boundary: integration fixes and focused checks only; no competition closure, deployment, screenshots, or submission work.
+  - Produces/freeze: clean integrated candidate ready for one acceptance run.
+
+- `F-Q` — final protected browser and repository acceptance; owner: embedded QA Engineer; model: `gpt-5.6-terra`; effort: XHigh; depends on: `F-I`
+  - Inputs: frozen integrated candidate and existing 57-case Playwright library.
+  - Method: extend only distinct final-phase journeys; deeply test flagship/representative graphs and all-ten lifecycle; run full Vitest, warning-free lint, production build, diff-check and one cold Chromium gate with console/page errors fatal.
+  - Boundary: e2e/tests/locator alignment and evidence only; product defects return to Lead for bounded correction; no weakened assertions.
+  - Produces/freeze: exact counts, clean tree, final result commit and owner handoff.
 
 ## Integration and escalation
 
-Lead reviews and commits every package boundary, keeps one shared candidate, and does not start Package 3. Escalate only if canonical resume destinations cannot be represented without duplicating graph topology, migration would discard authored Package 1 data, or a requested preview behavior would claim actual runtime execution. Otherwise implement the frozen seam and return exact commits/evidence.
+Lead reviews and commits each scheduler package before resolving it completed. The two schema transitions cannot overlap. F4 may consume but never persist highlights or proposal overview geometry. Escalate only if compound layout cannot preserve canonical subgraph coordinates, capability inheritance requires ambiguous runtime behavior, non-native relationships cannot remain separate from native validation, or proposal comparison would require a second accepted graph. Stop after F-Q; competition closure, submission, deployment, screenshots and demo assets require a new owner gate.
