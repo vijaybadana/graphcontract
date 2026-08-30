@@ -2207,7 +2207,8 @@ export function applyGraphOperations(
       } else {
         const patch = structuredClone(operation.patch);
         if (next.nodes[nodeIndex].kind === 'step' && patch.sensitive === null) {
-          const { sensitive: _, ...withoutSensitive } = patch;
+          const withoutSensitive = { ...patch };
+          delete withoutSensitive.sensitive;
           const updated = { ...next.nodes[nodeIndex], ...withoutSensitive } as StepGraphNode;
           delete updated.sensitive;
           next.nodes[nodeIndex] = updated;
