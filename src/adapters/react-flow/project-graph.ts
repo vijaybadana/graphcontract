@@ -22,6 +22,12 @@ import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import {
   runtimeProjectionAvailability,
 } from '@/src/features/workspace/runtime-projection';
+import {
+  ScenarioElementState,
+  ScenarioPresentation,
+  scenarioElementState,
+  scenarioPresentationClassName,
+} from '@/src/features/scenarios/scenario-presentation';
 
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
@@ -54,6 +60,8 @@ export type CanvasSystemRelationshipEdgeData = {
   evidenceMarker?: number;
   onEvidenceActivate?: (relationshipId: string) => void;
   onRelationshipActivate?: (relationshipId: string) => void;
+  /** Selected-scenario state is ephemeral and never part of the relationship. */
+  scenarioState?: ScenarioElementState;
   [key: string]: unknown;
 };
 
@@ -75,6 +83,8 @@ export type CanvasEdgePresentation = {
   runtimeInstance?: boolean;
   /** Provenance changes the treatment, but never the native route semantics. */
   provenance: ProvenanceRepresentation;
+  /** Selected-scenario state is ephemeral and never part of GraphEdge. */
+  scenarioState?: ScenarioElementState;
 };
 
 export type EvidenceMarkerTarget = 'node' | 'edge' | 'relationship';
@@ -93,6 +103,7 @@ export type CanvasProjectionMode = 'design' | 'runtime';
 export type CanvasProjectionOptions = {
   mode?: CanvasProjectionMode;
   runtimeFixture?: RuntimeProjectionFixture | null;
+  scenarioPresentation?: ScenarioPresentation | null;
 };
 
 export function isCanvasNativeEdge(edge: CanvasFlowEdge): edge is CanvasNativeEdge {
@@ -356,7 +367,10 @@ function projectEdge(
           ? `runtime-projection:${encodeURIComponent(edge.id)}:${encodeURIComponent(source)}:${encodeURIComponent(target)}`
           : edge.id,
     type: 'routing',
-    className: `contract-edge contract-edge--${presentation.mode}`,
+    className: [
+      `contract-edge contract-edge--${presentation.mode}`,
+      scenarioPresentationClassName(presentation.scenarioState),
+    ].filter(Boolean).join(' '),
     source,
     target,
     label: presentation.runtimeInstance
@@ -393,6 +407,7 @@ function subgraphFlowNode(
   subgraph: GraphSubgraph,
   graph: WorkflowGraph,
   proposalState?: ProposalVisualState,
+  scenarioState?: ScenarioElementState,
 ): CanvasFlowNode {
   const width = subgraph.collapsed ? CONTRACT_NODE_WIDTH : subgraph.dimensions.width;
   const height = subgraph.collapsed ? CONTRACT_NODE_HEIGHT : subgraph.dimensions.height;
@@ -400,6 +415,7 @@ function subgraphFlowNode(
   return {
     id: subgraph.id,
     type: 'subgraph',
+    className: scenarioPresentationClassName(scenarioState),
     position: subgraph.position,
     // Expanded containers sit directly below their member nodes. Restricting
     // their drag handle to the rendered header/border keeps children fully
@@ -420,6 +436,7 @@ function subgraphFlowNode(
       ...subgraph,
       proposalState,
       durability: resolveEffectiveCapabilities(graph, subgraph.id),
+      scenarioState,
     },
   };
 }
@@ -521,6 +538,7 @@ function projectDomainNode(
   diff: GraphProposal['diff'] | undefined,
   validationIssues: ReturnType<typeof validateGraph>,
   runtimeHiddenNodeIds: ReadonlySet<string>,
+  scenarioState?: ScenarioElementState,
 ): CanvasFlowNode {
   const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
   const proposalState = nodeProposalState(node.id, diff);
@@ -542,6 +560,7 @@ function projectDomainNode(
     return {
       id: node.id,
       type: 'mergeJunction',
+      className: scenarioPresentationClassName(scenarioState),
       position: node.position,
       initialWidth: CONTRACT_NODE_WIDTH,
       initialHeight: CONTRACT_NODE_HEIGHT,
@@ -553,7 +572,7 @@ function projectDomainNode(
         node.merge.waitingForDynamicInputs ? 'waiting for dynamic inputs' : 'invalid waiting policy'
       }${invalid ? ', invalid' : ''}${frozen ? ', frozen' : ''}`,
       ...parentProperties,
-      data: { ...node, proposalState, invalid, frozen, outsideSubgraph },
+      data: { ...node, proposalState, invalid, frozen, outsideSubgraph, scenarioState },
     };
   }
 
@@ -561,6 +580,7 @@ function projectDomainNode(
   return {
     id: node.id,
     type: 'contractNode',
+    className: scenarioPresentationClassName(scenarioState),
     position: node.position,
     initialWidth: CONTRACT_NODE_WIDTH,
     initialHeight: CONTRACT_NODE_HEIGHT,
@@ -578,6 +598,7 @@ function projectDomainNode(
       outsideSubgraph,
       invalid,
       frozen,
+      scenarioState,
       ...(template ? { sendTemplate: template } : {}),
     },
   };
@@ -618,6 +639,7 @@ export function projectGraphToCanvas(
     }
   }
   const diff = visibleProposal?.diff;
+  const scenarioPresentation = options.scenarioPresentation ?? null;
   const membershipAffectedSubgraphs = visibleProposal
     ? membershipAffectedSubgraphIds(graph, visibleProposal.operations)
     : new Set<string>();
@@ -647,11 +669,28 @@ export function projectGraphToCanvas(
     ...preview.nodes,
     ...graph.nodes.filter((node) => !previewNodeIds.has(node.id)),
   ];
+  const nodeScenarioState = (nodeId: string) =>
+    scenarioElementState(
+      scenarioPresentation,
+      Boolean(scenarioPresentation?.activeNodeIds.has(nodeId)),
+    );
+  const subgraphScenarioState = (subgraphId: string) =>
+    scenarioElementState(
+      scenarioPresentation,
+      sourceNodes.some(
+        (node) => node.parentId === subgraphId && scenarioPresentation?.activeNodeIds.has(node.id),
+      ),
+    );
 
   const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const validationIssues = validateGraph(preview);
   const nodes: CanvasFlowNode[] = [
-    ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(subgraph, preview, subgraphProposalState(subgraph.id))),
+    ...sourceSubgraphs.map((subgraph) => subgraphFlowNode(
+      subgraph,
+      preview,
+      subgraphProposalState(subgraph.id),
+      subgraphScenarioState(subgraph.id),
+    )),
     ...sourceNodes.map((node) =>
       projectDomainNode(
         node,
@@ -660,6 +699,7 @@ export function projectGraphToCanvas(
         diff,
         validationIssues,
         runtimeTemplateNodeIds,
+        nodeScenarioState(node.id),
       ),
     ),
   ];
@@ -697,6 +737,10 @@ export function projectGraphToCanvas(
     frozen: graph.status === 'frozen',
     proposalState: proposalStateForEdges(group, visibleProposal),
     provenance: edge.provenance?.representation ?? 'declared',
+    scenarioState: scenarioElementState(
+      scenarioPresentation,
+      group.some((candidate) => scenarioPresentation?.activeEdgeIds.has(candidate.id)),
+    ),
   });
   for (const domainEdge of domainEdges) {
     const collapsedInternal =
@@ -891,6 +935,10 @@ export function projectGraphToCanvas(
       nodes.push({
         id: tileId,
         type: 'externalSystemTile',
+        className: scenarioPresentationClassName(scenarioElementState(
+          scenarioPresentation,
+          Boolean(scenarioPresentation?.activeExternalSystemIds.has(externalEndpoint.externalId)),
+        )),
         position: {
           x: externalIsSource
             ? Math.max(12, anchorPosition.x - externalTileWidth - externalTileGap)
@@ -910,12 +958,20 @@ export function projectGraphToCanvas(
         data: {
           externalId: externalEndpoint.externalId,
           label: externalEndpoint.label,
+          scenarioState: scenarioElementState(
+            scenarioPresentation,
+            Boolean(scenarioPresentation?.activeExternalSystemIds.has(externalEndpoint.externalId)),
+          ),
         },
       });
     }
     edges.push({
       id: `system-relationship:${encodeURIComponent(relationship.id)}`,
       type: 'systemRelationship',
+      className: scenarioPresentationClassName(scenarioElementState(
+        scenarioPresentation,
+        Boolean(scenarioPresentation?.activeRelationshipIds.has(relationship.id)),
+      )),
       source: relationshipEndpointId(relationship.source),
       target: relationshipEndpointId(relationship.target),
       markerEnd: {
@@ -932,6 +988,10 @@ export function projectGraphToCanvas(
         projection: 'system-relationship',
         proposalState,
         readOnly: proposalState === 'removed',
+        scenarioState: scenarioElementState(
+          scenarioPresentation,
+          Boolean(scenarioPresentation?.activeRelationshipIds.has(relationship.id)),
+        ),
       },
     });
   }

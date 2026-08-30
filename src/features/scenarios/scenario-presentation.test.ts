@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { BranchScenario } from '@/src/domain';
-import { scenarioElementState, scenarioPresentationFor } from './scenario-presentation';
+import {
+  scenarioElementState,
+  scenarioPresentationClassName,
+  scenarioPresentationFor,
+} from './scenario-presentation';
 
 const scenario: BranchScenario = {
   id: 'scenario-approval',
@@ -40,5 +44,7 @@ describe('scenarioPresentationFor', () => {
     expect(scenarioElementState(presentation, true)).toBe('active');
     expect(scenarioElementState(presentation, false)).toBe('dimmed');
     expect(scenarioElementState(null, false)).toBeUndefined();
+    expect(scenarioPresentationClassName('active')).toBe('scenario-state--active');
+    expect(scenarioPresentationClassName(undefined)).toBeUndefined();
   });
 });

@@ -14,6 +14,12 @@ export type ScenarioPresentation = {
 
 export type ScenarioElementState = 'active' | 'dimmed';
 
+export function scenarioPresentationClassName(
+  state: ScenarioElementState | undefined,
+): string | undefined {
+  return state ? `scenario-state--${state}` : undefined;
+}
+
 export function scenarioPresentationFor(
   scenario: BranchScenario | null | undefined,
 ): ScenarioPresentation | null {

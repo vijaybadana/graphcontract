@@ -1,14 +1,42 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
   buildGraphContractDownload,
+  buildGraphScenarioDownload,
   buildGraphScenariosDownload,
+  buildPythonScenarioDownload,
   buildPythonTestsDownload,
   DownloadArtifact,
 } from '@/src/adapters/exports/downloads';
 import { BranchScenario, WorkflowGraph } from '@/src/domain';
+import './scenario-presentation.css';
 
-export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scenarios: BranchScenario[] }) {
+type ScenarioPanelProps = {
+  graph: WorkflowGraph;
+  scenarios: BranchScenario[];
+  selectedScenarioId?: string | null;
+  onScenarioSelect?: (scenarioId: string | null) => void;
+};
+
+const outcomeLabel = (scenario: BranchScenario) =>
+  scenario.expectedTerminalOutcome.detail?.trim() ||
+  scenario.expectedTerminalOutcome.kind.replaceAll('-', ' ');
+
+export function ScenarioPanel({
+  graph,
+  scenarios,
+  selectedScenarioId,
+  onScenarioSelect,
+}: ScenarioPanelProps) {
+  const [localSelectedScenarioId, setLocalSelectedScenarioId] = useState<string | null>(null);
+  const activeScenarioId = selectedScenarioId === undefined
+    ? localSelectedScenarioId
+    : selectedScenarioId;
+  const selectedScenario = scenarios.find((scenario) => scenario.id === activeScenarioId) ?? null;
+  const nodeLabels = useMemo(
+    () => new Map(graph.nodes.map((node) => [node.id, node.label])),
+    [graph.nodes],
+  );
   const downloads = useMemo(
     () => [
       buildGraphContractDownload(graph),
@@ -17,6 +45,20 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
     ],
     [graph, scenarios],
   );
+  const selectedDownloads = useMemo(
+    () => selectedScenario
+      ? [
+          buildGraphScenarioDownload(graph, selectedScenario),
+          buildPythonScenarioDownload(graph, selectedScenario),
+        ]
+      : [],
+    [graph, selectedScenario],
+  );
+  const selectScenario = (scenarioId: string) => {
+    const nextScenarioId = activeScenarioId === scenarioId ? null : scenarioId;
+    if (selectedScenarioId === undefined) setLocalSelectedScenarioId(nextScenarioId);
+    onScenarioSelect?.(nextScenarioId);
+  };
 
   if (graph.status !== 'frozen') {
     return (
@@ -36,9 +78,42 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
       </div>
       <div className="mt-3 max-h-[300px] space-y-2 overflow-y-auto pr-1">
         {scenarios.map((scenario) => (
-          <article key={scenario.id} className="rounded-xl border border-black/10 bg-white p-3">
-            <p className="text-xs font-semibold leading-5">{scenario.name}</p>
-            {scenario.triggeringConditions.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{scenario.triggeringConditions.map((condition) => <span key={condition.edgeId} className="rounded bg-amber-50 px-1.5 py-1 text-[9px] font-bold text-amber-800">{condition.label}</span>)}</div>}
+          <article
+            key={scenario.id}
+            className={`scenario-row ${activeScenarioId === scenario.id ? 'is-selected' : ''}`}
+          >
+            <button
+              type="button"
+              className="scenario-row__select"
+              data-scenario-id={scenario.id}
+              aria-pressed={activeScenarioId === scenario.id}
+              onClick={() => selectScenario(scenario.id)}
+            >
+              <span className="scenario-row__title">{scenario.name}</span>
+              <span className="scenario-row__detail">
+                <strong>Conditions</strong>
+                <span>
+                  {scenario.triggeringConditions.length
+                    ? scenario.triggeringConditions.map((condition) => condition.label).join(' · ')
+                    : 'Always'}
+                </span>
+              </span>
+              <span className="scenario-row__detail">
+                <strong>Ordered path</strong>
+                <span>{scenario.orderedPath.map((nodeId) => nodeLabels.get(nodeId) ?? nodeId).join(' → ')}</span>
+              </span>
+              <span className="scenario-row__detail">
+                <strong>Expected outcome</strong>
+                <span>{outcomeLabel(scenario)}</span>
+              </span>
+            </button>
+            {activeScenarioId === scenario.id && (
+              <div className="scenario-row__downloads" aria-label={`Downloads for ${scenario.name}`}>
+                {selectedDownloads.map((download) => (
+                  <DownloadLink key={download.filename} artifact={download} compact />
+                ))}
+              </div>
+            )}
           </article>
         ))}
       </div>
@@ -49,7 +124,7 @@ export function ScenarioPanel({ graph, scenarios }: { graph: WorkflowGraph; scen
   );
 }
 
-function DownloadLink({ artifact }: { artifact: DownloadArtifact }) {
+function DownloadLink({ artifact, compact = false }: { artifact: DownloadArtifact; compact?: boolean }) {
   const anchorRef = useRef<HTMLAnchorElement>(null);
 
   useLayoutEffect(() => {
@@ -74,7 +149,7 @@ function DownloadLink({ artifact }: { artifact: DownloadArtifact }) {
       ref={anchorRef}
       href="#download"
       download={artifact.filename}
-      className="download-button"
+      className={compact ? 'scenario-row__download' : 'download-button'}
     >
       Download {artifact.filename}
     </a>

@@ -1,0 +1,81 @@
+.scenario-row {
+  overflow: hidden;
+  border: 1px solid rgb(15 23 42 / 12%);
+  border-radius: .75rem;
+  background: #fff;
+}
+
+.scenario-row.is-selected {
+  border-color: rgb(37 99 235 / 55%);
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 12%);
+}
+
+.scenario-row__select {
+  display: grid;
+  width: 100%;
+  gap: .45rem;
+  border: 0;
+  background: transparent;
+  padding: .75rem;
+  color: inherit;
+  text-align: left;
+}
+
+.scenario-row__select:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -3px;
+}
+
+.scenario-row__title {
+  font-size: .75rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+}
+
+.scenario-row__detail {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, auto) 1fr;
+  gap: .5rem;
+  font-size: .625rem;
+  line-height: 1rem;
+}
+
+.scenario-row__detail strong {
+  color: rgb(15 23 42 / 58%);
+  text-transform: uppercase;
+}
+
+.scenario-row__downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  border-top: 1px solid rgb(15 23 42 / 9%);
+  padding: .6rem .75rem;
+  background: rgb(37 99 235 / 4%);
+}
+
+.scenario-row__download {
+  border: 1px solid rgb(37 99 235 / 28%);
+  border-radius: .45rem;
+  background: #fff;
+  padding: .35rem .5rem;
+  color: #1d4ed8;
+  font-size: .625rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* Scenario state is attached only to ephemeral React Flow projection objects. */
+.react-flow__node.scenario-state--dimmed,
+.react-flow__edge.scenario-state--dimmed {
+  opacity: .22;
+}
+
+.react-flow__node.scenario-state--active,
+.react-flow__edge.scenario-state--active {
+  opacity: 1;
+}
+
+.react-flow__node.scenario-state--active {
+  filter: drop-shadow(0 0 7px rgb(37 99 235 / 24%));
+}

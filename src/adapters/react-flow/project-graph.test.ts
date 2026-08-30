@@ -11,6 +11,7 @@ import {
   projectGraphToCanvas,
   topologyDerivedLoopEdgeIds,
 } from '@/src/adapters/react-flow/project-graph';
+import type { ScenarioPresentation } from '@/src/features/scenarios/scenario-presentation';
 import {
   createProposal,
   createDefaultGraphCapabilities,
@@ -207,6 +208,96 @@ describe('projectGraphToCanvas', () => {
     expect(native.source).toBe('collapsed-review');
     expect(relationship.source).toBe('classifier');
     expect(native.data.presentation.provenance).toBe('derived-semantic');
+  });
+
+  it('projects exact scenario states and activates a collapsed proxy when any represented edge is active', () => {
+    const graph = graphWithSubgraph(true);
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    graph.nodes.push({
+      id: 'unrelated',
+      kind: 'step',
+      executor: 'deterministic',
+      label: 'Unrelated',
+      position: { x: 600, y: 520 },
+    });
+    graph.edges.push({
+      id: 'enter-approve',
+      source: 'start',
+      target: 'approve',
+      mode: 'conditional',
+      label: 'shortcut',
+    });
+    graph.relationships = [
+      {
+        id: 'review-notifier',
+        kind: 'external-orchestration',
+        source: { kind: 'node', nodeId: 'review' },
+        target: { kind: 'external', externalId: 'notifier', label: 'Notifier' },
+        provenance: { representation: 'external-orchestration' },
+      },
+      {
+        id: 'unrelated-archive',
+        kind: 'external-orchestration',
+        source: { kind: 'node', nodeId: 'unrelated' },
+        target: { kind: 'external', externalId: 'archive', label: 'Archive' },
+        provenance: { representation: 'external-orchestration' },
+      },
+    ];
+    const presentation: ScenarioPresentation = {
+      scenarioId: 'scenario-review',
+      activeNodeIds: new Set(['start', 'review', 'approve', 'end']),
+      activeEdgeIds: new Set(['enter-review', 'review-approve', 'leave-approve']),
+      activeRelationshipIds: new Set(['review-notifier']),
+      activeExternalSystemIds: new Set(['notifier']),
+    };
+    const before = structuredClone(graph);
+
+    const canvas = projectGraphToCanvas(graph, null, { scenarioPresentation: presentation });
+    const entryProxy = canvas.edges.find(
+      (edge) => isSubgraphProxyEdge(edge) && edge.source === 'start',
+    )!;
+    const activeRelationship = canvas.edges.find(
+      (edge) => isCanvasSystemRelationshipEdge(edge) && edge.data.relationship.id === 'review-notifier',
+    )!;
+    const dimmedRelationship = canvas.edges.find(
+      (edge) => isCanvasSystemRelationshipEdge(edge) && edge.data.relationship.id === 'unrelated-archive',
+    )!;
+
+    expect(domainEdgeIdsForCanvasEdge(entryProxy)).toEqual(['enter-review', 'enter-approve']);
+    expect(entryProxy).toMatchObject({
+      className: expect.stringContaining('scenario-state--active'),
+      data: { presentation: { scenarioState: 'active' } },
+    });
+    expect(canvas.nodes.find((node) => node.id === 'review-group')).toMatchObject({
+      className: 'scenario-state--active',
+      data: { scenarioState: 'active' },
+    });
+    expect(canvas.nodes.find((node) => node.id === 'unrelated')).toMatchObject({
+      className: 'scenario-state--dimmed',
+      data: { scenarioState: 'dimmed' },
+    });
+    expect(canvas.nodes.find((node) => node.id === 'external-system:notifier')).toMatchObject({
+      className: 'scenario-state--active',
+      data: { scenarioState: 'active' },
+    });
+    expect(activeRelationship).toMatchObject({
+      className: 'scenario-state--active',
+      data: { scenarioState: 'active' },
+    });
+    expect(dimmedRelationship).toMatchObject({
+      className: 'scenario-state--dimmed',
+      data: { scenarioState: 'dimmed' },
+    });
+
+    const reversed = projectGraphToCanvas(
+      { ...graph, edges: [...graph.edges].reverse() },
+      null,
+      { scenarioPresentation: presentation },
+    );
+    expect(reversed.edges.find(
+      (edge) => isSubgraphProxyEdge(edge) && edge.source === 'start',
+    )?.data.presentation.scenarioState).toBe('active');
+    expect(graph).toEqual(before);
   });
 
   it('keeps Merge evidence and proposal relationship records in the projection layer', () => {
