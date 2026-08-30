@@ -214,6 +214,10 @@ describe('WebMCP adapter', () => {
     expect(proposalTool.description).toContain('mutate runtime projections');
     expect(proposalTool.description).toContain('before/inside/after');
     expect(proposalTool.description).toContain('respond, resume, freeze');
+    expect(proposalTool.description).toContain('unsupported in this build');
+    expect(proposalTool.description).toContain('future trusted runtime-evidence adapter');
+    expect(proposalTool.description).toContain('external-orchestration provenance with explicit evidence');
+    expect(proposalTool.description).not.toContain('separate runtime-evidence ingestion path');
     expect(nonSendEdge?.properties).toMatchObject({
       source: { type: 'string' },
       target: { type: 'string' },
@@ -251,6 +255,11 @@ describe('WebMCP adapter', () => {
       },
       additionalProperties: false,
     });
+    const relationshipProvenanceVariants = addRelationship?.properties?.relationship?.properties?.provenance?.oneOf ?? [];
+    const externalProvenance = relationshipProvenanceVariants.find(
+      (variant) => variant.properties?.representation?.const === 'external-orchestration',
+    );
+    expect(externalProvenance?.required).toEqual(['representation', 'evidence']);
     expect(updateRelationship?.properties?.patch?.additionalProperties).toBe(false);
     expect(proposalSchema.properties?.operations?.items?.oneOf).toHaveLength(17);
     expect((variants.find((variant) => variant.properties?.type?.const === 'update_graph_capabilities')
@@ -1050,9 +1059,16 @@ describe('WebMCP adapter', () => {
       ok: false,
       error: {
         code: 'WEBMCP_RUNTIME_AUTHORITY_REJECTED',
+        message: expect.stringContaining('unsupported in this build'),
         issues: expect.arrayContaining([
-          expect.objectContaining({ code: 'WEBMCP_RUNTIME_PROVENANCE_UNSUPPORTED' }),
-          expect.objectContaining({ code: 'WEBMCP_RUNTIME_INSPECTION_UNSUPPORTED' }),
+          expect.objectContaining({
+            code: 'WEBMCP_RUNTIME_PROVENANCE_UNSUPPORTED',
+            message: expect.stringContaining('unsupported in this build'),
+          }),
+          expect.objectContaining({
+            code: 'WEBMCP_RUNTIME_INSPECTION_UNSUPPORTED',
+            message: expect.stringContaining('unsupported in this build'),
+          }),
         ]),
       },
     });

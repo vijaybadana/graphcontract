@@ -99,7 +99,7 @@ const provenanceEvidenceSchema = {
 
 const webMcpProvenanceSchema = {
   description:
-    'WebMCP may declare direct, derived-semantic, or external-orchestration provenance. Derived-semantic claims require supplied evidence. Runtime-generated provenance is read-only here and must arrive through the separate runtime-evidence ingestion path.',
+    'WebMCP may declare direct, derived-semantic, or external-orchestration provenance. Derived-semantic and external-orchestration claims require supplied evidence. Runtime-generated provenance is unsupported in this build and cannot be authored through WebMCP; only a future trusted runtime-evidence adapter could add it.',
   oneOf: [
     {
       type: 'object',
@@ -115,7 +115,7 @@ const webMcpProvenanceSchema = {
     },
     {
       type: 'object',
-      required: ['representation'],
+      required: ['representation', 'evidence'],
       properties: { representation: { const: 'external-orchestration' }, evidence: provenanceEvidenceSchema },
       additionalProperties: false,
     },
@@ -287,7 +287,7 @@ const opaqueInterfacePortSchema = {
 const opaqueStepMetadataSchema = {
   type: 'object',
   description:
-    'Declared prebuilt-Step boundary only. Runtime inspection is unavailable through WebMCP; this tool cannot fabricate runtime evidence or internal topology.',
+    'Declared prebuilt-Step boundary only. Runtime inspection is unsupported in this build and cannot be authored through WebMCP; only a future trusted runtime-evidence adapter could add it. This tool cannot fabricate runtime evidence or internal topology.',
   required: ['factoryLabel', 'inputPorts', 'outputPorts', 'runtimeInspection'],
   properties: {
     factoryLabel: { type: 'string', minLength: 1 },
@@ -794,7 +794,7 @@ function validateWebMcpAuthority(input: unknown): AuthorityIssue[] {
     if (isRecord(value) && value.representation === 'runtime-generated') {
       issues.push({
         code: 'WEBMCP_RUNTIME_PROVENANCE_UNSUPPORTED',
-        message: 'Runtime-generated provenance must be supplied by the separate runtime-evidence ingestion path, not WebMCP.',
+        message: 'Runtime-generated provenance is unsupported in this build and cannot be authored through WebMCP.',
         path,
       });
     }
@@ -803,7 +803,7 @@ function validateWebMcpAuthority(input: unknown): AuthorityIssue[] {
     if (isRecord(value) && isRecord(value.runtimeInspection) && value.runtimeInspection.available === true) {
       issues.push({
         code: 'WEBMCP_RUNTIME_INSPECTION_UNSUPPORTED',
-        message: 'WebMCP cannot claim that runtime inspection is available; runtime evidence must be ingested separately.',
+        message: 'Runtime inspection is unsupported in this build and cannot be claimed through WebMCP.',
         path: `${path}.runtimeInspection.available`,
       });
     }
@@ -904,7 +904,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only schema-v6 proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. State, Checkpointer, Store, runtime mode, and external-orchestration capability records are distinct. Native control paths are only normal, conditional, command, fallback, and Send edges; spawned-run, spawned-thread, and external-orchestration relationships are separate non-native boundary records, so ordinary scenarios enumerate native paths only. WebMCP may author declared, derived-semantic (with explicit evidence), and external-orchestration provenance, but it cannot fabricate runtime-generated provenance or runtime inspection availability. Opaque Steps expose only their declared factory and interface. Retry is an internal Step policy, never a topology loop or runtime authority. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, unfreeze, inspect runtime, toggle evidence overlay, mutate runtime projections, or directly modify accepted state.',
+          'Creates a review-only schema-v6 proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. State, Checkpointer, Store, runtime mode, and external-orchestration capability records are distinct. Native control paths are only normal, conditional, command, fallback, and Send edges; spawned-run, spawned-thread, and external-orchestration relationships are separate non-native boundary records, so ordinary scenarios enumerate native paths only. WebMCP may author declared provenance, derived-semantic provenance with explicit evidence, and external-orchestration provenance with explicit evidence. Runtime-generated provenance and runtime inspection are unsupported in this build and cannot be authored through WebMCP; only a future trusted runtime-evidence adapter could add them. Opaque Steps expose only their declared factory and interface. Retry is an internal Step policy, never a topology loop or runtime authority. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, unfreeze, inspect runtime, toggle evidence overlay, mutate runtime projections, or directly modify accepted state.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],
@@ -924,7 +924,7 @@ export async function registerWebMcpTools(
               error: {
                 code: 'WEBMCP_RUNTIME_AUTHORITY_REJECTED',
                 message:
-                  'WebMCP cannot create runtime evidence, runtime inspection availability, or evidence-overlay controls.',
+                  'Runtime evidence and inspection are unsupported in this build; WebMCP also cannot control the evidence overlay.',
                 issues: authorityIssues,
               },
             };
