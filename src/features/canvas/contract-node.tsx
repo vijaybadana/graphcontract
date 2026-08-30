@@ -204,7 +204,10 @@ export function stepModifierPresentations(
       inspectorSection: 'retry',
     });
   }
-  if (node.opaque || node.modifiers?.opaque) {
+  // Opaque is canonical Step interface metadata. A legacy modifier flag is
+  // deliberately not enough to render an Opaque badge: that would imply an
+  // interface exists when the contract has not actually declared one.
+  if (node.opaque) {
     modifiers.push({
       id: 'opaque',
       label: 'Opaque',

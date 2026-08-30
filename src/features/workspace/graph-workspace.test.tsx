@@ -4,7 +4,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { GraphWorkspace } from './graph-workspace';
+import { GraphWorkspace, reconcileProjectionSelection } from './graph-workspace';
 import { sampleGraph } from '@/src/domain';
 import { useGraphStore } from '@/src/state/workspace-store';
 
@@ -249,4 +249,28 @@ describe('GraphWorkspace subgraph creation', () => {
     await waitFor(() => expect(reset.disabled).toBe(false));
     expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier')?.label).toBe('Approved classifier');
   }, 10_000);
+
+  it('clears stale local evidence and relationship selections after replacement, reset, load, or approval', () => {
+    const selectedEvidence = {
+      number: 4,
+      target: 'relationship' as const,
+      id: 'notify-runner',
+      label: 'Notify runner',
+      provenance: { representation: 'external-orchestration' as const },
+      nativeControlEdge: false,
+    };
+
+    expect(reconcileProjectionSelection(
+      selectedEvidence,
+      'notify-runner',
+      [],
+      [],
+    )).toEqual({ evidence: null, relationshipId: null });
+    expect(reconcileProjectionSelection(
+      selectedEvidence,
+      'notify-runner',
+      [selectedEvidence],
+      [{ id: 'notify-runner' }],
+    )).toEqual({ evidence: selectedEvidence, relationshipId: 'notify-runner' });
+  });
 });

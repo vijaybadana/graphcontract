@@ -32,7 +32,7 @@ import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/web
 import { evaluateConnection } from '@/src/application/connection-policy';
 import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
 import { graphLibraryEntries } from '@/src/application/graph-library';
-import { NodeKind, validateGraph } from '@/src/domain';
+import { applyGraphOperations, NodeKind, validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
@@ -106,6 +106,32 @@ const minimapColors: Record<NodeKind, string> = {
   end: '#52525b',
 };
 
+/**
+ * Local canvas selections are not canonical workspace state. Keep only
+ * selections whose projection targets still exist after a load, reset, or
+ * proposal decision. Deliberately compare evidence by stable target identity,
+ * never its marker number or render position.
+ */
+export function reconcileProjectionSelection(
+  selectedEvidence: EvidenceMarker | null,
+  selectedRelationshipId: string | null,
+  evidenceMarkers: readonly EvidenceMarker[],
+  relationships: readonly { id: string }[],
+) {
+  return {
+    evidence: selectedEvidence && evidenceMarkers.some(
+      (marker) => marker.target === selectedEvidence.target && marker.id === selectedEvidence.id,
+    )
+      ? selectedEvidence
+      : null,
+    relationshipId: selectedRelationshipId && relationships.some(
+      (relationship) => relationship.id === selectedRelationshipId,
+    )
+      ? selectedRelationshipId
+      : null,
+  };
+}
+
 export function GraphWorkspace() {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
@@ -176,16 +202,38 @@ export function GraphWorkspace() {
       : runtimeAvailability.reason;
   const activeViewMode = viewMode === 'runtime' && runtimeAvailable ? 'runtime' : 'design';
   const canvasEditable = editable && activeViewMode === 'design';
+  const relationshipPreviewGraph = useMemo(
+    () =>
+      proposal?.status === 'pending' || proposal?.status === 'invalid'
+        ? applyGraphOperations(graph, proposal.operations).graph
+        : graph,
+    [graph, proposal],
+  );
+  const relationshipOverlayGraph = useMemo(() => {
+    if (relationshipPreviewGraph === graph) return graph;
+    const previewIds = new Set(relationshipPreviewGraph.relationships.map((relationship) => relationship.id));
+    return {
+      ...relationshipPreviewGraph,
+      // Base-only records are proposal removal ghosts. This projection-only
+      // union keeps their evidence selectable without reviving them in state.
+      relationships: [
+        ...relationshipPreviewGraph.relationships,
+        ...graph.relationships.filter((relationship) => !previewIds.has(relationship.id)),
+      ],
+    };
+  }, [graph, relationshipPreviewGraph]);
   const evidenceMarkers = useMemo(
-    () => graph.capabilities.provenance.evidenceOverlayAvailable ? evidenceMarkersForGraph(graph) : [],
-    [graph],
+    () => relationshipOverlayGraph.capabilities.provenance.evidenceOverlayAvailable ? evidenceMarkersForGraph(relationshipOverlayGraph) : [],
+    [relationshipOverlayGraph],
   );
   const evidenceMarkerByTarget = useMemo(
     () => new Map(evidenceMarkers.map((marker) => [`${marker.target}:${marker.id}`, marker])),
     [evidenceMarkers],
   );
   const selectedRelationship = selectedRelationshipId
-    ? graph.relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null
+    ? relationshipPreviewGraph.relationships.find((relationship) => relationship.id === selectedRelationshipId) ??
+      graph.relationships.find((relationship) => relationship.id === selectedRelationshipId) ??
+      null
     : null;
 
   useEffect(() => {
@@ -197,6 +245,31 @@ export function GraphWorkspace() {
       setRuntimeSelection(null);
     });
   }, [runtimeAvailable, viewMode]);
+  useEffect(() => {
+    const reconciled = reconcileProjectionSelection(
+      selectedEvidence,
+      selectedRelationshipId,
+      evidenceMarkers,
+      relationshipOverlayGraph.relationships,
+    );
+    if (reconciled.evidence === selectedEvidence && reconciled.relationshipId === selectedRelationshipId) return;
+    // Replacement, approval, reset, and library/demo loading can invalidate
+    // local-only projection selections. Defer to avoid a cascading render.
+    queueMicrotask(() => {
+      setSelectedEvidence((current) => reconcileProjectionSelection(
+        current,
+        null,
+        evidenceMarkers,
+        relationshipOverlayGraph.relationships,
+      ).evidence);
+      setSelectedRelationshipId((current) => reconcileProjectionSelection(
+        null,
+        current,
+        evidenceMarkers,
+        relationshipOverlayGraph.relationships,
+      ).relationshipId);
+    });
+  }, [evidenceMarkers, relationshipOverlayGraph.relationships, selectedEvidence, selectedRelationshipId]);
   const openInspectorForSelection = useCallback(() => {
     setRightTab('review');
     setShowInspector(true);
@@ -222,6 +295,20 @@ export function GraphWorkspace() {
     }
     openInspectorForSelection();
   }, [clearSelection, evidenceMarkerByTarget, openInspectorForSelection, setSelection]);
+  const selectSystemRelationship = useCallback((relationshipId: string) => {
+    const relationship = relationshipPreviewGraph.relationships.find((candidate) => candidate.id === relationshipId) ??
+      graph.relationships.find((candidate) => candidate.id === relationshipId);
+    if (!relationship) return;
+    setRuntimeSelection(null);
+    setSelectedRelationshipId(relationship.id);
+    setSelectedEvidence(
+      evidenceOverlayVisible
+        ? evidenceMarkerByTarget.get(`relationship:${relationship.id}`) ?? null
+        : null,
+    );
+    clearSelection();
+    openInspectorForSelection();
+  }, [clearSelection, evidenceMarkerByTarget, evidenceOverlayVisible, graph.relationships, openInspectorForSelection, relationshipPreviewGraph.relationships]);
   const openGraphSettings = useCallback((tab: GraphSettingsRequest['tab'] = 'state') => {
     setRuntimeSelection(null);
     clearSelection();
@@ -303,17 +390,22 @@ export function GraphWorkspace() {
           ? `relationship:${edge.data.relationship.id}`
           : `edge:${edge.id}`;
         const marker = evidenceOverlayVisible ? evidenceMarkerByTarget.get(target) : undefined;
-        if (!marker) return edge;
         if (isCanvasSystemRelationshipEdge(edge)) {
           return {
             ...edge,
             data: {
               ...edge.data,
-              evidenceMarker: marker.number,
-              onEvidenceActivate: (relationshipId: string) => activateEvidence('relationship', relationshipId),
+              onRelationshipActivate: selectSystemRelationship,
+              ...(marker
+                ? {
+                    evidenceMarker: marker.number,
+                    onEvidenceActivate: (relationshipId: string) => activateEvidence('relationship', relationshipId),
+                  }
+                : {}),
             },
           };
         }
+        if (!marker) return edge;
         return {
           ...edge,
           data: {
@@ -335,6 +427,7 @@ export function GraphWorkspace() {
     activateEvidence,
     evidenceMarkerByTarget,
     evidenceOverlayVisible,
+    selectSystemRelationship,
   ]);
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
@@ -345,6 +438,15 @@ export function GraphWorkspace() {
     onCommitPositions: moveCanvasElements,
   });
   const { clearRenderedSelection } = canvasInteractions;
+  const clearProjectionSelection = useCallback(() => {
+    setRuntimeSelection(null);
+    setSelectedEvidence(null);
+    setSelectedRelationshipId(null);
+  }, []);
+  const handleReset = useCallback(() => {
+    clearProjectionSelection();
+    resetGraph();
+  }, [clearProjectionSelection, resetGraph]);
   const currentLibraryEntryId = useMemo(
     () => graphLibraryEntries.find((entry) => entry.graph.id === graph.id)?.id ?? null,
     [graph.id],
@@ -368,13 +470,13 @@ export function GraphWorkspace() {
       }
       if (!loadGraphLibraryEntry(entry)) return;
       clearRenderedSelection();
-      setRuntimeSelection(null);
+      clearProjectionSelection();
       setViewMode('design');
       setInspectorFocusRequest(null);
       setRightTab('review');
       setLibraryOpen(false);
     },
-    [clearRenderedSelection, graph.edges.length, graph.nodes.length, graph.subgraphs.length, libraryBlockedReason, loadGraphLibraryEntry],
+    [clearProjectionSelection, clearRenderedSelection, graph.edges.length, graph.nodes.length, graph.subgraphs.length, libraryBlockedReason, loadGraphLibraryEntry],
   );
   const fitPadding = useMemo(
     () => ({
@@ -552,12 +654,7 @@ export function GraphWorkspace() {
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
       const selectedSystemRelationship = edges.find(isCanvasSystemRelationshipEdge);
       if (selectedSystemRelationship) {
-        const relationship = selectedSystemRelationship.data.relationship;
-        setRuntimeSelection(null);
-        setSelectedRelationshipId(relationship.id);
-        setSelectedEvidence(evidenceMarkerByTarget.get(`relationship:${relationship.id}`) ?? null);
-        setSelection({ nodeIds: [], subgraphIds: [], edgeIds: [], primary: null });
-        openInspectorForSelection();
+        selectSystemRelationship(selectedSystemRelationship.data.relationship.id);
         return;
       }
       const selectedRuntimeNode = nodes.find(
@@ -583,7 +680,7 @@ export function GraphWorkspace() {
       }
       setSelection(nextSelection);
     },
-    [evidenceMarkerByTarget, evidenceOverlayVisible, openInspectorForSelection, setSelection],
+    [evidenceMarkerByTarget, evidenceOverlayVisible, openInspectorForSelection, selectSystemRelationship, setSelection],
   );
 
   const makePrimary = useCallback((primary: { type: 'node' | 'edge' | 'subgraph'; id: string }) => {
@@ -617,18 +714,13 @@ export function GraphWorkspace() {
   const handleEdgeClick = useCallback<EdgeMouseHandler<CanvasFlowEdge>>(
     (_, edge) => {
       if (isCanvasSystemRelationshipEdge(edge)) {
-        const relationship = edge.data.relationship;
-        setRuntimeSelection(null);
-        setSelectedRelationshipId(relationship.id);
-        setSelectedEvidence(evidenceMarkerByTarget.get(`relationship:${relationship.id}`) ?? null);
-        clearSelection();
-        openInspectorForSelection();
+        selectSystemRelationship(edge.data.relationship.id);
         return;
       }
       const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
       if (domainEdgeId) makePrimary({ type: 'edge', id: domainEdgeId });
     },
-    [clearSelection, evidenceMarkerByTarget, makePrimary, openInspectorForSelection],
+    [makePrimary, selectSystemRelationship],
   );
 
   const addPalettePayload = useCallback(
@@ -751,7 +843,7 @@ export function GraphWorkspace() {
           onDelete={deleteSelection}
           onAutoLayout={autoLayout}
           onFit={fitGraph}
-          onReset={resetGraph}
+          onReset={handleReset}
           onFreeze={handleFreeze}
           onUnfreeze={unfreezeGraph}
           onViewModeChange={(mode) => {

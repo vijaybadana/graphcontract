@@ -361,6 +361,15 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
               else delete updated.modifiers;
             }
           }
+          if (patch.opaque === null) {
+            delete updated.opaque;
+            if (updated.modifiers) {
+              const remainingModifiers = { ...updated.modifiers };
+              delete remainingModifiers.opaque;
+              if (Object.keys(remainingModifiers).length > 0) updated.modifiers = remainingModifiers;
+              else delete updated.modifiers;
+            }
+          }
           return updated;
         }),
       }));

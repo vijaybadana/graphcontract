@@ -214,6 +214,67 @@ describe('ContextInspector routing details', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Inspect at runtime' }).disabled).toBe(true);
   });
 
+  it('authors canonical opaque metadata and keeps its durable interface editable only in draft authority', async () => {
+    useGraphStore.setState({ graph: structuredClone(sampleGraph) });
+    selectNode('classifier');
+    renderInspector();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Opaque or prebuilt' }));
+    let classifier = useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier');
+    expect(classifier).toMatchObject({
+      kind: 'step',
+      opaque: {
+        factoryLabel: 'Classifier Agent factory',
+        inputPorts: [],
+        outputPorts: [],
+        runtimeInspection: { available: false },
+      },
+    });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Opaque factory label' }), {
+      target: { value: 'create_support_classifier' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Opaque input ports' }), {
+      target: { value: 'request, context, request' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Opaque output ports' }), {
+      target: { value: 'decision, explanation' },
+    });
+    classifier = useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier');
+    expect(classifier).toMatchObject({
+      kind: 'step',
+      opaque: {
+        factoryLabel: 'create_support_classifier',
+        inputPorts: [{ name: 'request' }, { name: 'context' }],
+        outputPorts: [{ name: 'decision' }, { name: 'explanation' }],
+        runtimeInspection: { available: false },
+      },
+    });
+    expect(document.getElementById('opaque-input-ports-classifier')).toBeTruthy();
+    expect(document.getElementById('opaque-output-ports-classifier')).toBeTruthy();
+
+    useGraphStore.setState({
+      graph: { ...useGraphStore.getState().graph, status: 'frozen' },
+    });
+    await waitFor(() => {
+      expect((screen.getByRole('textbox', { name: 'Opaque factory label' }) as HTMLInputElement).disabled).toBe(true);
+      expect((screen.getByRole('textbox', { name: 'Opaque input ports' }) as HTMLInputElement).disabled).toBe(true);
+    });
+
+    useGraphStore.setState({
+      graph: { ...useGraphStore.getState().graph, status: 'draft' },
+    });
+    await waitFor(() => {
+      expect((screen.getByRole('checkbox', { name: 'Opaque or prebuilt' }) as HTMLInputElement).disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Opaque or prebuilt' }));
+    classifier = useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier');
+    expect(classifier).toMatchObject({ kind: 'step' });
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected classifier Step fixture.');
+    expect(classifier.opaque).toBeUndefined();
+    expect(classifier.modifiers?.opaque).toBeUndefined();
+  });
+
   it('edits the v3 HITL response contract and sensitive policy independently', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     selectNode('classifier');

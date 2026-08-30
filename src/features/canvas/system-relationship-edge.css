@@ -5,9 +5,19 @@
 .system-relationship-edge__portal-back { stroke: #fff; }
 .system-relationship-edge__path.is-spawned { stroke: #6d28d9; stroke-width: 2.4px; }
 .system-relationship-edge__path.is-external { stroke: #6b7280; stroke-width: 2px; stroke-dasharray: 7 5; }
-.system-relationship-edge__label { position: absolute; z-index: 5; display: inline-flex; min-height: 25px; align-items: center; gap: 4px; border: 1px solid currentColor; border-radius: 7px; background: rgb(255 255 255 / 96%); box-shadow: 0 2px 7px rgb(15 23 42 / 9%); padding: 4px 6px; font-size: 10px; font-weight: 760; line-height: 1; pointer-events: none; white-space: nowrap; }
-.system-relationship-edge__label.is-spawned { color: #5b21b6; }
-.system-relationship-edge__label.is-external { border-style: dashed; color: #4b5563; }
+.system-relationship-edge__path.is-proposed-added { stroke: #059669; stroke-width: 2.7px; }
+.system-relationship-edge__path.is-proposed-updated { stroke: #d97706; stroke-dasharray: 9 3 2 3; stroke-width: 2.7px; }
+.system-relationship-edge__path.is-proposed-removed { stroke: #6b7280; stroke-dasharray: 4 5; opacity: .55; }
+.system-relationship-edge__label { position: absolute; z-index: 5; display: inline-flex; align-items: center; gap: 3px; color: #5b21b6; pointer-events: none; white-space: nowrap; }
+.system-relationship-edge__label.is-external { color: #4b5563; }
+.system-relationship-edge__select { display: inline-flex; min-height: 2.25rem; align-items: center; gap: 4px; border: 1px solid currentColor; border-radius: 7px; background: rgb(255 255 255 / 96%); box-shadow: 0 2px 7px rgb(15 23 42 / 9%); color: inherit; padding: 4px 6px; font-size: 10px; font-weight: 760; line-height: 1; pointer-events: all; text-align: left; }
+.system-relationship-edge__select:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.system-relationship-edge__label.is-external .system-relationship-edge__select { border-style: dashed; }
+.system-relationship-edge__label.is-proposed-added { color: #047857; }
+.system-relationship-edge__label.is-proposed-updated { color: #b45309; }
+.system-relationship-edge__label.is-proposed-removed { color: #6b7280; opacity: .72; }
+.system-relationship-edge__label.is-proposed-removed .system-relationship-edge__select { border-style: dashed; text-decoration: line-through; }
+.system-relationship-edge__proposal { margin-left: 3px; border-left: 1px solid currentColor; padding-left: 4px; font-size: 9px; font-weight: 850; text-decoration: none; }
 .system-relationship-edge__portal-icon { margin-left: 1px; border-left: 1px solid currentColor; padding-left: 4px; }
 .system-relationship-edge__evidence-marker { display: grid; width: 1.35rem; height: 1.35rem; margin: -1px -2px -1px 2px; place-items: center; border: 1px solid currentColor; border-radius: 999px; background: #fff; color: inherit; font-size: 9px; font-weight: 850; pointer-events: all; }
 .system-relationship-edge__evidence-marker:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }

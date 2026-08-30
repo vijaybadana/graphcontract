@@ -47,8 +47,13 @@ export type CanvasNativeEdge = Edge<CanvasEdgeData, 'routing'>;
 export type CanvasSystemRelationshipEdgeData = {
   relationship: NonNativeRelationship;
   projection: 'system-relationship';
+  /** Proposal visuals are review-only and never change canonical routing. */
+  proposalState?: 'added' | 'updated' | 'removed';
+  /** Removed accepted records remain inspectable but never editable. */
+  readOnly?: boolean;
   evidenceMarker?: number;
   onEvidenceActivate?: (relationshipId: string) => void;
+  onRelationshipActivate?: (relationshipId: string) => void;
   [key: string]: unknown;
 };
 
@@ -224,6 +229,17 @@ function proposalStateForEdges(
   if (edges.some((edge) => edgeVisualState(edge.id, proposal).removed)) return 'removed';
   if (edges.some((edge) => edgeVisualState(edge.id, proposal).added)) return 'added';
   if (edges.some((edge) => edgeVisualState(edge.id, proposal).updated)) return 'updated';
+  return undefined;
+}
+
+function proposalStateForRelationship(
+  relationshipId: string,
+  proposal: GraphProposal | null,
+): ProposalVisualState | undefined {
+  const diff = proposal?.diff;
+  if (diff?.removedRelationshipIds.includes(relationshipId)) return 'removed';
+  if (diff?.addedRelationshipIds.includes(relationshipId)) return 'added';
+  if (diff?.updatedRelationshipIds.includes(relationshipId)) return 'updated';
   return undefined;
 }
 
@@ -840,10 +856,18 @@ export function projectGraphToCanvas(
     endpoint.kind === 'node'
       ? endpoint.nodeId
       : `external-system:${encodeURIComponent(endpoint.externalId)}`;
-  const systemRelationships = [...(preview.relationships ?? [])].sort((left, right) =>
-    left.id.localeCompare(right.id),
-  );
+  // Candidate relationships are authoritative during review. Base-only
+  // records are retained strictly as removed ghosts; selection can still
+  // inspect those accepted records, but no relationship ever becomes native.
+  const previewRelationships = preview.relationships ?? [];
+  const acceptedRelationships = graph.relationships ?? [];
+  const previewRelationshipIds = new Set(previewRelationships.map((relationship) => relationship.id));
+  const systemRelationships = [
+    ...previewRelationships,
+    ...acceptedRelationships.filter((relationship) => !previewRelationshipIds.has(relationship.id)),
+  ].sort((left, right) => left.id.localeCompare(right.id));
   for (const relationship of systemRelationships) {
+    const proposalState = proposalStateForRelationship(relationship.id, visibleProposal);
     const externalEndpoint = relationship.source.kind === 'external'
       ? relationship.source
       : relationship.target.kind === 'external'
@@ -859,7 +883,7 @@ export function projectGraphToCanvas(
     const tileId = relationshipEndpointId(externalEndpoint);
     if (!externalTileIds.has(tileId)) {
       externalTileIds.add(tileId);
-      const anchor = preview.nodes.find((node) => node.id === nodeEndpoint.nodeId);
+      const anchor = sourceNodes.find((node) => node.id === nodeEndpoint.nodeId);
       const anchorPosition = anchor
         ? absolutePosition(anchor, subgraphsById)
         : { x: 0, y: 0 };
@@ -899,11 +923,15 @@ export function projectGraphToCanvas(
         color: relationship.kind === 'external-orchestration' ? '#6b7280' : '#6d28d9',
       },
       selectable: true,
+      focusable: true,
+      deletable: false,
       reconnectable: false,
       interactionWidth: 34,
       data: {
         relationship,
         projection: 'system-relationship',
+        proposalState,
+        readOnly: proposalState === 'removed',
       },
     });
   }

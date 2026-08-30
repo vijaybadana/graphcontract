@@ -41,5 +41,7 @@
 .merge-node-state { overflow: hidden; color: #334155; font-size: .58rem; text-overflow: ellipsis; white-space: nowrap; }
 .merge-node-statuses { display: flex; min-height: 1.85rem; align-items: center; justify-content: space-between; gap: .3rem; border-top: 1px solid #e2e8f0; padding: .44rem .75rem; color: #475569; font-size: .52rem; font-weight: 800; letter-spacing: .035em; text-transform: uppercase; }
 .merge-node-handle { width: .6875rem !important; height: .6875rem !important; border: 2px solid #fff !important; background: #526477 !important; }
+.merge-node-evidence-marker { position: absolute; z-index: 2; top: .45rem; right: 2.15rem; display: grid; width: 1.55rem; height: 1.55rem; place-items: center; border: 1px solid #2563eb; border-radius: 999px; background: #fff; color: #1d4ed8; font-size: .65rem; font-weight: 850; box-shadow: 0 1px 4px rgb(15 23 42 / 16%); }
+.merge-node-evidence-marker:focus-visible { outline: 2px solid #0f172a; outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) { .merge-node-shell { transition: none; } }

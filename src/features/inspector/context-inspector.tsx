@@ -23,6 +23,8 @@ import {
   SensitiveEffectPolicy,
   SendMapConfig,
   NonNativeRelationship,
+  OpaqueInterfacePort,
+  OpaqueStepMetadata,
   ProvenanceEvidence,
   StepExecutor,
   StepModifierSummary,
@@ -151,6 +153,26 @@ const defaultSensitiveEffectPolicy = (): SensitiveEffectPolicy => ({
 });
 
 const stableOutcomeId = (edge: GraphEdge) => `outcome:${edge.id}`;
+
+const defaultOpaqueMetadata = (node: StepNode): OpaqueStepMetadata => ({
+  // This is intentionally derived from the author-visible label so the
+  // canonical metadata is useful immediately without claiming parsed source
+  // or discovered runtime topology.
+  factoryLabel: `${node.label.trim() || node.id} factory`,
+  inputPorts: [],
+  outputPorts: [],
+  runtimeInspection: { available: false },
+});
+
+const opaquePortsFromInput = (
+  value: string,
+  existing: readonly OpaqueInterfacePort[],
+): OpaqueInterfacePort[] => {
+  const retainedByName = new Map(existing.map((port) => [port.name, port]));
+  return [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))].map(
+    (name) => retainedByName.get(name) ?? { name },
+  );
+};
 
 function defaultHitlResponse(graph: WorkflowGraph, nodeId: string): HitlResponseContract {
   return {
@@ -381,7 +403,7 @@ export function ContextInspector({
     Boolean(previewNode.hitl.response);
 
   const updateModifierFlag = (
-    key: Exclude<keyof StepModifierSummary, 'readiness' | 'storeRead' | 'storeWrite' | 'retryFallback'>,
+    key: Exclude<keyof StepModifierSummary, 'opaque' | 'readiness' | 'storeRead' | 'storeWrite' | 'retryFallback'>,
     enabled: boolean,
   ) => {
     if (node?.kind !== 'step') return;
@@ -389,6 +411,24 @@ export function ContextInspector({
     if (enabled) modifiers[key] = true;
     else delete modifiers[key];
     updateNode(node.id, { modifiers });
+  };
+
+  const updateOpaque = (enabled: boolean) => {
+    if (node?.kind !== 'step') return;
+    updateNode(node.id, { opaque: enabled ? defaultOpaqueMetadata(node) : null });
+  };
+
+  const updateOpaquePorts = (
+    direction: 'inputPorts' | 'outputPorts',
+    value: string,
+  ) => {
+    if (node?.kind !== 'step' || !node.opaque) return;
+    updateNode(node.id, {
+      opaque: {
+        ...node.opaque,
+        [direction]: opaquePortsFromInput(value, node.opaque[direction]),
+      },
+    });
   };
 
   const updateReadiness = (readiness: StepReadiness | 'ready') => {
@@ -877,11 +917,41 @@ export function ContextInspector({
               <section className="context-inspector__group context-inspector__group--opaque" aria-labelledby="opaque-step-heading">
                 <h3 id="opaque-step-heading">Opaque / prebuilt Step</h3>
                 <div className="context-inspector__fields">
-                  <Field label="Factory"><p className="context-inspector__read-only-value">{node.opaque.factoryLabel}</p></Field>
-                  <Field label="Known inputs"><p className="context-inspector__read-only-value">{node.opaque.inputPorts.map((port) => port.name).join(', ') || 'No declared input ports'}</p></Field>
-                  <Field label="Known outputs"><p className="context-inspector__read-only-value">{node.opaque.outputPorts.map((port) => port.name).join(', ') || 'No declared output ports'}</p></Field>
+                  <Field label="Factory">
+                    <input
+                      aria-label="Opaque factory label"
+                      className="input"
+                      value={node.opaque.factoryLabel}
+                      disabled={!editable}
+                      onChange={(event) => updateNode(node.id, {
+                        opaque: { ...node.opaque!, factoryLabel: event.target.value },
+                      })}
+                    />
+                  </Field>
+                  <Field label="Known inputs">
+                    <input
+                      id={`opaque-input-ports-${node.id}`}
+                      aria-label="Opaque input ports"
+                      className="input"
+                      value={node.opaque.inputPorts.map((port) => port.name).join(', ')}
+                      disabled={!editable}
+                      onChange={(event) => updateOpaquePorts('inputPorts', event.target.value)}
+                      placeholder="Comma-separated input ports"
+                    />
+                  </Field>
+                  <Field label="Known outputs">
+                    <input
+                      id={`opaque-output-ports-${node.id}`}
+                      aria-label="Opaque output ports"
+                      className="input"
+                      value={node.opaque.outputPorts.map((port) => port.name).join(', ')}
+                      disabled={!editable}
+                      onChange={(event) => updateOpaquePorts('outputPorts', event.target.value)}
+                      placeholder="Comma-separated output ports"
+                    />
+                  </Field>
                 </div>
-                <p className="context-inspector__help">Only the declared factory and interface are shown. Internal child topology is intentionally unknown.</p>
+                <p className="context-inspector__help">Only the declared factory and comma-separated interface ports are shown. Internal child topology is intentionally unknown.</p>
                 <button
                   type="button"
                   className="secondary-button"
@@ -919,7 +989,7 @@ export function ContextInspector({
                 </label>
                 <label className="context-inspector__toggle-label">
                   <span>Opaque or prebuilt</span>
-                  <input type="checkbox" checked={Boolean(node.modifiers?.opaque)} disabled={!editable} onChange={(event) => updateModifierFlag('opaque', event.target.checked)} />
+                  <input type="checkbox" aria-label="Opaque or prebuilt" checked={Boolean(node.opaque)} disabled={!editable} onChange={(event) => updateOpaque(event.target.checked)} />
                 </label>
                 <Field label="Readiness">
                   <select

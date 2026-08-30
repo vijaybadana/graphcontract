@@ -43,6 +43,12 @@ export function SystemRelationshipEdge({
   const readableLabel =
     (typeof label === 'string' && label.trim()) || relationship.label?.trim() || relationshipLabel(relationship.kind);
   const marker = data.evidenceMarker;
+  const proposal = data.proposalState;
+  const proposalText = proposal
+    ? proposal === 'removed'
+      ? 'Removed · accepted record'
+      : `Proposed ${proposal}`
+    : null;
 
   return (
     <>
@@ -53,19 +59,34 @@ export function SystemRelationshipEdge({
         path={edgePath}
         markerEnd={markerEnd}
         interactionWidth={interactionWidth ?? 34}
-        className={`system-relationship-edge__path ${external ? 'is-external' : 'is-spawned'}`}
+        className={`system-relationship-edge__path ${external ? 'is-external' : 'is-spawned'} ${
+          proposal ? `is-proposed-${proposal}` : ''
+        }`}
       />
       <EdgeLabelRenderer>
         <div
-          className={`system-relationship-edge__label ${external ? 'is-external' : 'is-spawned'}`}
-          data-system-relationship-id={relationship.id}
-          data-relationship-kind={relationship.kind}
+          className={`system-relationship-edge__label ${external ? 'is-external' : 'is-spawned'} ${
+            proposal ? `is-proposed-${proposal}` : ''
+          }`}
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)` }}
-          aria-label={`${relationshipLabel(relationship.kind)}: ${readableLabel}. Not a native control edge.`}
         >
-          {external ? <ArrowsOutCardinalIcon aria-hidden="true" size={14} weight="bold" /> : <PlugsConnectedIcon aria-hidden="true" size={15} weight="bold" />}
-          <span>{readableLabel}</span>
-          {!external && <PathIcon className="system-relationship-edge__portal-icon" aria-hidden="true" size={14} weight="bold" />}
+          <button
+            type="button"
+            className="system-relationship-edge__select nodrag nopan"
+            data-system-relationship-id={relationship.id}
+            data-relationship-kind={relationship.kind}
+            data-proposal-state={proposal}
+            aria-label={`${relationshipLabel(relationship.kind)}: ${readableLabel}.${proposalText ? ` ${proposalText}.` : ''} Not a native control edge; open relationship details.`}
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onRelationshipActivate?.(relationship.id);
+            }}
+          >
+            {external ? <ArrowsOutCardinalIcon aria-hidden="true" size={14} weight="bold" /> : <PlugsConnectedIcon aria-hidden="true" size={15} weight="bold" />}
+            <span>{readableLabel}</span>
+            {!external && <PathIcon className="system-relationship-edge__portal-icon" aria-hidden="true" size={14} weight="bold" />}
+            {proposalText && <span className="system-relationship-edge__proposal">{proposalText}</span>}
+          </button>
           {marker && (
             <button
               type="button"

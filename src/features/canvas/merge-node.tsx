@@ -4,6 +4,7 @@ import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import { ArrowsInIcon, ClockCountdownIcon, LockSimpleIcon, WarningCircleIcon } from '@phosphor-icons/react';
 
 import './merge-node.css';
+import type { Provenance } from '@/src/domain';
 
 /**
  * Merge remains a structural canvas element. Keeping its data shape local to
@@ -24,6 +25,10 @@ export type MergeNodeData = {
   proposalState?: 'added' | 'updated' | 'removed';
   invalid?: boolean;
   frozen?: boolean;
+  /** Evidence remains an optional projection-only workspace overlay. */
+  provenance?: Provenance;
+  evidenceMarker?: number;
+  onEvidenceActivate?: (nodeId: string) => void;
   [key: string]: unknown;
 };
 
@@ -60,6 +65,16 @@ export function MergeNode({ data, selected }: NodeProps<MergeFlowNode>) {
           <strong className="merge-node-title">{data.label}</strong>
         </span>
       </header>
+      {data.evidenceMarker && (
+        <button
+          type="button"
+          className="merge-node-evidence-marker nodrag nopan"
+          aria-label={`Evidence marker ${data.evidenceMarker} for ${data.label}. Open evidence details.`}
+          onClick={() => data.onEvidenceActivate?.(data.id)}
+        >
+          {data.evidenceMarker}
+        </button>
+      )}
       <div className="merge-node-details">
         <span className="merge-node-detail">
           <ClockCountdownIcon size={13} weight="bold" aria-hidden="true" />

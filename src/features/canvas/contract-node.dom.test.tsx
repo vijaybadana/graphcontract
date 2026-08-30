@@ -67,6 +67,12 @@ describe('ContractNode Step anatomy', () => {
             opaque: true,
             readiness: 'degraded',
           },
+          opaque: {
+            factoryLabel: 'portfolio_factory',
+            inputPorts: [],
+            outputPorts: [],
+            runtimeInspection: { available: false },
+          },
           proposalState: 'updated',
           onModifierActivate,
         }}
@@ -185,6 +191,19 @@ describe('ContractNode Step anatomy', () => {
       expect.objectContaining({ id: 'storeRead', inspectorSection: 'storeAccess' }),
       expect.objectContaining({ id: 'retryFallback', inspectorSection: 'retry', accessibleLabel: 'Internal retry policy' }),
     ]);
+  });
+
+  it('does not present a legacy opaque modifier as an opaque interface declaration', () => {
+    const presentations = stepModifierPresentations({
+      id: 'legacy-prebuilt',
+      kind: 'step',
+      executor: 'deterministic',
+      label: 'Legacy prebuilt',
+      position: { x: 0, y: 0 },
+      modifiers: { opaque: true },
+    });
+
+    expect(presentations.some((presentation) => presentation.id === 'opaque')).toBe(false);
   });
 
   it('renders v6 provenance, opaque readiness, and semantic outcomes with text cues', async () => {

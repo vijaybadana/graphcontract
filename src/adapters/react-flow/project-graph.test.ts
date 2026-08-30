@@ -208,6 +208,101 @@ describe('projectGraphToCanvas', () => {
     expect(native.data.presentation.provenance).toBe('derived-semantic');
   });
 
+  it('keeps Merge evidence and proposal relationship records in the projection layer', () => {
+    const graph = structuredClone(sampleGraph);
+    graph.capabilities.provenance.externalOrchestrationAvailable = true;
+    graph.nodes.push({
+      id: 'merge-contract',
+      kind: 'merge',
+      label: 'Merge contract',
+      position: { x: 680, y: 360 },
+      merge: {
+        reducer: { name: 'append', aggregateState: 'evidence' },
+        completion: { mode: 'all' },
+        continuation: { mode: 'once' },
+        waitingForDynamicInputs: true,
+      },
+      provenance: {
+        representation: 'derived-semantic',
+        evidence: { source: 'merge contract', evidenceClass: 'Semantic inference', confidence: 'high' },
+      },
+    });
+    graph.relationships = [
+      {
+        id: 'update-runner',
+        kind: 'spawned-run',
+        source: { kind: 'node', nodeId: 'classifier' },
+        target: { kind: 'external', externalId: 'runner', label: 'Runner' },
+        label: 'Accepted runner',
+        provenance: { representation: 'declared' },
+      },
+      {
+        id: 'remove-runner',
+        kind: 'external-orchestration',
+        source: { kind: 'node', nodeId: 'billing' },
+        target: { kind: 'external', externalId: 'archive', label: 'Archive' },
+        label: 'Accepted archive',
+        provenance: { representation: 'external-orchestration' },
+      },
+    ];
+    const proposal = createProposal(graph, {
+      rationale: 'Review system-boundary changes.',
+      operations: [
+        {
+          type: 'update_relationship',
+          relationshipId: 'update-runner',
+          patch: { label: 'Candidate runner' },
+        },
+        { type: 'remove_relationship', relationshipId: 'remove-runner' },
+        {
+          type: 'add_relationship',
+          relationship: {
+            id: 'added-runner',
+            kind: 'external-orchestration',
+            source: { kind: 'node', nodeId: 'classifier' },
+            target: { kind: 'external', externalId: 'queue', label: 'Queue' },
+            label: 'Candidate queue',
+            provenance: { representation: 'external-orchestration' },
+          },
+        },
+      ],
+    }).proposal!;
+
+    const canvas = projectGraphToCanvas(graph, proposal);
+    const relationship = (id: string) =>
+      canvas.edges.find(
+        (edge) => isCanvasSystemRelationshipEdge(edge) && edge.data.relationship.id === id,
+      );
+    const merge = canvas.nodes.find((node) => node.id === 'merge-contract');
+
+    expect(evidenceMarkersForGraph(graph).some((marker) => marker.target === 'node' && marker.id === 'merge-contract')).toBe(true);
+    expect(merge).toMatchObject({
+      type: 'mergeJunction',
+      data: { provenance: { representation: 'derived-semantic' } },
+    });
+    expect(relationship('added-runner')).toMatchObject({
+      data: { proposalState: 'added', relationship: { label: 'Candidate queue' } },
+    });
+    expect(relationship('update-runner')).toMatchObject({
+      data: { proposalState: 'updated', relationship: { label: 'Candidate runner' } },
+    });
+    expect(relationship('remove-runner')).toMatchObject({
+      selectable: true,
+      reconnectable: false,
+      data: {
+        proposalState: 'removed',
+        readOnly: true,
+        relationship: { label: 'Accepted archive' },
+      },
+    });
+    expect(graph.relationships.map((entry) => entry.label)).toEqual(['Accepted runner', 'Accepted archive']);
+
+    const repeat = projectGraphToCanvas(graph, proposal);
+    expect(repeat.nodes.filter((node) => node.type === 'externalSystemTile').map((node) => ({ id: node.id, position: node.position }))).toEqual(
+      canvas.nodes.filter((node) => node.type === 'externalSystemTile').map((node) => ({ id: node.id, position: node.position })),
+    );
+  });
+
   it('projects routing semantics into reusable edge presentation without storing loop mode', () => {
     const graph = structuredClone(researchIntakeRoutingGraph);
     const canvas = projectGraphToCanvas(graph, null);
