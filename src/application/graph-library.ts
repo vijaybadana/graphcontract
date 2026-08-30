@@ -5,6 +5,7 @@ import {
   validateGraph,
   type GraphNode,
   type GraphCapabilities,
+  type OpaqueStepMetadata,
   type StepExecutor,
   type WorkflowGraph,
 } from '@/src/domain';
@@ -44,6 +45,13 @@ const step = (
   y: number,
   options: StepOptions = {},
 ): GraphNode => ({ id, kind: 'step', label, executor, position: { x, y }, ...options });
+
+const opaque = (factoryLabel: string): OpaqueStepMetadata => ({
+  factoryLabel,
+  inputPorts: [],
+  outputPorts: [],
+  runtimeInspection: { available: false },
+});
 
 const source = (owner: string, repository: string, note?: string): GraphLibrarySource => ({
   owner,
@@ -93,7 +101,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     source: source(
       'langchain-ai',
       'open_deep_research',
-      'The source’s elastic researcher pool, tool inventory, and runtime limits are intentionally omitted from this schema-v5 normalization.',
+      'The source’s elastic researcher pool, tool inventory, and runtime limits are intentionally omitted from this schema-v6 normalization.',
     ),
     graph: graph(
       'library-hierarchical-deep-research',
@@ -141,7 +149,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
       [
         start('coding-start', 40, 180),
         step('prepare-workspace', 'Prepare bounded workspace', 'deterministic', 240, 180, { modifiers: { guardrail: true } }),
-        step('coding-agent', 'Guarded coding agent', 'ai', 490, 180, { modifiers: { opaque: true, retryFallback: true }, participation: { internalTools: true } }),
+        step('coding-agent', 'Guarded coding agent', 'ai', 490, 180, { opaque: opaque('Guarded coding agent factory'), modifiers: { retryFallback: true }, participation: { internalTools: true } }),
         step('publish-change', 'Publish approved change', 'tool', 760, 180, {
           sensitive: { target: 'Repository change publication', authorization: 'Release owner', approvalRequired: true, idempotency: 'Change request key' },
           hitl: { enabled: true, timing: 'before', activation: { reason: 'Publishing changes requires an explicit approval.' }, response: { type: 'approval', allowedOutcomes: [{ id: 'approve', label: 'Approve publication', resumeNodeId: 'coding-delivered' }] } },
@@ -342,7 +350,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
       'library-voice-specialist-handoffs',
       'Voice Specialist Handoffs',
       [
-        start('voice-start', 40, 220), step('voice-triage', 'Voice triage', 'ai', 250, 220, { modifiers: { opaque: true }, participation: { internalTools: true } }), step('membership-specialist', 'Membership specialist', 'ai', 520, 80, { modifiers: { opaque: true }, participation: { internalTools: true }, sensitive: { target: 'Membership status', authorization: 'Member request', approvalRequired: false, idempotency: 'Conversation turn key' } }), step('credit-specialist', 'Credit specialist', 'ai', 520, 220, { modifiers: { opaque: true }, participation: { internalTools: true } }), step('booking-specialist', 'Booking specialist', 'ai', 520, 360, { modifiers: { opaque: true }, participation: { internalTools: true }, sensitive: { target: 'Class booking', authorization: 'Member request', approvalRequired: false, idempotency: 'Conversation turn key' } }), end('voice-turn-complete', 'End of turn', 840, 220),
+        start('voice-start', 40, 220), step('voice-triage', 'Voice triage', 'ai', 250, 220, { opaque: opaque('Voice triage factory'), participation: { internalTools: true } }), step('membership-specialist', 'Membership specialist', 'ai', 520, 80, { opaque: opaque('Membership specialist factory'), participation: { internalTools: true }, sensitive: { target: 'Membership status', authorization: 'Member request', approvalRequired: false, idempotency: 'Conversation turn key' } }), step('credit-specialist', 'Credit specialist', 'ai', 520, 220, { opaque: opaque('Credit specialist factory'), participation: { internalTools: true } }), step('booking-specialist', 'Booking specialist', 'ai', 520, 360, { opaque: opaque('Booking specialist factory'), participation: { internalTools: true }, sensitive: { target: 'Class booking', authorization: 'Member request', approvalRequired: false, idempotency: 'Conversation turn key' } }), end('voice-turn-complete', 'End of turn', 840, 220),
       ],
       [
         { id: 'voice-triage', source: 'voice-start', target: 'voice-triage', mode: 'conditional', label: 'default owner', condition: 'owner.default' }, { id: 'voice-membership', source: 'voice-start', target: 'membership-specialist', mode: 'conditional', label: 'membership owner', condition: 'owner.membership' }, { id: 'voice-credit', source: 'voice-start', target: 'credit-specialist', mode: 'conditional', label: 'credit owner', condition: 'owner.credit' }, { id: 'voice-booking', source: 'voice-start', target: 'booking-specialist', mode: 'conditional', label: 'booking owner', condition: 'owner.booking' }, { id: 'triage-membership', source: 'voice-triage', target: 'membership-specialist', mode: 'command', label: 'handoff membership', condition: 'handoff.membership' }, { id: 'triage-credit', source: 'voice-triage', target: 'credit-specialist', mode: 'command', label: 'handoff credit', condition: 'handoff.credit' }, { id: 'triage-booking', source: 'voice-triage', target: 'booking-specialist', mode: 'command', label: 'handoff booking', condition: 'handoff.booking' }, { id: 'triage-end', source: 'voice-triage', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' }, { id: 'membership-triage', source: 'membership-specialist', target: 'voice-triage', mode: 'command', label: 'return to triage', condition: 'handoff.triage' }, { id: 'membership-end', source: 'membership-specialist', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' }, { id: 'credit-triage', source: 'credit-specialist', target: 'voice-triage', mode: 'command', label: 'return to triage', condition: 'handoff.triage' }, { id: 'credit-end', source: 'credit-specialist', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' }, { id: 'booking-triage', source: 'booking-specialist', target: 'voice-triage', mode: 'command', label: 'return to triage', condition: 'handoff.triage' }, { id: 'booking-end', source: 'booking-specialist', target: 'voice-turn-complete', mode: 'command', label: 'reply complete', condition: 'turn.complete' },

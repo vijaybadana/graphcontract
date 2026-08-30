@@ -11,13 +11,14 @@ const graph = (
 ): WorkflowGraph => ({
   id: 'layout-fixture',
   name: 'Layout fixture',
-  schemaVersion: '5',
+  schemaVersion: '6',
   status: 'draft',
   updatedAt: '2026-08-31T00:00:00.000Z',
   capabilities: createDefaultGraphCapabilities(),
   nodes,
   edges,
   subgraphs,
+  relationships: [],
 });
 
 const step = (id: string, x: number, y: number, parentId?: string) => ({

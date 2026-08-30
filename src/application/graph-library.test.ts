@@ -1,5 +1,5 @@
 import { buildGraphContractDownload, buildGraphScenariosDownload } from '@/src/adapters/exports/downloads';
-import { migrateWorkspaceV6 } from '@/src/adapters/persistence/migrate-workspace';
+import { migrateWorkspaceV7 } from '@/src/adapters/persistence/migrate-workspace';
 import { enumerateScenarios, validateGraph, workflowGraphSchema } from '@/src/domain';
 import { describe, expect, it } from 'vitest';
 
@@ -11,13 +11,13 @@ import {
 import { GRAPH_LIBRARY_ENTRY_COUNT, cloneGraphLibraryGraph } from './graph-library-contract';
 
 describe('graph library registry', () => {
-  it('contains exactly ten distinct, safe, schema-v5 graph templates', () => {
+  it('contains exactly ten distinct, safe, schema-v6 graph templates', () => {
     expect(graphLibraryEntries).toHaveLength(GRAPH_LIBRARY_ENTRY_COUNT);
     expect(new Set(graphLibraryEntries.map((entry) => entry.id)).size).toBe(GRAPH_LIBRARY_ENTRY_COUNT);
     for (const entry of graphLibraryEntries) {
       expect(entry.source.url).toBe(`https://github.com/${entry.source.owner}/${entry.source.repository}`);
       expect(entry.source.url).toMatch(/^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/);
-      expect(entry.graph.schemaVersion).toBe('5');
+      expect(entry.graph.schemaVersion).toBe('6');
       expect(workflowGraphSchema.safeParse(entry.graph).success).toBe(true);
       expect(validateGraph(entry.graph)).toEqual([]);
     }
@@ -99,10 +99,27 @@ describe('graph library registry', () => {
       merge: entry.graph.nodes.some((node) => node.kind === 'merge'),
       hitl: entry.graph.nodes.some((node) => node.kind === 'step' && node.hitl?.enabled),
       command: entry.graph.edges.some((edge) => edge.mode === 'command'),
-      opaque: entry.graph.nodes.some((node) => node.kind === 'step' && node.modifiers?.opaque),
+      opaque: entry.graph.nodes.some((node) => node.kind === 'step' && node.opaque !== undefined),
       loop: entry.graph.edges.some((edge) => edge.loopCap !== undefined),
     }));
     expect(new Set(signatures.map((signature) => JSON.stringify(signature))).size).toBe(GRAPH_LIBRARY_ENTRY_COUNT);
+  });
+
+  it('uses canonical opaque metadata rather than presentation-only legacy flags', () => {
+    const opaqueSteps = graphLibraryEntries.flatMap((entry) =>
+      entry.graph.nodes.filter((node) => node.kind === 'step' && node.opaque),
+    );
+
+    expect(opaqueSteps.length).toBeGreaterThan(0);
+    for (const node of opaqueSteps) {
+      if (node.kind !== 'step') throw new Error('Expected an opaque Step.');
+      expect(node.opaque).toMatchObject({
+        factoryLabel: expect.any(String),
+        inputPorts: [],
+        outputPorts: [],
+        runtimeInspection: { available: false },
+      });
+    }
   });
 
   it('round-trips each graph through export and workspace rehydration', () => {
@@ -111,8 +128,8 @@ describe('graph library registry', () => {
       expect(cloned).not.toBe(entry.graph);
       const exported = JSON.parse(buildGraphContractDownload(cloned).content);
       const parsed = workflowGraphSchema.parse(exported);
-      const rehydrated = migrateWorkspaceV6({ graph: parsed }, () => {
-        throw new Error('A valid schema-v5 graph must not use the fallback workspace.');
+      const rehydrated = migrateWorkspaceV7({ graph: parsed }, () => {
+        throw new Error('A valid schema-v6 graph must not use the fallback workspace.');
       });
       expect(rehydrated.graph).toEqual(parsed);
       expect(JSON.parse(buildGraphScenariosDownload(parsed, entry.scenarioSummary.scenarios).content).scenarios).toEqual(entry.scenarioSummary.scenarios);

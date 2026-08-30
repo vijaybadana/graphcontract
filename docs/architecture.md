@@ -111,7 +111,7 @@ A frozen graph is immutable in normal UI flow. The user must explicitly unfreeze
 
 ## Persistence
 
-`localStorage` stores the current accepted graph, pending proposal metadata, and frozen state on the local browser/device. Persistence version 6 migrates schema-v1 through schema-v4 graphs into schema v5, adding explicit default capability records without inventing topology; legacy direct Store summary flags become direct Store access only when that evidence exists. No account, authentication, or server-side project database is needed for the MVP.
+`localStorage` stores the current accepted graph, pending proposal metadata, and frozen state on the local browser/device. Persistence version 7 migrates schema-v1 through schema-v5 graphs into schema v6. The migration adds declared provenance defaults and explicit capability records without inventing evidence, external relationships, runtime inspection, or topology; legacy direct Store summary flags become direct Store access only when that declaration exists. No account, authentication, or server-side project database is needed for the MVP.
 
 Persisted data is convenience storage, not a collaboration or security mechanism. The page remains fully functional when storage is empty by loading the predefined sample graph.
 

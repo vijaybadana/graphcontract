@@ -28,7 +28,7 @@ import {
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
-    schemaVersion: '5',
+    schemaVersion: '6',
     id: 'subgraph-projection',
     name: 'Subgraph projection',
     status: 'draft',
@@ -43,6 +43,7 @@ function graphWithSubgraph(collapsed = false): WorkflowGraph {
         collapsed,
       },
     ],
+    relationships: [],
     nodes: [
       { id: 'start', kind: 'start', label: 'Start', position: { x: 40, y: 260 } },
       {

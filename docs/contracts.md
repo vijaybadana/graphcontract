@@ -28,11 +28,26 @@ type RuntimeModeCapability = {
   mode: "unspecified" | "text" | "voice";
   input?: "text" | "audio";
 };
+type ProvenanceEvidence = {
+  source: string;
+  evidenceClass: string;
+  confidence: "low" | "medium" | "high";
+  details?: string;
+  timestamp?: string;
+};
+type Provenance = {
+  representation: "declared" | "runtime-generated" | "derived-semantic" | "external-orchestration";
+  evidence?: ProvenanceEvidence;
+};
 type GraphCapabilities = {
   state: WorkingStateCapability;
   checkpointer: CheckpointerCapability;
   store: LongTermStoreCapability;
   runtimeMode: RuntimeModeCapability;
+  provenance: {
+    evidenceOverlayAvailable: boolean;
+    externalOrchestrationAvailable: boolean;
+  };
 };
 
 type StepStoreAccess = {
@@ -47,6 +62,12 @@ type RetryPolicy = {
 };
 type HitlConfig = { enabled: boolean; timing?: "before" | "inside" | "after" };
 type MergeConfig = { reducer: { name: string; aggregateState: string }; completion: { mode: "all" | "any" | "quorum" }; continuation: { mode: "once" | "per_batch" }; waitingForDynamicInputs: true };
+type OpaqueStepMetadata = {
+  factoryLabel: string;
+  inputPorts: Array<{ name: string; description?: string }>;
+  outputPorts: Array<{ name: string; description?: string }>;
+  runtimeInspection: { available: boolean; evidence?: ProvenanceEvidence };
+};
 type GraphSubgraph = {
   id: string;
   label: string;
@@ -56,17 +77,30 @@ type GraphSubgraph = {
   capabilityOverrides?: Partial<Pick<GraphCapabilities, "state" | "checkpointer" | "store">>;
 };
 type GraphNode =
-  | { id: string; kind: "start" | "end"; label: string; position: { x: number; y: number }; parentId?: string }
-  | { id: string; kind: "merge"; label: string; position: { x: number; y: number }; parentId?: string; merge: MergeConfig }
-  | { id: string; kind: "step"; label: string; position: { x: number; y: number }; parentId?: string; executor: StepExecutor; storeAccess?: StepStoreAccess; retry?: RetryPolicy; hitl?: HitlConfig };
-type GraphEdge = { id: string; source: string; target: string; mode: EdgeMode; label?: string; condition?: string; loopCap?: number };
+  | { id: string; kind: "start"; label: string; position: { x: number; y: number }; parentId?: string; provenance?: Provenance }
+  | { id: string; kind: "end"; label: string; position: { x: number; y: number }; parentId?: string; outcome?: { kind: "completed" | "awaiting-reply" | "failure" | "partial-result" | "cancelled" | "domain-specific"; detail?: string }; provenance?: Provenance }
+  | { id: string; kind: "merge"; label: string; position: { x: number; y: number }; parentId?: string; merge: MergeConfig; provenance?: Provenance }
+  | { id: string; kind: "step"; label: string; position: { x: number; y: number }; parentId?: string; executor: StepExecutor; storeAccess?: StepStoreAccess; retry?: RetryPolicy; hitl?: HitlConfig; readiness?: { state: "ready" | "degraded" | "unimplemented"; detail?: string }; opaque?: OpaqueStepMetadata; provenance?: Provenance };
+type GraphEdge = { id: string; source: string; target: string; mode: EdgeMode; label?: string; condition?: string; loopCap?: number; provenance?: Provenance };
+type RelationshipEndpoint =
+  | { kind: "node"; nodeId: string }
+  | { kind: "external"; externalId: string; label: string };
+type NonNativeRelationship = {
+  id: string;
+  kind: "spawned-run" | "spawned-thread" | "external-orchestration";
+  source: RelationshipEndpoint;
+  target: RelationshipEndpoint;
+  label?: string;
+  provenance: Provenance;
+};
 type WorkflowGraph = {
-  schemaVersion: "5";
+  schemaVersion: "6";
   id: string;
   name: string;
   capabilities: GraphCapabilities;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  relationships: NonNativeRelationship[];
   subgraphs: GraphSubgraph[];
   status: "draft" | "frozen";
   updatedAt: string;
@@ -75,11 +109,19 @@ type WorkflowGraph = {
 
 ## State, Checkpoint, Store, and Runtime scope
 
-Schema v5 keeps four different concepts explicit. **State** is per-run data and reducer metadata. A **Checkpointer** persists/resumes a thread and its durable-thread requirement. A **Store** is cross-thread knowledge availability; a Step receives a Store `R` or `W` marker only when its own `storeAccess` declares that direct access. **Runtime mode** is a graph-level text/voice declaration, not a subgraph override.
+Durability was introduced in schema v5 and remains explicit in active schema v6. **State** is per-run data and reducer metadata. A **Checkpointer** persists/resumes a thread and its durable-thread requirement. A **Store** is cross-thread knowledge availability; a Step receives a Store `R` or `W` marker only when its own `storeAccess` declares that direct access. **Runtime mode** is a graph-level text/voice declaration, not a subgraph override.
 
 Subgraphs inherit State, Checkpointer, and Store from the graph unless they contain an explicit complete override for that capability. The effective source is therefore `graph`, `inherited`, or `overridden`; missing overrides never imply a disabled capability. Backend, namespace, thread-id source, retention, state fields, and reducers are inspector data rather than topology.
 
 `retry` is an internal Step policy. It may record attempts, backoff, retry conditions, or a provider fallback, but it never creates a graph edge, a routing mode, or a topology loop. A loop remains an authored cycle in `edges` and is bounded only by its topology `loopCap`.
+
+## Provenance and system boundaries
+
+Schema v6 keeps native control-flow `edges` separate from non-native `relationships`. A relationship may connect one graph node to one external endpoint to describe a spawned run, spawned thread, or external orchestrator, but it never participates in reachability, loops, routing validation, or scenario traversal. External orchestration provenance requires supplied display-only evidence and the corresponding graph capability; WebMCP cannot fabricate runtime-generated evidence or runtime inspection.
+
+Evidence fields are untrusted text that is validated and rendered inertly. A source or confidence label does not make a claim trusted. Evidence-overlay visibility, selected evidence, and selected system relationships are transient UI state and are never persisted into the accepted graph or undo history.
+
+An opaque/prebuilt Step declares only its known factory and interface. It never invents child topology. Runtime inspection is unavailable unless explicit evidence accompanies it, and the canonical `opaque` record—not a presentation badge—is the source of truth.
 
 ## Routing invariants
 
@@ -160,6 +202,9 @@ type GraphOperation =
       type: "remove_edge";
       edgeId: string;
     }
+  | { type: "add_relationship"; relationship: NonNativeRelationship }
+  | { type: "update_relationship"; relationshipId: string; patch: Partial<Omit<NonNativeRelationship, "id">> }
+  | { type: "remove_relationship"; relationshipId: string }
   | { type: "update_graph_capabilities"; patch: Partial<GraphCapabilities> }
   | { type: "set_subgraph_capability_override"; subgraphId: string; override: Partial<Pick<GraphCapabilities, "state" | "checkpointer" | "store">> }
   | { type: "remove_subgraph_capability_override"; subgraphId: string; capability: "state" | "checkpointer" | "store" };
@@ -184,7 +229,7 @@ type ValidationIssue = {
 
 Proposal operations are evaluated in their supplied order against a copy of the current accepted graph, with each referenced node or subgraph required to exist at that point in the sequence. `add_node.parentId` is validated against that progressive graph; membership changes never use `update_node`. Assigning or removing a parent preserves a node's absolute screen position, while dissolving a subgraph removes only the container, preserves canonical edges, and converts its direct children to absolute positions. A proposal is valid only if the resulting graph satisfies final validation. Approval applies all operations atomically; failure leaves the accepted graph unchanged.
 
-Durability operations follow the same progressive, review-only path. A proposal can replace graph capability records, set or remove one supported subgraph override, and update a Step's direct Store access or Retry policy. It cannot approve, reject, freeze, resume, create runtime instances, or mutate accepted state while under review.
+Durability and provenance operations follow the same progressive, review-only path. A proposal can replace graph capability records, set or remove one supported subgraph override, update a Step's direct Store access or Retry policy, declare opaque/readiness/outcome metadata, and add/update/remove non-native relationships. It cannot approve, reject, freeze, resume, create runtime instances, fabricate runtime evidence, or mutate accepted state while under review.
 
 A proposal becomes `stale` if the accepted graph changes after the agent read it or after the proposal was created. Stale proposals must not be approved without being regenerated against the current graph.
 
@@ -218,7 +263,7 @@ type ScenarioBundle = {
 };
 ```
 
-Scenarios are generated only from a frozen, valid graph. Each scenario represents one bounded deterministic reachable `start`-to-`end` execution path. A topology-derived return loop is traversed at most once per path, so a graph with a single unbranched path produces one scenario. Retry and provider fallback metadata remains attached to a Step and does not add a scenario traversal.
+Scenarios are generated only from a frozen, valid graph. Each scenario represents one bounded deterministic reachable `start`-to-`end` execution path. A topology-derived return loop is traversed at most once per path, so a graph with a single unbranched path produces one scenario. Retry and provider fallback metadata remains attached to a Step and does not add a scenario traversal. Non-native relationships are retained as annotations in downloads but are never traversed as executable paths.
 
 ## WebMCP tools
 
@@ -280,6 +325,14 @@ type ProposeGraphChangesOutput = {
     addedEdgeIds: string[];
     updatedEdgeIds: string[];
     removedEdgeIds: string[];
+    addedRelationshipIds: string[];
+    updatedRelationshipIds: string[];
+    removedRelationshipIds: string[];
+    changedCapabilityPaths: string[];
+    changedProvenancePaths: string[];
+    changedReadinessNodeIds: string[];
+    changedOpaqueNodeIds: string[];
+    changedEndOutcomeNodeIds: string[];
   };
 };
 ```
