@@ -300,6 +300,61 @@ describe('workspace persistence migration', () => {
     expect(migrated.proposal).toEqual(proposal);
   });
 
+  it('preserves parseable incomplete Send and Merge drafts instead of replacing the canvas', () => {
+    const graph = structuredClone(sampleGraph);
+    graph.nodes.push({
+      id: 'draft-merge',
+      kind: 'merge',
+      label: 'Draft Merge',
+      position: { x: 780, y: 300 },
+      merge: {
+        reducer: { name: '', aggregateState: '' },
+        completion: { mode: 'all' },
+        continuation: { mode: 'once' },
+        waitingForDynamicInputs: true,
+      },
+    });
+    graph.edges = graph.edges.map((edge) =>
+      edge.id === 'classifier-billing'
+        ? {
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            mode: 'send' as const,
+            send: {
+              destinationTemplateId: edge.target,
+              multiplicity: 'dynamic' as const,
+              payloadLabel: '',
+              mergeNodeId: '',
+            },
+          }
+        : edge,
+    );
+
+    const migrated = migrateWorkspaceV5(
+      { graph, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph?.id).toBe(graph.id);
+    expect(migrated.graph?.nodes.find((node) => node.id === 'draft-merge')).toMatchObject({
+      kind: 'merge',
+      merge: { reducer: { name: '', aggregateState: '' } },
+    });
+    expect(migrated.graph?.edges.find((edge) => edge.id === 'classifier-billing')).toMatchObject({
+      mode: 'send',
+      send: { payloadLabel: '', mergeNodeId: '' },
+    });
+    expect(validateGraph(migrated.graph!).map((entry) => entry.code)).toEqual(
+      expect.arrayContaining([
+        'SEND_PAYLOAD_LABEL_REQUIRED',
+        'SEND_MERGE_REQUIRED',
+        'MERGE_REDUCER_REQUIRED',
+        'MERGE_AGGREGATE_STATE_REQUIRED',
+      ]),
+    );
+  });
+
   it('migrates v2 HITL, sensitive policy, and pending proposal data without replacing incomplete drafts', () => {
     const graph = structuredClone(sampleGraph) as unknown as {
       schemaVersion: '2';

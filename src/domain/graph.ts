@@ -672,8 +672,10 @@ export const mergeConfigSchema = z
   .object({
     reducer: z
       .object({
-        name: z.string().min(1),
-        aggregateState: z.string().min(1),
+        // Draft fields remain parseable while the inspector is being edited;
+        // validateGraph owns the actionable readability requirements.
+        name: z.string(),
+        aggregateState: z.string(),
       })
       .strict(),
     completion: z
@@ -753,11 +755,12 @@ const graphEdgeBaseSchema = z.object({
 
 export const sendMapConfigSchema = z
   .object({
-    destinationTemplateId: z.string().min(1),
+    // Draft configuration must survive persistence even before it is valid.
+    destinationTemplateId: z.string(),
     multiplicity: z.literal('dynamic'),
-    payloadLabel: z.string().min(1),
-    mergeNodeId: z.string().min(1),
-    payloadSchemaRef: z.string().min(1).optional(),
+    payloadLabel: z.string(),
+    mergeNodeId: z.string(),
+    payloadSchemaRef: z.string().optional(),
   })
   .strict();
 
@@ -1611,6 +1614,24 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     const nodeOutgoing = outgoing.get(node.id) ?? [];
     const normalContinuations = nodeOutgoing.filter((edge) => edge.mode === 'normal');
     const dynamicInputs = sendEdges.filter((edge) => edge.send?.mergeNodeId === node.id);
+    if (!node.merge.reducer.name.trim()) {
+      issues.push(
+        issue(
+          'MERGE_REDUCER_REQUIRED',
+          `Merge “${node.label}” needs a readable reducer name.`,
+          `nodes.${node.id}.merge.reducer.name`,
+        ),
+      );
+    }
+    if (!node.merge.reducer.aggregateState.trim()) {
+      issues.push(
+        issue(
+          'MERGE_AGGREGATE_STATE_REQUIRED',
+          `Merge “${node.label}” needs a readable aggregate state.`,
+          `nodes.${node.id}.merge.reducer.aggregateState`,
+        ),
+      );
+    }
     if (dynamicInputs.length === 0) {
       issues.push(
         issue(
