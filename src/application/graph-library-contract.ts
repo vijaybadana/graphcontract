@@ -14,7 +14,7 @@ export type GraphLibrarySource = {
 };
 
 /**
- * Author-owned metadata and a canonical schema-v4 fixture. Repository metadata
+ * Author-owned metadata and a canonical schema-v5 fixture. Repository metadata
  * is presentation-only and never participates in graph identity or loading.
  */
 export type GraphLibraryDefinition = {

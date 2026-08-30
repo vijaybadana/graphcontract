@@ -1,4 +1,4 @@
-import { WorkflowGraph } from '@/src/domain';
+import { createDefaultGraphCapabilities, WorkflowGraph } from '@/src/domain';
 import { describe, expect, it } from 'vitest';
 
 import { CONTRACT_NODE_HEIGHT, CONTRACT_NODE_WIDTH } from './canvas-geometry';
@@ -11,9 +11,10 @@ const graph = (
 ): WorkflowGraph => ({
   id: 'layout-fixture',
   name: 'Layout fixture',
-  schemaVersion: '4',
+  schemaVersion: '5',
   status: 'draft',
   updatedAt: '2026-08-31T00:00:00.000Z',
+  capabilities: createDefaultGraphCapabilities(),
   nodes,
   edges,
   subgraphs,

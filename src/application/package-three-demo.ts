@@ -1,12 +1,13 @@
-import type { RuntimeProjectionFixture, WorkflowGraph } from '@/src/domain';
+import { createDefaultGraphCapabilities, type RuntimeProjectionFixture, type WorkflowGraph } from '@/src/domain';
 
 /** An authored Package 3 contract; concrete workers live only in its fixture. */
 export const dynamicParallelismDemoGraph: WorkflowGraph = {
-  schemaVersion: '4',
+  schemaVersion: '5',
   id: 'dynamic-parallelism-merge-demo',
   name: 'Parallel research · Send ×N',
   status: 'draft',
   updatedAt: '2026-08-30T00:00:00.000Z',
+  capabilities: createDefaultGraphCapabilities(),
   nodes: [
     { id: 'parallel-start', kind: 'start', label: 'Start', position: { x: 48, y: 244 } },
     {

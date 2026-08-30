@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
+import { createDefaultGraphCapabilities } from '@/src/domain';
 
 import { GraphLibrarySheet } from './graph-library-sheet';
 
@@ -18,7 +19,7 @@ const entries: readonly GraphLibraryEntry[] = [
     concepts: ['Routing', 'HITL'],
     source: { owner: 'langchain-ai', repository: 'open_deep_research', url: 'https://github.com/langchain-ai/open_deep_research', note: 'Runtime worker pools are intentionally deferred.' },
     graph: {
-      id: 'research-graph', name: 'Research graph', schemaVersion: '4', status: 'draft', updatedAt: '2026-08-30T00:00:00.000Z', subgraphs: [],
+      id: 'research-graph', name: 'Research graph', schemaVersion: '5', status: 'draft', updatedAt: '2026-08-30T00:00:00.000Z', capabilities: createDefaultGraphCapabilities(), subgraphs: [],
       nodes: [
         { id: 'start', kind: 'start', label: 'Begin', position: { x: 0, y: 20 } },
         { id: 'review', kind: 'step', label: 'Review', position: { x: 180, y: 20 }, executor: 'deterministic' },
@@ -40,7 +41,7 @@ const entries: readonly GraphLibraryEntry[] = [
     concepts: ['HITL', 'Merge'],
     source: { owner: 'AttiR', repository: 'OpsCanvas', url: 'https://github.com/AttiR/OpsCanvas' },
     graph: {
-      id: 'incident-graph', name: 'Incident graph', schemaVersion: '4', status: 'draft', updatedAt: '2026-08-30T00:00:00.000Z', subgraphs: [],
+      id: 'incident-graph', name: 'Incident graph', schemaVersion: '5', status: 'draft', updatedAt: '2026-08-30T00:00:00.000Z', capabilities: createDefaultGraphCapabilities(), subgraphs: [],
       nodes: [
         { id: 'start', kind: 'start', label: 'Begin', position: { x: 0, y: 0 } },
         { id: 'merge', kind: 'merge', label: 'Coordinate', position: { x: 180, y: 40 }, merge: { reducer: { name: 'all', aggregateState: 'updates' }, completion: { mode: 'all' }, continuation: { mode: 'once' }, waitingForDynamicInputs: true } },

@@ -1,5 +1,5 @@
 import { buildGraphContractDownload, buildGraphScenariosDownload } from '@/src/adapters/exports/downloads';
-import { migrateWorkspaceV5 } from '@/src/adapters/persistence/migrate-workspace';
+import { migrateWorkspaceV6 } from '@/src/adapters/persistence/migrate-workspace';
 import { enumerateScenarios, validateGraph, workflowGraphSchema } from '@/src/domain';
 import { describe, expect, it } from 'vitest';
 
@@ -11,13 +11,13 @@ import {
 import { GRAPH_LIBRARY_ENTRY_COUNT, cloneGraphLibraryGraph } from './graph-library-contract';
 
 describe('graph library registry', () => {
-  it('contains exactly ten distinct, safe, schema-v4 graph templates', () => {
+  it('contains exactly ten distinct, safe, schema-v5 graph templates', () => {
     expect(graphLibraryEntries).toHaveLength(GRAPH_LIBRARY_ENTRY_COUNT);
     expect(new Set(graphLibraryEntries.map((entry) => entry.id)).size).toBe(GRAPH_LIBRARY_ENTRY_COUNT);
     for (const entry of graphLibraryEntries) {
       expect(entry.source.url).toBe(`https://github.com/${entry.source.owner}/${entry.source.repository}`);
       expect(entry.source.url).toMatch(/^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/);
-      expect(entry.graph.schemaVersion).toBe('4');
+      expect(entry.graph.schemaVersion).toBe('5');
       expect(workflowGraphSchema.safeParse(entry.graph).success).toBe(true);
       expect(validateGraph(entry.graph)).toEqual([]);
     }
@@ -72,8 +72,8 @@ describe('graph library registry', () => {
       expect(cloned).not.toBe(entry.graph);
       const exported = JSON.parse(buildGraphContractDownload(cloned).content);
       const parsed = workflowGraphSchema.parse(exported);
-      const rehydrated = migrateWorkspaceV5({ graph: parsed }, () => {
-        throw new Error('A valid schema-v4 graph must not use the fallback workspace.');
+      const rehydrated = migrateWorkspaceV6({ graph: parsed }, () => {
+        throw new Error('A valid schema-v5 graph must not use the fallback workspace.');
       });
       expect(rehydrated.graph).toEqual(parsed);
       expect(JSON.parse(buildGraphScenariosDownload(parsed, entry.scenarioSummary.scenarios).content).scenarios).toEqual(entry.scenarioSummary.scenarios);

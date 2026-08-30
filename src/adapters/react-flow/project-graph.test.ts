@@ -11,6 +11,7 @@ import {
 } from '@/src/adapters/react-flow/project-graph';
 import {
   createProposal,
+  createDefaultGraphCapabilities,
   humanControlHitlDemoGraph,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
@@ -25,11 +26,12 @@ import {
 
 function graphWithSubgraph(collapsed = false): WorkflowGraph {
   return {
-    schemaVersion: '3',
+    schemaVersion: '5',
     id: 'subgraph-projection',
     name: 'Subgraph projection',
     status: 'draft',
     updatedAt: '2026-08-29T00:00:00.000Z',
+    capabilities: createDefaultGraphCapabilities(),
     subgraphs: [
       {
         id: 'review-group',

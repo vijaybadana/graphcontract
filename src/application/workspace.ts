@@ -9,7 +9,7 @@ import {
   GraphProposal,
   GraphSubgraph,
   NodeKind,
-  normalizeWorkflowGraphRouting,
+  normalizeWorkflowGraph,
   researchIntakeRoutingGraph,
   researchSupervisorGraph,
   humanControlHitlDemoGraph,
@@ -18,6 +18,7 @@ import {
   ValidationIssue,
   WorkflowGraph,
   StepExecutor,
+  StepGraphNode,
 } from '@/src/domain';
 import { dynamicParallelismDemoGraph } from './package-three-demo';
 import { layoutWorkflowGraph } from './layout-workflow';
@@ -115,7 +116,7 @@ function createNodeFromPreset(
 
 const clone = <T,>(value: T): T => structuredClone(value);
 const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
-  ['executor', 'participation', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
+  ['executor', 'participation', 'storeAccess', 'retry', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
 const hasMergeOnlyPatchFields = (patch: GraphNodePatch) => 'merge' in patch;
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
@@ -185,7 +186,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     notice?: string,
   ): WorkspaceTransition => {
     if (!editable(state)) return blocked(state);
-    const graph = normalizeWorkflowGraphRouting(updater(clone(state.graph)));
+    const graph = normalizeWorkflowGraph(updater(clone(state.graph)));
     graph.updatedAt = dependencies.now();
     graph.status = 'draft';
     return { state: { graph, proposal: null, scenarios: [] }, changed: true, notice };
@@ -332,7 +333,32 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       }
       return changeGraph(state, (graph) => ({
         ...graph,
-        nodes: graph.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
+        nodes: graph.nodes.map((node) => {
+          if (node.id !== nodeId) return node;
+          if (node.kind !== 'step') return { ...node, ...patch } as GraphNode;
+          const updated = { ...node, ...patch } as StepGraphNode;
+          if (patch.sensitive === null) delete updated.sensitive;
+          if (patch.storeAccess === null) {
+            delete updated.storeAccess;
+            if (updated.modifiers) {
+              const remainingModifiers = { ...updated.modifiers };
+              delete remainingModifiers.storeRead;
+              delete remainingModifiers.storeWrite;
+              if (Object.keys(remainingModifiers).length > 0) updated.modifiers = remainingModifiers;
+              else delete updated.modifiers;
+            }
+          }
+          if (patch.retry === null) {
+            delete updated.retry;
+            if (updated.modifiers) {
+              const remainingModifiers = { ...updated.modifiers };
+              delete remainingModifiers.retryFallback;
+              if (Object.keys(remainingModifiers).length > 0) updated.modifiers = remainingModifiers;
+              else delete updated.modifiers;
+            }
+          }
+          return updated;
+        }),
       }));
     },
 

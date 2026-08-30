@@ -1,5 +1,7 @@
 import {
+  createDefaultGraphCapabilities,
   enumerateScenarios,
+  normalizeWorkflowGraph,
   validateGraph,
   type GraphNode,
   type StepExecutor,
@@ -55,12 +57,13 @@ const graph = (
   nodes: GraphNode[],
   edges: WorkflowGraph['edges'],
   subgraphs: WorkflowGraph['subgraphs'] = [],
-): WorkflowGraph => ({
-  schemaVersion: '4',
+): WorkflowGraph => normalizeWorkflowGraph({
+  schemaVersion: '5',
   id,
   name,
   status: 'draft',
   updatedAt: UPDATED_AT,
+  capabilities: createDefaultGraphCapabilities(),
   nodes,
   edges,
   subgraphs,
@@ -77,7 +80,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     source: source(
       'langchain-ai',
       'open_deep_research',
-      'The source’s elastic researcher pool, tool inventory, and runtime limits are intentionally omitted from this schema-v4 normalization.',
+      'The source’s elastic researcher pool, tool inventory, and runtime limits are intentionally omitted from this schema-v5 normalization.',
     ),
     graph: graph(
       'library-hierarchical-deep-research',
@@ -204,7 +207,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'data',
     complexity: 'intermediate',
     concepts: ['guardrail', 'conditional repair', 'approval gate'],
-    source: source('tharunramavath', 'AI-Powered-SQL-Agent', 'Database state, checkpointing, and live execution details are intentionally outside this schema-v4 graph.'),
+    source: source('tharunramavath', 'AI-Powered-SQL-Agent', 'Database state, checkpointing, and live execution details are intentionally outside this schema-v5 graph.'),
     graph: graph(
       'library-guarded-natural-language-to-sql',
       'Guarded Natural-Language-to-SQL',
@@ -223,7 +226,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
     domain: 'communications',
     complexity: 'advanced',
     concepts: ['command routing', 'subgraph', 'human review'],
-    source: source('langchain-ai', 'agents-from-scratch-ts', 'Preference-store behavior and runtime tool inventories are deferred; this graph keeps only schema-v4 control flow.'),
+    source: source('langchain-ai', 'agents-from-scratch-ts', 'Preference-store behavior and runtime tool inventories are deferred; this graph keeps only schema-v5 control flow.'),
     graph: graph(
       'library-email-triage-with-human-review',
       'Email Triage with Human Review',

@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyGraphOperations,
+  createDefaultGraphCapabilities,
   enumerateScenarios,
   graphOperationSchema,
   graphNodePatchSchema,
   researchIntakeRoutingGraph,
+  researchSupervisorGraph,
+  resolveEffectiveCapabilities,
   sampleGraph,
   validateGraph,
   validateRuntimeProjectionFixture,
+  type GraphOperation,
   WorkflowGraph,
   workflowGraphSchema,
+  workflowGraphV4Schema,
 } from './graph';
 import {
   buildGraphContractDownload,
@@ -19,11 +24,12 @@ import {
 } from '../adapters/exports/downloads';
 
 const sendMergeGraph = (): WorkflowGraph => ({
-  schemaVersion: '4',
+  schemaVersion: '5',
   id: 'dynamic-send-merge',
   name: 'Dynamic Send and Merge',
   status: 'draft',
   updatedAt: '2026-08-30T00:00:00.000Z',
+  capabilities: createDefaultGraphCapabilities(),
   nodes: [
     { id: 'start', kind: 'start', label: 'Start', position: { x: 0, y: 0 } },
     { id: 'dispatch', kind: 'step', executor: 'ai', label: 'Dispatch', position: { x: 160, y: 0 } },
@@ -93,11 +99,19 @@ describe('routing edge semantics', () => {
       approvalRequired: false,
       idempotency: 'No external mutation',
     };
+    graph.capabilities.store.available = true;
+    ai.storeAccess = {
+      read: { namespace: 'customer-preferences', key: 'customer.id' },
+      write: { namespace: 'customer-preferences', key: 'customer.id', retention: '30d' },
+    };
+    ai.retry = {
+      maxAttempts: 3,
+      backoff: { strategy: 'exponential', initialDelayMs: 100, maxDelayMs: 1_000 },
+      retryOn: ['provider.timeout'],
+      fallback: { provider: 'secondary-ai', model: 'reviewer' },
+    };
     ai.modifiers = {
       guardrail: true,
-      storeRead: true,
-      storeWrite: true,
-      retryFallback: true,
       opaque: true,
       readiness: 'degraded',
     };
@@ -110,7 +124,9 @@ describe('routing edge semantics', () => {
       participation: { internalTools: true },
       hitl: { enabled: true, timing: 'before' },
       sensitive: { target: 'Refund decision', approvalRequired: false },
-      modifiers: { storeRead: true, storeWrite: true, readiness: 'degraded' },
+      storeAccess: { read: { namespace: 'customer-preferences' }, write: { retention: '30d' } },
+      retry: { maxAttempts: 3, backoff: { strategy: 'exponential' } },
+      modifiers: { readiness: 'degraded' },
     });
     expect(human.executor).toBe('human');
     expect(human.hitl).toBeUndefined();
@@ -168,6 +184,139 @@ describe('routing edge semantics', () => {
     );
     expect(classifier.hitl.timing).toBe('inside');
     expect(classifier.hitl.response?.allowedOutcomes[0]?.resumeNodeId).toBe('missing-node');
+  });
+
+  it('resolves graph and subgraph durability capabilities without changing topology', () => {
+    const graph = structuredClone(researchSupervisorGraph);
+    graph.capabilities = {
+      state: {
+        enabled: true,
+        schema: { fields: ['messages', 'results'], summary: 'Per-run research state' },
+        reducers: [{ key: 'messages', summary: 'Append reviewer messages' }],
+      },
+      checkpointer: {
+        enabled: true,
+        backend: 'MemorySaver',
+        durableThread: { required: true, threadIdSource: 'request.context.threadId' },
+      },
+      store: { available: true, namespace: 'research-preferences', retention: '30d' },
+      runtimeMode: { mode: 'text', input: 'text' },
+    };
+    const subgraph = graph.subgraphs.find((candidate) => candidate.id === 'research-supervisor');
+    const step = graph.nodes.find((candidate) => candidate.id === 'research-supervisor-agent');
+    if (!subgraph || !step || step.kind !== 'step') throw new Error('Expected the Research subgraph fixture.');
+    subgraph.capabilityOverrides = {
+      state: { enabled: true, schema: { fields: ['messages'] }, reducers: [] },
+      checkpointer: { enabled: true, durableThread: { required: false } },
+      store: { available: false },
+    };
+    step.storeAccess = { read: { namespace: 'research-preferences', key: 'query' } };
+
+    expect(resolveEffectiveCapabilities(graph).state.source).toBe('graph');
+    expect(resolveEffectiveCapabilities(graph, subgraph.id)).toMatchObject({
+      state: { source: 'overridden', value: { schema: { fields: ['messages'] } } },
+      checkpointer: { source: 'overridden', value: { durableThread: { required: false } } },
+      store: { source: 'overridden', value: { available: false } },
+      runtimeMode: { source: 'graph', value: { mode: 'text' } },
+    });
+    expect(validateGraph(graph)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'STORE_READ_REQUIRES_AVAILABLE_STORE',
+          path: 'nodes.research-supervisor-agent.storeAccess.read',
+        }),
+      ]),
+    );
+
+    subgraph.capabilityOverrides.store = { available: true, namespace: 'research-preferences' };
+    expect(validateGraph(graph)).toEqual([]);
+  });
+
+  it('requires a durable-thread configuration source only for enabled required Checkpointers', () => {
+    const graph = structuredClone(sampleGraph);
+    graph.capabilities.checkpointer = { enabled: true, durableThread: { required: true } };
+
+    expect(validateGraph(graph)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'CHECKPOINTER_THREAD_ID_SOURCE_REQUIRED',
+          path: 'capabilities.checkpointer.durableThread.threadIdSource',
+        }),
+      ]),
+    );
+
+    graph.capabilities.checkpointer = { enabled: true, durableThread: { required: false } };
+    expect(validateGraph(graph)).toEqual([]);
+
+    graph.capabilities.checkpointer = { enabled: false, durableThread: { required: true } };
+    const disabled = validateGraph(graph);
+    expect(disabled).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'CHECKPOINTER_DISABLED_WITH_REQUIRED_THREAD' }),
+      ]),
+    );
+    expect(disabled).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'CHECKPOINTER_THREAD_ID_SOURCE_REQUIRED' }),
+      ]),
+    );
+  });
+
+  it('keeps v4 persistence parsing isolated from v5 durability fields and overrides', () => {
+    const { capabilities, ...v4Graph } = structuredClone(sampleGraph);
+    void capabilities;
+    const v4 = { ...v4Graph, schemaVersion: '4' as const };
+    expect(workflowGraphV4Schema.safeParse(v4).success).toBe(true);
+
+    const withV5StepFields = structuredClone(v4) as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    withV5StepFields.nodes.find((node) => node.kind === 'step')!.storeAccess = { read: {} };
+    expect(workflowGraphV4Schema.safeParse(withV5StepFields).success).toBe(false);
+
+    const withV5SubgraphOverride = structuredClone(v4) as {
+      subgraphs: Array<Record<string, unknown>>;
+    };
+    withV5SubgraphOverride.subgraphs = [
+      {
+        id: 'legacy-subgraph',
+        label: 'Legacy scope',
+        position: { x: 0, y: 0 },
+        dimensions: { width: 100, height: 100 },
+        collapsed: false,
+        capabilityOverrides: { store: { available: true } },
+      },
+    ];
+    expect(workflowGraphV4Schema.safeParse(withV5SubgraphOverride).success).toBe(false);
+  });
+
+  it('rejects invalid internal retry policy values without adding a loop edge', () => {
+    const graph = structuredClone(sampleGraph);
+    const step = graph.nodes.find((candidate) => candidate.id === 'classifier');
+    if (!step || step.kind !== 'step') throw new Error('Expected a Step fixture.');
+    const originalEdges = structuredClone(graph.edges);
+    const originalScenarios = enumerateScenarios(graph);
+    step.retry = {
+      maxAttempts: 1,
+      backoff: { strategy: 'fixed', initialDelayMs: -1, maxDelayMs: -2 },
+      retryOn: [''],
+      fallback: { provider: '' },
+    };
+
+    expect(validateGraph(graph)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'RETRY_MAX_ATTEMPTS_INVALID', path: 'nodes.classifier.retry.maxAttempts' }),
+        expect.objectContaining({ code: 'RETRY_BACKOFF_DELAY_INVALID', path: 'nodes.classifier.retry.backoff.initialDelayMs' }),
+        expect.objectContaining({ code: 'RETRY_BACKOFF_MAX_DELAY_INVALID', path: 'nodes.classifier.retry.backoff.maxDelayMs' }),
+        expect.objectContaining({ code: 'RETRY_CONDITION_REQUIRED', path: 'nodes.classifier.retry.retryOn.0' }),
+        expect.objectContaining({ code: 'RETRY_FALLBACK_PROVIDER_REQUIRED', path: 'nodes.classifier.retry.fallback.provider' }),
+      ]),
+    );
+
+    step.retry = { maxAttempts: 2, backoff: { strategy: 'fixed', initialDelayMs: 0 } };
+    expect(validateGraph(graph)).toEqual([]);
+    expect(graph.edges).toEqual(originalEdges);
+    expect(enumerateScenarios(graph)).toEqual(originalScenarios);
   });
 
   it('requires a configured before approval gate for approval-required sensitive policy without adding one', () => {
@@ -282,6 +431,69 @@ describe('routing edge semantics', () => {
     expect(applied.graph.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('sensitive');
     const roundTripped = workflowGraphSchema.parse(JSON.parse(JSON.stringify(applied.graph)));
     expect(roundTripped.nodes.find((node) => node.id === 'classifier')).not.toHaveProperty('sensitive');
+  });
+
+  it('round-trips Step Store access and Retry through add, update, and null removal operations', () => {
+    const original = structuredClone(sampleGraph);
+    original.capabilities.store.available = true;
+    const add = {
+      type: 'add_node',
+      node: {
+        id: 'durable-step',
+        kind: 'step',
+        executor: 'ai',
+        label: 'Durable Step',
+        position: { x: 120, y: 120 },
+        storeAccess: { read: { namespace: 'preferences', key: 'customer.id' } },
+        retry: { maxAttempts: 2, backoff: { strategy: 'fixed' as const, initialDelayMs: 0 } },
+      },
+    } satisfies GraphOperation;
+    expect(graphOperationSchema.safeParse(add).success).toBe(true);
+
+    const added = applyGraphOperations(original, [add]);
+    expect(added.errors).toEqual([]);
+    expect(added.graph.nodes.find((node) => node.id === 'durable-step')).toMatchObject({
+      storeAccess: { read: { namespace: 'preferences', key: 'customer.id' } },
+      retry: { maxAttempts: 2 },
+      modifiers: { storeRead: true, retryFallback: true },
+    });
+
+    const update = {
+      type: 'update_node',
+      nodeId: 'durable-step',
+      patch: {
+        storeAccess: { write: { namespace: 'preferences', key: 'customer.id', retention: '30d' } },
+        retry: { maxAttempts: 3, backoff: { strategy: 'exponential' as const, initialDelayMs: 100 } },
+      },
+    } satisfies GraphOperation;
+    const updated = applyGraphOperations(added.graph, [update]);
+    const roundTrippedUpdate = workflowGraphSchema.parse(JSON.parse(JSON.stringify(updated.graph)));
+    expect(updated.errors).toEqual([]);
+    expect(roundTrippedUpdate.nodes.find((node) => node.id === 'durable-step')).toMatchObject({
+      storeAccess: { write: { retention: '30d' } },
+      retry: { maxAttempts: 3, backoff: { strategy: 'exponential' } },
+      modifiers: { storeWrite: true, retryFallback: true },
+    });
+
+    const remove = {
+      type: 'update_node',
+      nodeId: 'durable-step',
+      patch: { storeAccess: null, retry: null },
+    } satisfies GraphOperation;
+    const removed = applyGraphOperations(updated.graph, [remove]);
+    const roundTrippedRemoval = workflowGraphSchema.parse(JSON.parse(JSON.stringify(removed.graph)));
+    expect(removed.errors).toEqual([]);
+    const durableStep = roundTrippedRemoval.nodes.find((node) => node.id === 'durable-step');
+    expect(durableStep).not.toHaveProperty('storeAccess');
+    expect(durableStep).not.toHaveProperty('retry');
+    expect(durableStep).not.toHaveProperty('modifiers');
+
+    const structural = applyGraphOperations(original, [
+      { type: 'update_node', nodeId: 'start', patch: { storeAccess: null } },
+    ]);
+    expect(structural.errors).toEqual([
+      expect.objectContaining({ code: 'STEP_FIELDS_REQUIRE_STEP', path: 'operations.0' }),
+    ]);
   });
 
   it('keeps the Research Intake topology valid with commands and a derived return loop', () => {
@@ -471,9 +683,13 @@ describe('routing edge semantics', () => {
     expect(JSON.parse(buildGraphContractDownload(staleExport).content).edges).toEqual(
       researchIntakeRoutingGraph.edges,
     );
-    expect(JSON.parse(buildGraphScenariosDownload(researchIntakeRoutingGraph, scenarios).content).scenarios).toEqual(
-      scenarios,
-    );
+    const scenarioDownload = JSON.parse(buildGraphScenariosDownload(researchIntakeRoutingGraph, scenarios).content);
+    expect(scenarioDownload.scenarios).toEqual(scenarios);
+    expect(scenarioDownload).toMatchObject({
+      graphSchemaVersion: '5',
+      graphCapabilities: researchIntakeRoutingGraph.capabilities,
+      subgraphCapabilityOverrides: [],
+    });
   });
 
   it('enumerates configured human outcomes in stable order through only their canonical outgoing edges', () => {
@@ -567,6 +783,8 @@ describe('routing edge semantics', () => {
     expect(python).toContain('"dynamic_sends"');
     expect(python).toContain('"payload_schema_ref"');
     expect(python).toContain('"merges"');
+    expect(python).toContain('GRAPH_METADATA');
+    expect(python).toContain('"schema_version":"5"');
 
     const invalidSend = structuredClone(graph) as unknown as {
       edges: Array<Record<string, unknown>>;

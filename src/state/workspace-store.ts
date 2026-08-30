@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import { migrateWorkspaceV5 } from '@/src/adapters/persistence/migrate-workspace';
+import { migrateWorkspaceV6 } from '@/src/adapters/persistence/migrate-workspace';
 import {
   createWorkspaceService,
   FreezeResult,
@@ -445,11 +445,11 @@ export const useGraphStore = create<WorkspaceStore>()(
     },
     {
       name: 'graphcontract-workspace-v1',
-      version: 5,
+      version: 6,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
       migrate: (persistedState) =>
-        migrateWorkspaceV5(persistedState, workspace.createInitial) as WorkspaceStore,
+        migrateWorkspaceV6(persistedState, workspace.createInitial) as WorkspaceStore,
       partialize: (state) => ({
         graph: state.graph,
         proposal: state.proposal,

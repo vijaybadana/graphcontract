@@ -1,7 +1,7 @@
 import {
   buildPythonTestSkeleton,
   BranchScenario,
-  normalizeWorkflowGraphRouting,
+  normalizeWorkflowGraph,
   WorkflowGraph,
 } from '@/src/domain';
 
@@ -14,7 +14,7 @@ export type DownloadArtifact = {
 export function buildGraphContractDownload(graph: WorkflowGraph): DownloadArtifact {
   return {
     filename: 'graph-contract.json',
-    content: JSON.stringify(normalizeWorkflowGraphRouting(graph), null, 2),
+    content: JSON.stringify(normalizeWorkflowGraph(graph), null, 2),
     type: 'application/json;charset=utf-8',
   };
 }
@@ -23,13 +23,20 @@ export function buildGraphScenariosDownload(
   graph: WorkflowGraph,
   scenarios: BranchScenario[],
 ): DownloadArtifact {
+  const normalized = normalizeWorkflowGraph(graph);
   return {
     filename: 'graph-test-scenarios.json',
     content: JSON.stringify(
       {
-        graphId: graph.id,
-        graphName: graph.name,
-        graphUpdatedAt: graph.updatedAt,
+        graphId: normalized.id,
+        graphName: normalized.name,
+        graphUpdatedAt: normalized.updatedAt,
+        graphSchemaVersion: normalized.schemaVersion,
+        graphCapabilities: normalized.capabilities,
+        subgraphCapabilityOverrides: normalized.subgraphs.map((subgraph) => ({
+          subgraphId: subgraph.id,
+          ...(subgraph.capabilityOverrides ? { capabilityOverrides: subgraph.capabilityOverrides } : {}),
+        })),
         generatedAt: new Date().toISOString(),
         scenarios,
       },

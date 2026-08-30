@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDraftEdge, evaluateConnection } from './connection-policy';
-import { sampleGraph, WorkflowGraph } from '@/src/domain';
+import { createDefaultGraphCapabilities, sampleGraph, WorkflowGraph } from '@/src/domain';
 
 describe('evaluateConnection', () => {
   it('accepts a derived cycle while preserving Start, End, and duplicate-route constraints', () => {
@@ -42,11 +42,12 @@ describe('evaluateConnection', () => {
 
   it('keeps internal Start and End nodes as the only permitted subgraph boundary routes', () => {
     const graph: WorkflowGraph = {
-      schemaVersion: '3',
+      schemaVersion: '5',
       id: 'subgraph-boundaries',
       name: 'Subgraph boundaries',
       status: 'draft',
       updatedAt: '2026-08-30T00:00:00.000Z',
+      capabilities: createDefaultGraphCapabilities(),
       subgraphs: [
         {
           id: 'review',

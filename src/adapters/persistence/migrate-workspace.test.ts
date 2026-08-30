@@ -10,7 +10,7 @@ import {
   WorkflowGraphV1,
   WorkflowGraphV3,
 } from '@/src/domain';
-import { migrateWorkspaceV5 } from './migrate-workspace';
+import { migrateWorkspaceV6 } from './migrate-workspace';
 
 const service = createWorkspaceService({
   now: () => '2026-08-28T12:00:00.000Z',
@@ -19,6 +19,8 @@ const service = createWorkspaceService({
 
 const legacyV1Graph = (): WorkflowGraphV1 => {
   const graph = structuredClone(sampleGraph);
+  const { capabilities, ...legacyGraph } = graph;
+  void capabilities;
   const legacyKinds: Record<string, string> = {
     classifier: 'agent',
     billing: 'agent',
@@ -28,7 +30,7 @@ const legacyV1Graph = (): WorkflowGraphV1 => {
   };
 
   return {
-    ...graph,
+    ...legacyGraph,
     schemaVersion: '1' as const,
     nodes: graph.nodes.map((node) => {
       const legacy = { ...node } as Record<string, unknown>;
@@ -63,14 +65,14 @@ describe('workspace persistence migration', () => {
       collapsed: false,
     });
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph: invalid, proposal: null, scenarios: [] },
       service.createInitial,
     );
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '4',
+      schemaVersion: '5',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'unfinished-agent', kind: 'step', executor: 'ai' }),
       ]),
@@ -88,8 +90,69 @@ describe('workspace persistence migration', () => {
     );
   });
 
+  it('migrates v4 modifier summaries into explicit v5 capability records without changing topology', () => {
+    const legacy = structuredClone(sampleGraph) as unknown as {
+      schemaVersion: '4';
+      capabilities?: unknown;
+      nodes: Array<Record<string, unknown>>;
+      edges: typeof sampleGraph.edges;
+    };
+    legacy.schemaVersion = '4';
+    delete legacy.capabilities;
+    legacy.nodes.find((node) => node.id === 'classifier')!.modifiers = {
+      storeRead: true,
+      storeWrite: true,
+      retryFallback: true,
+    };
+
+    const migrated = migrateWorkspaceV6(
+      { graph: legacy, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+    const classifier = migrated.graph?.nodes.find((node) => node.id === 'classifier');
+
+    expect(migrated.graph).toMatchObject({
+      schemaVersion: '5',
+      capabilities: { store: { available: true }, runtimeMode: { mode: 'unspecified' } },
+      edges: legacy.edges,
+    });
+    expect(classifier).toMatchObject({
+      storeAccess: { read: {}, write: {} },
+      retry: { maxAttempts: 2, backoff: { strategy: 'fixed', initialDelayMs: 0 } },
+      modifiers: { storeRead: true, storeWrite: true, retryFallback: true },
+    });
+    expect(validateGraph(migrated.graph!)).toEqual([]);
+  });
+
+  it('retains parseable incomplete v5 Store and Retry drafts for ordinary validation', () => {
+    const graph = structuredClone(sampleGraph);
+    const classifier = graph.nodes.find((node) => node.id === 'classifier');
+    if (!classifier || classifier.kind !== 'step') throw new Error('Expected a Step fixture.');
+    classifier.storeAccess = { read: { namespace: '', key: '' } };
+    classifier.retry = {};
+
+    const migrated = migrateWorkspaceV6(
+      { graph, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph?.nodes.find((node) => node.id === 'classifier')).toMatchObject({
+      storeAccess: { read: { namespace: '', key: '' } },
+      retry: {},
+    });
+    expect(validateGraph(migrated.graph!).map((entry) => entry.code)).toEqual(
+      expect.arrayContaining([
+        'STORE_READ_REQUIRES_AVAILABLE_STORE',
+        'STORE_ACCESS_NAMESPACE_REQUIRED',
+        'STORE_ACCESS_KEY_REQUIRED',
+        'RETRY_MAX_ATTEMPTS_REQUIRED',
+        'RETRY_BACKOFF_REQUIRED',
+      ]),
+    );
+  });
+
   it('falls back only when the saved graph shape cannot be parsed', () => {
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph: { ...legacyV1Graph(), nodes: 'corrupt' }, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -106,7 +169,7 @@ describe('workspace persistence migration', () => {
     graph.nodes.find((node) => node.id === 'diagnostic')!.label = 'New Action';
     graph.nodes.find((node) => node.id === 'diagnostic')!.description = 'Keep this exact detail.';
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -127,7 +190,7 @@ describe('workspace persistence migration', () => {
     classifier.config = { tools: ['lookup'] };
     diagnostic.hitl = { enabled: true, timing: 'before', inputType: 'approval' };
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph: legacy, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -184,7 +247,7 @@ describe('workspace persistence migration', () => {
       ],
     };
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph: legacy, proposal, scenarios: [] },
       service.createInitial,
     );
@@ -223,14 +286,14 @@ describe('workspace persistence migration', () => {
     const proposal = proposalResult.proposal!;
     const scenarios = enumerateScenarios(sampleGraph);
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph: legacy, proposal, scenarios },
       service.createInitial,
     );
 
     expect(migrated.graph).toMatchObject({
       id: sampleGraph.id,
-      schemaVersion: '4',
+      schemaVersion: '5',
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'classifier', kind: 'step', executor: 'ai' }),
         expect.objectContaining({ id: 'diagnostic', kind: 'step', executor: 'deterministic' }),
@@ -249,7 +312,7 @@ describe('workspace persistence migration', () => {
   });
 
   it('keeps a persisted Command graph with a topology-derived loop', () => {
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph: structuredClone(researchIntakeRoutingGraph), proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -268,9 +331,11 @@ describe('workspace persistence migration', () => {
     });
   });
 
-  it('advances v3 to v4 without changing ordinary topology, policies, or pending proposal meaning', () => {
+  it('advances v3 to v5 without changing ordinary topology, policies, or pending proposal meaning', () => {
+    const { capabilities, ...legacyGraph } = structuredClone(sampleGraph);
+    void capabilities;
     const graph = {
-      ...structuredClone(sampleGraph),
+      ...legacyGraph,
       schemaVersion: '3' as const,
     } as unknown as WorkflowGraphV3;
     const proposal = createProposal(sampleGraph, {
@@ -284,13 +349,13 @@ describe('workspace persistence migration', () => {
       rationale: 'Persist this review draft.',
     }).proposal!;
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph, proposal, scenarios: [] },
       service.createInitial,
     );
 
     expect(migrated.graph).toMatchObject({
-      schemaVersion: '4',
+      schemaVersion: '5',
       id: graph.id,
       name: graph.name,
       nodes: graph.nodes,
@@ -331,7 +396,7 @@ describe('workspace persistence migration', () => {
         : edge,
     );
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph, proposal: null, scenarios: [] },
       service.createInitial,
     );
@@ -358,10 +423,12 @@ describe('workspace persistence migration', () => {
   it('migrates v2 HITL, sensitive policy, and pending proposal data without replacing incomplete drafts', () => {
     const graph = structuredClone(sampleGraph) as unknown as {
       schemaVersion: '2';
+      capabilities?: unknown;
       nodes: Array<Record<string, unknown>>;
       edges: typeof sampleGraph.edges;
     };
     graph.schemaVersion = '2';
+    delete graph.capabilities;
     const classifier = graph.nodes.find((node) => node.id === 'classifier')!;
     classifier.hitl = {
       enabled: true,
@@ -414,7 +481,7 @@ describe('workspace persistence migration', () => {
       ],
     };
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph, proposal, scenarios: [] },
       service.createInitial,
     );
@@ -447,7 +514,7 @@ describe('workspace persistence migration', () => {
       modifiers: { guardrail: true },
     });
     expect(migratedClassifier).not.toMatchObject({ modifiers: { sensitiveSideEffect: true } });
-    expect(migrated.graph?.schemaVersion).toBe('4');
+    expect(migrated.graph?.schemaVersion).toBe('5');
     const operations = (migrated.proposal as unknown as { operations: Array<{ patch: Record<string, unknown> }> }).operations;
     expect(operations[0]?.patch).toMatchObject({
       hitl: {
@@ -480,7 +547,7 @@ describe('workspace persistence migration', () => {
     legacy.edges.find((edge) => edge.id === 'clarify-write-brief')!.label = ' ready ';
     legacy.edges.find((edge) => edge.id === 'clarify-write-brief')!.condition = '   ';
 
-    const migrated = migrateWorkspaceV5(
+    const migrated = migrateWorkspaceV6(
       { graph: legacy, proposal: null, scenarios: [] },
       service.createInitial,
     );

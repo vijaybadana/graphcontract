@@ -12,9 +12,11 @@ import {
   migrateWorkflowGraphV1,
   migrateWorkflowGraphV2,
   migrateWorkflowGraphV3,
+  migrateWorkflowGraphV4,
   normalizeLegacyWorkNodeKind,
-  normalizeWorkflowGraphRouting,
+  normalizeWorkflowGraph,
   workflowGraphSchema,
+  workflowGraphV4Schema,
   workflowGraphV3Schema,
   workflowGraphV2Schema,
   workflowGraphV1Schema,
@@ -130,7 +132,7 @@ function migrateV2Proposal(proposal: unknown, graph: WorkflowGraphV2): unknown {
 
 /** Repairs the hackathon demo snapshot without mixing persistence concerns into
  * domain validation or deleting valid user-authored workflows. */
-export function migrateWorkspaceV5(
+export function migrateWorkspaceV6(
   persistedState: unknown,
   createInitial: () => WorkspaceCore,
 ): PersistedWorkspace {
@@ -146,7 +148,15 @@ export function migrateWorkspaceV5(
   if (parsed.success) {
     return {
       ...persisted,
-      graph: normalizeWorkflowGraphRouting(parsed.data),
+      graph: normalizeWorkflowGraph(parsed.data),
+    };
+  }
+
+  const v4 = workflowGraphV4Schema.safeParse(persisted.graph);
+  if (v4.success) {
+    return {
+      ...persisted,
+      graph: migrateWorkflowGraphV4(v4.data),
     };
   }
 
@@ -179,6 +189,7 @@ export function migrateWorkspaceV5(
 }
 
 /** Compatibility aliases for callers that imported the Package 1 migration. */
-export const migrateWorkspaceV4 = migrateWorkspaceV5;
-export const migrateWorkspaceV3 = migrateWorkspaceV5;
-export const migrateWorkspaceV2 = migrateWorkspaceV5;
+export const migrateWorkspaceV5 = migrateWorkspaceV6;
+export const migrateWorkspaceV4 = migrateWorkspaceV6;
+export const migrateWorkspaceV3 = migrateWorkspaceV6;
+export const migrateWorkspaceV2 = migrateWorkspaceV6;

@@ -59,12 +59,73 @@ export type HitlConfigV2 = {
 export type GraphPosition = { x: number; y: number };
 export type GraphDimensions = { width: number; height: number };
 
-export type GraphSubgraph = {
+/** Per-run state remains separate from checkpointing and cross-thread Store. */
+export type WorkingStateCapability = {
+  enabled: boolean;
+  schema: { fields: string[]; summary?: string };
+  reducers: Array<{ key: string; summary: string }>;
+};
+
+/** Durable resume metadata for the graph or one explicitly overridden subgraph. */
+export type CheckpointerCapability = {
+  enabled: boolean;
+  backend?: string;
+  /** Configuration source for a durable thread identifier, never a live thread instance. */
+  durableThread: { required: boolean; threadIdSource?: string };
+};
+
+/** Cross-thread Store availability. Direct Step access is declared separately. */
+export type LongTermStoreCapability = {
+  available: boolean;
+  namespace?: string;
+  retention?: string;
+};
+
+/** Runtime mode is graph-level; subgraphs intentionally cannot override it. */
+export type RuntimeModeCapability = {
+  mode: 'unspecified' | 'text' | 'voice';
+  input?: 'text' | 'audio';
+};
+
+export type GraphCapabilities = {
+  state: WorkingStateCapability;
+  checkpointer: CheckpointerCapability;
+  store: LongTermStoreCapability;
+  runtimeMode: RuntimeModeCapability;
+};
+
+/** Only State, Checkpointer, and Store have meaningful subgraph scope. */
+export type GraphCapabilityOverrides = Partial<
+  Pick<GraphCapabilities, 'state' | 'checkpointer' | 'store'>
+>;
+
+export type CapabilitySource = 'graph' | 'inherited' | 'overridden';
+
+export type EffectiveCapability<T> = {
+  source: CapabilitySource;
+  value: T;
+};
+
+export type EffectiveGraphCapabilities = {
+  state: EffectiveCapability<WorkingStateCapability>;
+  checkpointer: EffectiveCapability<CheckpointerCapability>;
+  store: EffectiveCapability<LongTermStoreCapability>;
+  runtimeMode: EffectiveCapability<RuntimeModeCapability>;
+};
+
+export type GraphSubgraphBase = {
   id: string;
   label: string;
   position: GraphPosition;
   dimensions: GraphDimensions;
   collapsed: boolean;
+};
+
+/** v1-v4 persisted containers have no durability capability metadata. */
+export type GraphSubgraphV4 = GraphSubgraphBase;
+
+export type GraphSubgraph = GraphSubgraphBase & {
+  capabilityOverrides?: GraphCapabilityOverrides;
 };
 
 type GraphNodeBase = {
@@ -90,6 +151,24 @@ export type StepModifierSummary = {
   opaque?: true;
   /** Omit when ready; degraded and unimplemented need an explicit status. */
   readiness?: 'degraded' | 'unimplemented';
+};
+
+/** Direct Store use is a Step capability, never an implied graph edge. */
+export type StepStoreAccess = {
+  read?: { namespace?: string; key?: string };
+  write?: { namespace?: string; key?: string; retention?: string };
+};
+
+/** Internal retry policy. It is intentionally independent of graph topology. */
+export type RetryPolicy = {
+  maxAttempts?: number;
+  backoff?: {
+    strategy?: 'fixed' | 'exponential';
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+  };
+  retryOn?: string[];
+  fallback?: { provider?: string; model?: string };
 };
 
 /** v2 compatibility summary. Active v3 derives Sensitive from `sensitive`. */
@@ -121,6 +200,10 @@ export type StepGraphNode = GraphNodeBase & {
   /** The policy is independent from HITL; its presence renders Sensitive. */
   sensitive?: SensitiveEffectPolicy;
   participation?: StepParticipation;
+  /** Canonical v5 direct Store access; summaries are derived for compatibility. */
+  storeAccess?: StepStoreAccess;
+  /** Canonical v5 retry policy; it never creates a routing edge. */
+  retry?: RetryPolicy;
   modifiers?: StepModifierSummary;
 };
 
@@ -137,13 +220,20 @@ export type MergeGraphNode = GraphNodeBase & {
   merge: MergeConfig;
 };
 
-/** v3 persistence nodes remain input-only after Package 3. */
-export type GraphNodeV3 = StructuralGraphNode | StepGraphNode;
+/** v4 persistence nodes include Merge but predate v5 durability fields. */
+export type StepGraphNodeV4 = Omit<StepGraphNode, 'storeAccess' | 'retry'>;
+export type GraphNodeV4 = StructuralGraphNode | StepGraphNodeV4 | MergeGraphNode;
+
+/** v3 persistence nodes deliberately predate Merge and v5 durability fields. */
+export type GraphNodeV3 = StructuralGraphNode | StepGraphNodeV4;
 
 /** The active, serialized node model. Agent/Action/Tool/Human are presets, not kinds. */
-export type GraphNode = GraphNodeV3 | MergeGraphNode;
+export type GraphNode = StructuralGraphNode | StepGraphNode | MergeGraphNode;
 
-export type StepGraphNodeV2 = Omit<StepGraphNode, 'hitl' | 'sensitive' | 'modifiers'> & {
+export type StepGraphNodeV2 = Omit<
+  StepGraphNode,
+  'hitl' | 'sensitive' | 'storeAccess' | 'retry' | 'modifiers'
+> & {
   hitl?: HitlConfigV2;
   modifiers?: StepModifierSummaryV2;
 };
@@ -251,47 +341,138 @@ export function normalizeWorkflowGraphRouting<T extends { edges: Array<GraphEdge
   return { ...graph, edges: graph.edges.map(normalizeRoutingEdge) };
 }
 
-type WorkflowGraphBase<Edge extends GraphEdge | GraphEdgeV3 = GraphEdge> = {
+/** Explicit v5 defaults for new graphs and pre-capability migrations. */
+export function createDefaultGraphCapabilities(): GraphCapabilities {
+  return {
+    state: { enabled: false, schema: { fields: [] }, reducers: [] },
+    checkpointer: { enabled: false, durableThread: { required: false } },
+    store: { available: false },
+    runtimeMode: { mode: 'unspecified' },
+  };
+}
+
+const legacyRetryPolicy = (): RetryPolicy => ({
+  maxAttempts: 2,
+  backoff: { strategy: 'fixed', initialDelayMs: 0 },
+});
+
+/**
+ * v5 treats Step access and retry as the source of truth. Older compact
+ * modifier flags are accepted at the boundary and regenerated from that
+ * canonical data so existing presentation consumers remain compatible.
+ */
+export function normalizeStepDurability(node: StepGraphNode): StepGraphNode {
+  const { storeRead, storeWrite, retryFallback, ...remainingModifiers } = node.modifiers ?? {};
+  const storeAccess = node.storeAccess ?? {
+    ...(storeRead ? { read: {} } : {}),
+    ...(storeWrite ? { write: {} } : {}),
+  };
+  const retry = node.retry ?? (retryFallback ? legacyRetryPolicy() : undefined);
+  const modifiers = {
+    ...remainingModifiers,
+    ...(storeAccess.read ? { storeRead: true as const } : {}),
+    ...(storeAccess.write ? { storeWrite: true as const } : {}),
+    ...(retry ? { retryFallback: true as const } : {}),
+  };
+
+  return {
+    ...node,
+    ...(node.storeAccess !== undefined || storeAccess.read || storeAccess.write ? { storeAccess } : {}),
+    ...(retry ? { retry } : {}),
+    ...(Object.keys(modifiers).length > 0 ? { modifiers } : {}),
+  };
+}
+
+type WorkflowGraphBase<
+  Edge extends GraphEdge | GraphEdgeV3 = GraphEdge,
+  Subgraph extends GraphSubgraphBase = GraphSubgraph,
+> = {
   id: string;
   name: string;
   edges: Edge[];
-  subgraphs: GraphSubgraph[];
+  subgraphs: Subgraph[];
   status: 'draft' | 'frozen';
   updatedAt: string;
 };
 
-/** The active, serialized schema. All new writes use v4. */
+/** The active, serialized schema. All new writes use v5. */
 export type WorkflowGraph = WorkflowGraphBase & {
-  schemaVersion: '4';
+  schemaVersion: '5';
   nodes: GraphNode[];
+  capabilities: GraphCapabilities;
+};
+
+/** v4 is persistence input only and is normalized before it reaches v5. */
+export type WorkflowGraphV4 = WorkflowGraphBase<GraphEdge, GraphSubgraphV4> & {
+  schemaVersion: '4';
+  nodes: GraphNodeV4[];
 };
 
 /** v3 is persistence input only and is normalized before it reaches v4. */
-export type WorkflowGraphV3 = WorkflowGraphBase<GraphEdgeV3> & {
+export type WorkflowGraphV3 = WorkflowGraphBase<GraphEdgeV3, GraphSubgraphV4> & {
   schemaVersion: '3';
   nodes: GraphNodeV3[];
 };
 
 /** v2 is persistence input only and is normalized before it reaches v4. */
-export type WorkflowGraphV2 = WorkflowGraphBase<GraphEdgeV3> & {
+export type WorkflowGraphV2 = WorkflowGraphBase<GraphEdgeV3, GraphSubgraphV4> & {
   schemaVersion: '2';
   nodes: GraphNodeV2[];
 };
 
 /** The v1 persistence-only graph shape accepted by the ordinary migration. */
-export type WorkflowGraphV1 = WorkflowGraphBase<GraphEdgeV3> & {
+export type WorkflowGraphV1 = WorkflowGraphBase<GraphEdgeV3, GraphSubgraphV4> & {
   schemaVersion: '1';
   nodes: LegacyGraphNodeV1[];
 };
+
+/**
+ * Resolves one scope without mutating the graph. A graph-level request is
+ * marked `graph`; a subgraph inherits each unsupported/absent override.
+ */
+export function resolveEffectiveCapabilities(
+  graph: Pick<WorkflowGraph, 'capabilities' | 'subgraphs'>,
+  subgraphId?: string,
+): EffectiveGraphCapabilities {
+  const subgraph = subgraphId
+    ? graph.subgraphs.find((candidate) => candidate.id === subgraphId)
+    : undefined;
+  const overrides = subgraph?.capabilityOverrides;
+  const resolve = <T,>(value: T, override: T | undefined): EffectiveCapability<T> =>
+    override !== undefined
+      ? { source: 'overridden', value: override }
+      : { source: subgraph ? 'inherited' : 'graph', value };
+
+  return {
+    state: resolve(graph.capabilities.state, overrides?.state),
+    checkpointer: resolve(graph.capabilities.checkpointer, overrides?.checkpointer),
+    store: resolve(graph.capabilities.store, overrides?.store),
+    runtimeMode: { source: 'graph', value: graph.capabilities.runtimeMode },
+  };
+}
+
+/** Canonicalizes route fields and v5 compatibility summaries for writes. */
+export function normalizeWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
+  return normalizeWorkflowGraphRouting({
+    ...graph,
+    nodes: graph.nodes.map((node) =>
+      node.kind === 'step' ? normalizeStepDurability(node) : { ...node },
+    ),
+  });
+}
 
 /** Deliberately excludes `kind`; active node identity never changes in-place. */
 export type GraphNodePatch = Partial<
   Omit<GraphNodeBase, 'id' | 'parentId'> & {
     hitl: HitlConfig;
-    /** `null` is patch-only and removes the optional v3 policy. */
+    /** `null` is patch-only and removes the optional sensitive-effect policy. */
     sensitive: SensitiveEffectPolicy | null;
     executor: StepExecutor;
     participation: StepParticipation;
+    /** `null` removes direct Store access from a Step. */
+    storeAccess: StepStoreAccess | null;
+    /** `null` removes the internal retry policy from a Step. */
+    retry: RetryPolicy | null;
     modifiers: StepModifierSummary;
     merge: MergeConfig;
   }
@@ -425,10 +606,10 @@ export function migrateWorkflowGraphV2ToV3(graph: WorkflowGraphV2): WorkflowGrap
 }
 
 /**
- * Advances a valid v3 graph without changing existing topology, labels,
- * positions, policies, or proposal meaning. Package 3 features are opt-in.
+ * Advances a valid v3 graph into the Package 3 v4 shape without changing
+ * topology, labels, positions, policies, or proposal meaning.
  */
-export function migrateWorkflowGraphV3(graph: WorkflowGraphV3): WorkflowGraph {
+export function migrateWorkflowGraphV3ToV4(graph: WorkflowGraphV3): WorkflowGraphV4 {
   return normalizeWorkflowGraphRouting({
     ...graph,
     schemaVersion: '4',
@@ -436,18 +617,48 @@ export function migrateWorkflowGraphV3(graph: WorkflowGraphV3): WorkflowGraph {
   });
 }
 
-/** Converts v2 persistence input directly into the active v4 graph. */
+/**
+ * Adds the explicit v5 capability records to a parseable v4 graph. Legacy
+ * Store summary flags prove direct access existed, so migration enables the
+ * graph Store without inventing any edge or position.
+ */
+export function migrateWorkflowGraphV4(graph: WorkflowGraphV4): WorkflowGraph {
+  const capabilities = createDefaultGraphCapabilities();
+  if (
+    graph.nodes.some(
+      (node) =>
+        node.kind === 'step' &&
+        (node.modifiers?.storeRead === true || node.modifiers?.storeWrite === true),
+    )
+  ) {
+    capabilities.store.available = true;
+  }
+  return normalizeWorkflowGraph({
+    ...graph,
+    schemaVersion: '5',
+    capabilities,
+    nodes: graph.nodes.map((node) => ({ ...node })),
+  });
+}
+
+/** Converts v3 persistence input directly into the active v5 graph. */
+export function migrateWorkflowGraphV3(graph: WorkflowGraphV3): WorkflowGraph {
+  return migrateWorkflowGraphV4(migrateWorkflowGraphV3ToV4(graph));
+}
+
+/** Converts v2 persistence input directly into the active v5 graph. */
 export function migrateWorkflowGraphV2(graph: WorkflowGraphV2): WorkflowGraph {
   return migrateWorkflowGraphV3(migrateWorkflowGraphV2ToV3(graph));
 }
 
 /** Convenience migration for callers that receive an original v1 payload. */
-export function migrateWorkflowGraphV1ToV4(graph: WorkflowGraphV1): WorkflowGraph {
+export function migrateWorkflowGraphV1ToV5(graph: WorkflowGraphV1): WorkflowGraph {
   return migrateWorkflowGraphV2(migrateWorkflowGraphV1(graph));
 }
 
-/** Compatibility name retained for Package 2 callers; its result is active v4. */
-export const migrateWorkflowGraphV1ToV3 = migrateWorkflowGraphV1ToV4;
+/** Compatibility names retained for callers from prior package revisions. */
+export const migrateWorkflowGraphV1ToV4 = migrateWorkflowGraphV1ToV5;
+export const migrateWorkflowGraphV1ToV3 = migrateWorkflowGraphV1ToV5;
 
 export type ValidationIssue = {
   code: string;
@@ -649,6 +860,71 @@ export const stepModifierSummarySchema = z
   })
   .strict();
 
+export const workingStateCapabilitySchema = z
+  .object({
+    enabled: z.boolean(),
+    schema: z.object({ fields: z.array(z.string()), summary: z.string().optional() }).strict(),
+    reducers: z.array(z.object({ key: z.string(), summary: z.string() }).strict()),
+  })
+  .strict();
+
+export const checkpointerCapabilitySchema = z
+  .object({
+    enabled: z.boolean(),
+    backend: z.string().optional(),
+    durableThread: z.object({ required: z.boolean(), threadIdSource: z.string().optional() }).strict(),
+  })
+  .strict();
+
+export const longTermStoreCapabilitySchema = z
+  .object({
+    available: z.boolean(),
+    namespace: z.string().optional(),
+    retention: z.string().optional(),
+  })
+  .strict();
+
+export const runtimeModeCapabilitySchema = z
+  .object({ mode: z.enum(['unspecified', 'text', 'voice']), input: z.enum(['text', 'audio']).optional() })
+  .strict();
+
+export const graphCapabilitiesSchema = z
+  .object({
+    state: workingStateCapabilitySchema,
+    checkpointer: checkpointerCapabilitySchema,
+    store: longTermStoreCapabilitySchema,
+    runtimeMode: runtimeModeCapabilitySchema,
+  })
+  .strict();
+
+export const graphCapabilityOverridesSchema = graphCapabilitiesSchema
+  .pick({ state: true, checkpointer: true, store: true })
+  .partial()
+  .strict();
+
+export const stepStoreAccessSchema = z
+  .object({
+    read: z.object({ namespace: z.string().optional(), key: z.string().optional() }).strict().optional(),
+    write: z.object({ namespace: z.string().optional(), key: z.string().optional(), retention: z.string().optional() }).strict().optional(),
+  })
+  .strict();
+
+export const retryPolicySchema = z
+  .object({
+    maxAttempts: z.number().int().optional(),
+    backoff: z
+      .object({
+        strategy: z.enum(['fixed', 'exponential']).optional(),
+        initialDelayMs: z.number().int().optional(),
+        maxDelayMs: z.number().int().optional(),
+      })
+      .strict()
+      .optional(),
+    retryOn: z.array(z.string()).optional(),
+    fallback: z.object({ provider: z.string().optional(), model: z.string().optional() }).strict().optional(),
+  })
+  .strict();
+
 const stepModifierSummaryV2Schema = stepModifierSummarySchema.extend({
   sensitiveSideEffect: z.literal(true).optional(),
 });
@@ -697,52 +973,71 @@ export const graphNodeSchema = z.discriminatedUnion('kind', [
     hitl: hitlSchema.optional(),
     sensitive: sensitiveEffectPolicySchema.optional(),
     participation: stepParticipationSchema.optional(),
+    storeAccess: stepStoreAccessSchema.optional(),
+    retry: retryPolicySchema.optional(),
     modifiers: stepModifierSummarySchema.optional(),
   }).strict(),
   graphNodeBaseSchema.extend({ kind: z.literal('merge'), merge: mergeConfigSchema }).strict(),
   graphNodeBaseSchema.extend({ kind: z.literal('end') }).strict(),
 ]);
 
-/** v3 input-only nodes deliberately omit Package 3 Merge. */
+/** v4 input-only nodes deliberately omit v5 Step durability fields. */
+const graphNodeV4StepSchema = graphNodeBaseSchema.extend({
+  kind: z.literal('step'),
+  executor: stepExecutorSchema,
+  hitl: hitlSchema.optional(),
+  sensitive: sensitiveEffectPolicySchema.optional(),
+  participation: stepParticipationSchema.optional(),
+  modifiers: stepModifierSummarySchema.optional(),
+}).strict();
+
+export const graphNodeV4Schema = z.discriminatedUnion('kind', [
+  graphNodeBaseSchema.extend({ kind: z.literal('start') }).strict(),
+  graphNodeV4StepSchema,
+  graphNodeBaseSchema.extend({ kind: z.literal('merge'), merge: mergeConfigSchema }).strict(),
+  graphNodeBaseSchema.extend({ kind: z.literal('end') }).strict(),
+]);
+
+/** v3 input-only nodes deliberately omit Package 3 Merge and v5 durability. */
 export const graphNodeV3Schema = z.discriminatedUnion('kind', [
-  graphNodeBaseSchema.extend({ kind: z.literal('start') }),
-  graphNodeBaseSchema.extend({
-    kind: z.literal('step'),
-    executor: stepExecutorSchema,
-    hitl: hitlSchema.optional(),
-    sensitive: sensitiveEffectPolicySchema.optional(),
-    participation: stepParticipationSchema.optional(),
-    modifiers: stepModifierSummarySchema.optional(),
-  }),
-  graphNodeBaseSchema.extend({ kind: z.literal('end') }),
+  graphNodeBaseSchema.extend({ kind: z.literal('start') }).strict(),
+  graphNodeV4StepSchema,
+  graphNodeBaseSchema.extend({ kind: z.literal('end') }).strict(),
 ]);
 
 /** v2 compatibility input only; active graph operations never accept this shape. */
 export const graphNodeV2Schema = z.discriminatedUnion('kind', [
-  graphNodeBaseSchema.extend({ kind: z.literal('start') }),
+  graphNodeBaseSchema.extend({ kind: z.literal('start') }).strict(),
   graphNodeBaseSchema.extend({
     kind: z.literal('step'),
     executor: stepExecutorSchema,
     hitl: hitlV2Schema.optional(),
     participation: stepParticipationSchema.optional(),
     modifiers: stepModifierSummaryV2Schema.optional(),
-  }),
-  graphNodeBaseSchema.extend({ kind: z.literal('end') }),
+  }).strict(),
+  graphNodeBaseSchema.extend({ kind: z.literal('end') }).strict(),
 ]);
 
 /** v1 compatibility input only; successful parsing must be followed by migration. */
 export const legacyGraphNodeV1Schema = graphNodeBaseSchema.extend({
   kind: z.enum(v1NodeKinds),
   hitl: hitlV2Schema.optional(),
-});
+}).strict();
 
-export const graphSubgraphSchema = z.object({
+const graphSubgraphBaseSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   position: positionSchema,
   dimensions: dimensionsSchema,
   collapsed: z.boolean(),
-});
+}).strict();
+
+/** v1-v4 containers must not accept v5 durability override metadata. */
+export const graphSubgraphV4Schema = graphSubgraphBaseSchema;
+
+export const graphSubgraphSchema = graphSubgraphBaseSchema.extend({
+  capabilityOverrides: graphCapabilityOverridesSchema.optional(),
+}).strict();
 
 const graphEdgeBaseSchema = z.object({
   id: z.string().min(1),
@@ -783,28 +1078,43 @@ export const graphEdgeV3Schema = graphEdgeBaseSchema
   .omit({ loopCap: true })
   .extend({ mode: z.enum(['normal', 'conditional', 'command', 'fallback']) });
 
-const workflowGraphBaseSchema = z.object({
+const workflowGraphCoreSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  // A default keeps every pre-subgraph persisted graph readable without
-  // changing its node positions, topology, or other authored data.
-  subgraphs: z.array(graphSubgraphSchema).default([]),
   status: z.enum(['draft', 'frozen']),
   updatedAt: z.string().min(1),
 });
 
-export const workflowGraphSchema = workflowGraphBaseSchema.extend({
-  schemaVersion: z.literal('4'),
+const workflowGraphV5BaseSchema = workflowGraphCoreSchema.extend({
+  subgraphs: z.array(graphSubgraphSchema).default([]),
+}).strict();
+
+const workflowGraphV4BaseSchema = workflowGraphCoreSchema.extend({
+  // A default keeps every pre-subgraph persisted graph readable without
+  // changing its node positions, topology, or other authored data.
+  subgraphs: z.array(graphSubgraphV4Schema).default([]),
+}).strict();
+
+export const workflowGraphSchema = workflowGraphV5BaseSchema.extend({
+  schemaVersion: z.literal('5'),
   nodes: z.array(graphNodeSchema),
   edges: z.array(graphEdgeSchema),
-});
+  capabilities: graphCapabilitiesSchema,
+}).strict();
+
+/** v4 compatibility input only; successful parsing must be followed by migration. */
+export const workflowGraphV4Schema = workflowGraphV4BaseSchema.extend({
+  schemaVersion: z.literal('4'),
+  nodes: z.array(graphNodeV4Schema),
+  edges: z.array(graphEdgeSchema),
+}).strict();
 
 /** v3 compatibility input only; successful parsing must be followed by migration. */
-export const workflowGraphV3Schema = workflowGraphBaseSchema.extend({
+export const workflowGraphV3Schema = workflowGraphV4BaseSchema.extend({
   schemaVersion: z.literal('3'),
   nodes: z.array(graphNodeV3Schema),
   edges: z.array(graphEdgeV3Schema),
-});
+}).strict();
 
 /** v2 compatibility input only; successful parsing must be followed by migration. */
 export const workflowGraphV2Schema = workflowGraphV3Schema
@@ -812,7 +1122,8 @@ export const workflowGraphV2Schema = workflowGraphV3Schema
   .extend({
     schemaVersion: z.literal('2'),
     nodes: z.array(graphNodeV2Schema),
-  });
+  })
+  .strict();
 
 /** v1 compatibility input only; active graph operations never accept this shape. */
 export const workflowGraphV1Schema = workflowGraphV2Schema
@@ -820,7 +1131,8 @@ export const workflowGraphV1Schema = workflowGraphV2Schema
   .extend({
     schemaVersion: z.literal('1'),
     nodes: z.array(legacyGraphNodeV1Schema),
-  });
+  })
+  .strict();
 
 export const graphNodePatchSchema = z
   .object({
@@ -832,6 +1144,8 @@ export const graphNodePatchSchema = z
     sensitive: sensitiveEffectPolicySchema.nullable().optional(),
     executor: stepExecutorSchema.optional(),
     participation: stepParticipationSchema.optional(),
+    storeAccess: stepStoreAccessSchema.nullable().optional(),
+    retry: retryPolicySchema.nullable().optional(),
     modifiers: stepModifierSummarySchema.optional(),
     merge: mergeConfigSchema.optional(),
   })
@@ -907,11 +1221,12 @@ export const proposalInputSchema = z.object({
 });
 
 export const sampleGraph: WorkflowGraph = {
-  schemaVersion: '4',
+  schemaVersion: '5',
   id: 'customer-support-contract',
   name: 'Customer Support Workflow',
   status: 'draft',
   updatedAt: '2026-08-28T00:00:00.000Z',
+  capabilities: createDefaultGraphCapabilities(),
   nodes: [
     { id: 'start', kind: 'start', label: 'Start', position: { x: 40, y: 230 } },
     {
@@ -987,11 +1302,12 @@ export const sampleGraph: WorkflowGraph = {
  * canonical topology. It is intentionally a design-time preview fixture: no
  * runtime response, resume, or side effect is executed by loading it. */
 export const humanControlHitlDemoGraph: WorkflowGraph = {
-  schemaVersion: '4',
+  schemaVersion: '5',
   id: 'human-control-hitl-demo',
   name: 'Human Control · Deploy Change',
   status: 'draft',
   updatedAt: '2026-08-30T00:00:00.000Z',
+  capabilities: createDefaultGraphCapabilities(),
   nodes: [
     { id: 'human-control-start', kind: 'start', label: 'Start', position: { x: 40, y: 280 } },
     {
@@ -1083,11 +1399,12 @@ export const humanControlHitlDemoGraph: WorkflowGraph = {
 
 /** A compact valid fixture for the first-class subgraph interaction. */
 export const researchSupervisorGraph: WorkflowGraph = {
-  schemaVersion: '4',
+  schemaVersion: '5',
   id: 'research-supervisor-demo',
   name: 'Research Supervisor Workflow',
   status: 'draft',
   updatedAt: '2026-08-29T00:00:00.000Z',
+  capabilities: createDefaultGraphCapabilities(),
   nodes: [
     {
       id: 'research-outer-start',
@@ -1182,11 +1499,12 @@ export const researchSupervisorGraph: WorkflowGraph = {
 /** The canonical routing-semantics fixture. A return edge is normal topology,
  * so loop presentation can be derived without persisting a separate mode. */
 export const researchIntakeRoutingGraph: WorkflowGraph = {
-  schemaVersion: '4',
+  schemaVersion: '5',
   id: 'research-intake-routing-demo',
   name: 'Research Intake Routing',
   status: 'draft',
   updatedAt: '2026-08-30T00:00:00.000Z',
+  capabilities: createDefaultGraphCapabilities(),
   nodes: [
     { id: 'research-intake-start', kind: 'start', label: 'Start', position: { x: 40, y: 280 } },
     {
@@ -1386,13 +1704,73 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     );
   }
 
-  const normalized = normalizeWorkflowGraphRouting(parsed.data);
+  const normalized = normalizeWorkflowGraph(parsed.data);
   const issues: ValidationIssue[] = [];
   const nodeIds = new Set<string>();
   const edgeIds = new Set<string>();
   const subgraphIds = new Set<string>();
   const nodeById = new Map<string, GraphNode>();
   const edgesByConnection = new Map<string, GraphEdge[]>();
+
+  const validateStateCapability = (state: WorkingStateCapability, path: string) => {
+    for (const [index, field] of state.schema.fields.entries()) {
+      if (!field.trim()) {
+        issues.push(issue('STATE_SCHEMA_FIELD_REQUIRED', 'State schema fields must be readable.', `${path}.schema.fields.${index}`));
+      }
+    }
+    const normalizedFields = state.schema.fields.map((field) => field.trim()).filter(Boolean);
+    if (new Set(normalizedFields).size !== normalizedFields.length) {
+      issues.push(issue('STATE_SCHEMA_FIELD_DUPLICATE', 'State schema fields must be unique.', `${path}.schema.fields`));
+    }
+    const reducerKeys = state.reducers.map((reducer) => reducer.key.trim());
+    for (const [index, reducer] of state.reducers.entries()) {
+      if (!reducer.key.trim()) {
+        issues.push(issue('STATE_REDUCER_KEY_REQUIRED', 'State reducer keys must be readable.', `${path}.reducers.${index}.key`));
+      }
+      if (!reducer.summary.trim()) {
+        issues.push(issue('STATE_REDUCER_SUMMARY_REQUIRED', 'State reducers need a readable summary.', `${path}.reducers.${index}.summary`));
+      }
+    }
+    if (new Set(reducerKeys.filter(Boolean)).size !== reducerKeys.filter(Boolean).length) {
+      issues.push(issue('STATE_REDUCER_KEY_DUPLICATE', 'State reducer keys must be unique.', `${path}.reducers`));
+    }
+  };
+  const validateCheckpointerCapability = (checkpointer: CheckpointerCapability, path: string) => {
+    if (!checkpointer.enabled && checkpointer.durableThread.required) {
+      issues.push(issue('CHECKPOINTER_DISABLED_WITH_REQUIRED_THREAD', 'A required durable thread needs an enabled Checkpointer.', `${path}.durableThread.required`));
+    }
+    if (
+      checkpointer.enabled &&
+      checkpointer.durableThread.required &&
+      !checkpointer.durableThread.threadIdSource?.trim()
+    ) {
+      issues.push(issue('CHECKPOINTER_THREAD_ID_SOURCE_REQUIRED', 'A required durable thread needs a readable thread ID source.', `${path}.durableThread.threadIdSource`));
+    }
+    if (checkpointer.backend !== undefined && !checkpointer.backend.trim()) {
+      issues.push(issue('CHECKPOINTER_BACKEND_REQUIRED', 'Checkpointer backend must be readable when supplied.', `${path}.backend`));
+    }
+  };
+  const validateStoreCapability = (store: LongTermStoreCapability, path: string) => {
+    if (store.namespace !== undefined && !store.namespace.trim()) {
+      issues.push(issue('STORE_NAMESPACE_REQUIRED', 'Store namespace must be readable when supplied.', `${path}.namespace`));
+    }
+    if (store.retention !== undefined && !store.retention.trim()) {
+      issues.push(issue('STORE_RETENTION_REQUIRED', 'Store retention must be readable when supplied.', `${path}.retention`));
+    }
+  };
+
+  validateStateCapability(normalized.capabilities.state, 'capabilities.state');
+  validateCheckpointerCapability(normalized.capabilities.checkpointer, 'capabilities.checkpointer');
+  validateStoreCapability(normalized.capabilities.store, 'capabilities.store');
+  const runtimeInput = normalized.capabilities.runtimeMode.input;
+  if (
+    runtimeInput !== undefined &&
+    ((normalized.capabilities.runtimeMode.mode === 'text' && runtimeInput !== 'text') ||
+      (normalized.capabilities.runtimeMode.mode === 'voice' && runtimeInput !== 'audio') ||
+      normalized.capabilities.runtimeMode.mode === 'unspecified')
+  ) {
+    issues.push(issue('RUNTIME_MODE_INPUT_MISMATCH', 'Runtime mode and input metadata must agree.', 'capabilities.runtimeMode.input'));
+  }
 
   for (const subgraph of normalized.subgraphs) {
     if (subgraphIds.has(subgraph.id)) {
@@ -1401,6 +1779,15 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
       );
     }
     subgraphIds.add(subgraph.id);
+    const overrides = subgraph.capabilityOverrides;
+    if (overrides) {
+      if (Object.keys(overrides).length === 0) {
+        issues.push(issue('SUBGRAPH_CAPABILITY_OVERRIDE_EMPTY', `Subgraph “${subgraph.label}” must override at least one supported capability.`, `subgraphs.${subgraph.id}.capabilityOverrides`));
+      }
+      if (overrides.state) validateStateCapability(overrides.state, `subgraphs.${subgraph.id}.capabilityOverrides.state`);
+      if (overrides.checkpointer) validateCheckpointerCapability(overrides.checkpointer, `subgraphs.${subgraph.id}.capabilityOverrides.checkpointer`);
+      if (overrides.store) validateStoreCapability(overrides.store, `subgraphs.${subgraph.id}.capabilityOverrides.store`);
+    }
   }
 
   for (const node of normalized.nodes) {
@@ -1674,6 +2061,83 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     if (node.kind !== 'step') continue;
     const hitl = node.hitl;
     const nodeOutgoing = outgoing.get(node.id) ?? [];
+    const storeAccess = node.storeAccess;
+    const effectiveCapabilities = resolveEffectiveCapabilities(normalized, node.parentId);
+
+    if (storeAccess?.read) {
+      if (!effectiveCapabilities.store.value.available) {
+        issues.push(
+          issue(
+            'STORE_READ_REQUIRES_AVAILABLE_STORE',
+            `Step “${node.label}” directly reads Store, but Store is unavailable in its effective scope.`,
+            `nodes.${node.id}.storeAccess.read`,
+          ),
+        );
+      }
+      if (storeAccess.read.namespace !== undefined && !storeAccess.read.namespace.trim()) {
+        issues.push(issue('STORE_ACCESS_NAMESPACE_REQUIRED', 'Store access namespace must be readable when supplied.', `nodes.${node.id}.storeAccess.read.namespace`));
+      }
+      if (storeAccess.read.key !== undefined && !storeAccess.read.key.trim()) {
+        issues.push(issue('STORE_ACCESS_KEY_REQUIRED', 'Store access key must be readable when supplied.', `nodes.${node.id}.storeAccess.read.key`));
+      }
+    }
+    if (storeAccess?.write) {
+      if (!effectiveCapabilities.store.value.available) {
+        issues.push(
+          issue(
+            'STORE_WRITE_REQUIRES_AVAILABLE_STORE',
+            `Step “${node.label}” directly writes Store, but Store is unavailable in its effective scope.`,
+            `nodes.${node.id}.storeAccess.write`,
+          ),
+        );
+      }
+      if (storeAccess.write.namespace !== undefined && !storeAccess.write.namespace.trim()) {
+        issues.push(issue('STORE_ACCESS_NAMESPACE_REQUIRED', 'Store access namespace must be readable when supplied.', `nodes.${node.id}.storeAccess.write.namespace`));
+      }
+      if (storeAccess.write.key !== undefined && !storeAccess.write.key.trim()) {
+        issues.push(issue('STORE_ACCESS_KEY_REQUIRED', 'Store access key must be readable when supplied.', `nodes.${node.id}.storeAccess.write.key`));
+      }
+      if (storeAccess.write.retention !== undefined && !storeAccess.write.retention.trim()) {
+        issues.push(issue('STORE_ACCESS_RETENTION_REQUIRED', 'Store write retention must be readable when supplied.', `nodes.${node.id}.storeAccess.write.retention`));
+      }
+    }
+
+    const retry = node.retry;
+    if (retry) {
+      if (retry.maxAttempts === undefined) {
+        issues.push(issue('RETRY_MAX_ATTEMPTS_REQUIRED', `Retry on “${node.label}” needs a maximum attempt count.`, `nodes.${node.id}.retry.maxAttempts`));
+      } else if (retry.maxAttempts < 2 || retry.maxAttempts > 10) {
+        issues.push(issue('RETRY_MAX_ATTEMPTS_INVALID', `Retry on “${node.label}” must allow two to ten attempts.`, `nodes.${node.id}.retry.maxAttempts`));
+      }
+      if (!retry.backoff) {
+        issues.push(issue('RETRY_BACKOFF_REQUIRED', `Retry on “${node.label}” needs a backoff policy.`, `nodes.${node.id}.retry.backoff`));
+      } else {
+        if (!retry.backoff.strategy) {
+          issues.push(issue('RETRY_BACKOFF_STRATEGY_REQUIRED', `Retry on “${node.label}” needs a backoff strategy.`, `nodes.${node.id}.retry.backoff.strategy`));
+        }
+        if (retry.backoff.initialDelayMs === undefined) {
+          issues.push(issue('RETRY_BACKOFF_DELAY_REQUIRED', `Retry on “${node.label}” needs an initial delay.`, `nodes.${node.id}.retry.backoff.initialDelayMs`));
+        } else if (retry.backoff.initialDelayMs < 0) {
+          issues.push(issue('RETRY_BACKOFF_DELAY_INVALID', `Retry on “${node.label}” cannot use a negative delay.`, `nodes.${node.id}.retry.backoff.initialDelayMs`));
+        }
+        if (retry.backoff.maxDelayMs !== undefined) {
+          if (retry.backoff.maxDelayMs < 0 || (retry.backoff.initialDelayMs !== undefined && retry.backoff.maxDelayMs < retry.backoff.initialDelayMs)) {
+            issues.push(issue('RETRY_BACKOFF_MAX_DELAY_INVALID', `Retry on “${node.label}” needs a non-negative maximum delay no smaller than its initial delay.`, `nodes.${node.id}.retry.backoff.maxDelayMs`));
+          }
+        }
+      }
+      for (const [index, condition] of (retry.retryOn ?? []).entries()) {
+        if (!condition.trim()) {
+          issues.push(issue('RETRY_CONDITION_REQUIRED', `Retry conditions on “${node.label}” must be readable.`, `nodes.${node.id}.retry.retryOn.${index}`));
+        }
+      }
+      if (retry.fallback?.provider !== undefined && !retry.fallback.provider.trim()) {
+        issues.push(issue('RETRY_FALLBACK_PROVIDER_REQUIRED', `Retry fallback provider on “${node.label}” must be readable when supplied.`, `nodes.${node.id}.retry.fallback.provider`));
+      }
+      if (retry.fallback?.model !== undefined && !retry.fallback.model.trim()) {
+        issues.push(issue('RETRY_FALLBACK_MODEL_REQUIRED', `Retry fallback model on “${node.label}” must be readable when supplied.`, `nodes.${node.id}.retry.fallback.model`));
+      }
+    }
 
     if (hitl?.enabled) {
       if (!hitl.timing) {
@@ -2140,7 +2604,7 @@ export function applyGraphOperations(
   graph: WorkflowGraph,
   operations: GraphOperation[],
 ): { graph: WorkflowGraph; errors: ValidationIssue[] } {
-  const next: WorkflowGraph = normalizeWorkflowGraphRouting(structuredClone(graph));
+  const next: WorkflowGraph = normalizeWorkflowGraph(structuredClone(graph));
   // Proposals may be replayed against data loaded before subgraphs existed.
   // Keep that accepted data canonical even outside the persistence adapter.
   next.subgraphs ??= [];
@@ -2159,7 +2623,7 @@ export function applyGraphOperations(
   };
   const uniqueNodeIds = (nodeIds: string[]) => [...new Set(nodeIds)];
   const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
-    ['executor', 'participation', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
+    ['executor', 'participation', 'storeAccess', 'retry', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
   const hasMergePatchFields = (patch: GraphNodePatch) => 'merge' in patch;
   const missingNodes = (nodeIds: string[], operationIndex: number) => {
     const missing = uniqueNodeIds(nodeIds).filter((nodeId) => !findNode(nodeId));
@@ -2206,11 +2670,28 @@ export function applyGraphOperations(
         );
       } else {
         const patch = structuredClone(operation.patch);
-        if (next.nodes[nodeIndex].kind === 'step' && patch.sensitive === null) {
-          const withoutSensitive = { ...patch };
-          delete withoutSensitive.sensitive;
-          const updated = { ...next.nodes[nodeIndex], ...withoutSensitive } as StepGraphNode;
-          delete updated.sensitive;
+        if (next.nodes[nodeIndex].kind === 'step') {
+          const updated = { ...next.nodes[nodeIndex], ...patch } as StepGraphNode;
+          if (patch.sensitive === null) delete updated.sensitive;
+          if (patch.storeAccess === null) {
+            delete updated.storeAccess;
+            if (updated.modifiers) {
+              const remainingModifiers = { ...updated.modifiers };
+              delete remainingModifiers.storeRead;
+              delete remainingModifiers.storeWrite;
+              if (Object.keys(remainingModifiers).length > 0) updated.modifiers = remainingModifiers;
+              else delete updated.modifiers;
+            }
+          }
+          if (patch.retry === null) {
+            delete updated.retry;
+            if (updated.modifiers) {
+              const remainingModifiers = { ...updated.modifiers };
+              delete remainingModifiers.retryFallback;
+              if (Object.keys(remainingModifiers).length > 0) updated.modifiers = remainingModifiers;
+              else delete updated.modifiers;
+            }
+          }
           next.nodes[nodeIndex] = updated;
         } else {
           next.nodes[nodeIndex] = { ...next.nodes[nodeIndex], ...patch } as GraphNode;
@@ -2320,7 +2801,7 @@ export function applyGraphOperations(
     }
   }
 
-  return { graph: next, errors };
+  return { graph: normalizeWorkflowGraph(next), errors };
 }
 
 export function proposalDiff(operations: GraphOperation[], baseGraph?: WorkflowGraph): ProposalDiff {
@@ -2416,7 +2897,7 @@ export function createProposal(
 
 export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
   if (validateGraph(graph).length > 0) return [];
-  const normalized = normalizeWorkflowGraphRouting(workflowGraphSchema.parse(graph));
+  const normalized = normalizeWorkflowGraph(workflowGraphSchema.parse(graph));
   const start = normalized.nodes.find((node) => node.kind === 'start' && !node.parentId);
   if (!start) return [];
 
@@ -2583,6 +3064,24 @@ import pytest
 
 
 ${payload}
+
+
+GRAPH_METADATA = ${JSON.stringify(
+    {
+      schema_version: graph.schemaVersion,
+      capabilities: graph.capabilities,
+      subgraph_capability_overrides: graph.subgraphs.map((subgraph) => ({
+        subgraph_id: subgraph.id,
+        ...(subgraph.capabilityOverrides
+          ? { capability_overrides: subgraph.capabilityOverrides }
+          : {}),
+      })),
+    },
+    null,
+  )
+    .replace(/true/g, 'True')
+    .replace(/false/g, 'False')
+    .replace(/null/g, 'None')}
 
 
 SCENARIOS = ${JSON.stringify(
