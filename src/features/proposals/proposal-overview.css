@@ -1,0 +1,127 @@
+.proposal-overview {
+  container-type: inline-size;
+  margin-top: 12px;
+  border: 1px solid rgb(23 33 28 / 10%);
+  border-radius: 14px;
+  background: #f8faf8;
+  padding: 10px;
+}
+
+.proposal-overview-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.proposal-overview-heading h3 {
+  margin-top: 2px;
+  color: #17211c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.proposal-overview-count {
+  border-radius: 999px;
+  background: #e8eee9;
+  padding: 4px 7px;
+  color: #43534a;
+  font-size: 9px;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.proposal-overview-graphs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.proposal-overview-graph {
+  min-width: 0;
+}
+
+.proposal-overview-graph h4 {
+  margin-bottom: 4px;
+  color: #536159;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proposal-overview-canvas {
+  position: relative;
+  height: 154px;
+  overflow: hidden;
+  border: 1px solid rgb(23 33 28 / 10%);
+  border-radius: 10px;
+  background-color: #fff;
+  background-image: radial-gradient(rgb(23 33 28 / 10%) 0.6px, transparent 0.6px);
+  background-size: 8px 8px;
+}
+
+.proposal-overview-canvas .react-flow__pane,
+.proposal-overview-canvas .react-flow__node,
+.proposal-overview-canvas .react-flow__edge {
+  cursor: default;
+}
+
+.proposal-overview-canvas .react-flow__node {
+  pointer-events: none;
+}
+
+.proposal-overview-summary {
+  margin-top: 9px;
+  border-radius: 9px;
+  background: #fff;
+  padding: 8px;
+  color: #46554d;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.proposal-overview-summary > strong {
+  color: #17211c;
+  font-size: 10px;
+}
+
+.proposal-overview-summary ul {
+  display: grid;
+  gap: 5px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proposal-overview-summary li {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.42fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.proposal-overview-summary li > span:first-child {
+  color: #24322b;
+  font-weight: 760;
+}
+
+.proposal-overview-summary li > span:last-child {
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 285px) {
+  .proposal-overview-graphs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .proposal-overview-canvas {
+    height: 132px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proposal-overview-canvas .react-flow__edge.animated path {
+    animation: none !important;
+  }
+}
