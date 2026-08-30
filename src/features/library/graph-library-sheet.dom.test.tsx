@@ -16,7 +16,7 @@ const entries: readonly GraphLibraryEntry[] = [
     domain: 'Research',
     complexity: 'advanced',
     concepts: ['Routing', 'HITL'],
-    source: { owner: 'langchain-ai', repository: 'open_deep_research', url: 'https://github.com/langchain-ai/open_deep_research' },
+    source: { owner: 'langchain-ai', repository: 'open_deep_research', url: 'https://github.com/langchain-ai/open_deep_research', note: 'Runtime worker pools are intentionally deferred.' },
     graph: {
       id: 'research-graph', name: 'Research graph', schemaVersion: '4', status: 'draft', updatedAt: '2026-08-30T00:00:00.000Z', subgraphs: [],
       nodes: [
@@ -62,6 +62,7 @@ describe('GraphLibrarySheet', () => {
     render(<GraphLibrarySheet open entries={entries} onClose={() => {}} onRequestOpen={() => {}} />);
 
     expect(screen.getByText('Showing 2 of 2 templates')).toBeTruthy();
+    expect(screen.getByText('Runtime worker pools are intentionally deferred.')).toBeTruthy();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search graph library' }), { target: { value: 'incident' } });
     expect(screen.getByText('Showing 1 of 2 templates')).toBeTruthy();
     expect(screen.getByText('Human-Approved Incident Response')).toBeTruthy();

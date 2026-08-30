@@ -268,6 +268,7 @@ function GraphLibraryCard({
           </span>
           <span id={`graph-library-card-outcome-${entry.id}`} className="graph-library-card__outcome">{entry.outcome}</span>
           <span className="graph-library-card__chips">
+            <span className="graph-library-card__domain">{entry.domain}</span>
             {entry.concepts.map((concept) => <span key={concept}>{concept}</span>)}
             <span className="graph-library-card__complexity">{entry.complexity}</span>
           </span>
@@ -285,6 +286,7 @@ function GraphLibraryCard({
           )}
         </span>
         <span>{GRAPH_LIBRARY_DISCLAIMER}</span>
+        {entry.source.note && <span className="graph-library-card__source-note">{entry.source.note}</span>}
       </footer>
     </article>
   );
@@ -292,11 +294,14 @@ function GraphLibraryCard({
 
 /** A small, graph-derived topology projection; no repository media is used. */
 export function GraphTopologyThumbnail({ entry }: { entry: Pick<GraphLibraryEntry, 'graph'> }) {
-  const nodes = entry.graph.nodes;
-  const positions = topologyPositions(nodes);
+  const { nodes, subgraphs } = topologyGeometry(entry.graph);
+  const positions = nodes;
   const byId = new Map(positions.map((position) => [position.id, position]));
   return (
     <svg className="graph-library-topology" viewBox="0 0 164 88" role="img" aria-label={`${entry.graph.name} topology`}>
+      {subgraphs.map((subgraph) => (
+        <rect key={subgraph.id} x={subgraph.x} y={subgraph.y} width={subgraph.width} height={subgraph.height} rx="5" />
+      ))}
       {entry.graph.edges.map((edge) => {
         const source = byId.get(edge.source);
         const target = byId.get(edge.target);
@@ -308,20 +313,48 @@ export function GraphTopologyThumbnail({ entry }: { entry: Pick<GraphLibraryEntr
   );
 }
 
-function topologyPositions(nodes: GraphLibraryEntry['graph']['nodes']) {
-  if (!nodes.length) return [];
-  const xValues = nodes.map((node) => node.position.x);
-  const yValues = nodes.map((node) => node.position.y);
+function topologyGeometry(graph: GraphLibraryEntry['graph']) {
+  const parentById = new Map(graph.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
+  const absoluteNodes = graph.nodes.map((node) => {
+    const parent = node.parentId ? parentById.get(node.parentId) : undefined;
+    return {
+      id: node.id,
+      kind: node.kind,
+      x: node.position.x + (parent?.position.x ?? 0),
+      y: node.position.y + (parent?.position.y ?? 0),
+    };
+  });
+  if (!absoluteNodes.length) return { nodes: [], subgraphs: [] };
+  const xValues = [
+    ...absoluteNodes.map((node) => node.x),
+    ...graph.subgraphs.flatMap((subgraph) => [subgraph.position.x, subgraph.position.x + subgraph.dimensions.width]),
+  ];
+  const yValues = [
+    ...absoluteNodes.map((node) => node.y),
+    ...graph.subgraphs.flatMap((subgraph) => [subgraph.position.y, subgraph.position.y + subgraph.dimensions.height]),
+  ];
   const minX = Math.min(...xValues);
   const maxX = Math.max(...xValues);
   const minY = Math.min(...yValues);
   const maxY = Math.max(...yValues);
   const xRange = maxX - minX || 1;
   const yRange = maxY - minY || 1;
-  return nodes.map((node, index) => ({
-    id: node.id,
-    kind: node.kind,
-    x: nodes.length === 1 ? 82 : 14 + ((node.position.x - minX) / xRange) * 136,
-    y: nodes.length === 1 ? 44 : 14 + ((node.position.y - minY) / yRange) * 60 + (maxY === minY ? ((index % 3) - 1) * 13 : 0),
-  }));
+  const projectX = (x: number) => 14 + ((x - minX) / xRange) * 136;
+  const projectY = (y: number) => 14 + ((y - minY) / yRange) * 60;
+  return {
+    nodes: absoluteNodes.map((node, index) => ({
+      ...node,
+      x: absoluteNodes.length === 1 ? 82 : projectX(node.x),
+      y: absoluteNodes.length === 1
+        ? 44
+        : projectY(node.y) + (maxY === minY ? ((index % 3) - 1) * 13 : 0),
+    })),
+    subgraphs: graph.subgraphs.map((subgraph) => ({
+      id: subgraph.id,
+      x: projectX(subgraph.position.x),
+      y: projectY(subgraph.position.y),
+      width: Math.max(12, (subgraph.dimensions.width / xRange) * 136),
+      height: Math.max(12, (subgraph.dimensions.height / yRange) * 60),
+    })),
+  };
 }
