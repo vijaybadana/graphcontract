@@ -4,7 +4,6 @@ import {
 } from '@/src/adapters/exports/downloads';
 import { migrateWorkspaceV7 } from '@/src/adapters/persistence/migrate-workspace';
 import {
-  enumerateScenarios,
   validateGraph,
   workflowGraphSchema,
 } from '@/src/domain';
@@ -51,16 +50,18 @@ describe('graph library all-template integration', () => {
     expect(loaded.state.graph.id).toBe(entry.graph.id);
     expect(validateGraph(loaded.state.graph)).toEqual([]);
 
-    const firstScenarios = enumerateScenarios(loaded.state.graph);
-    expect(firstScenarios).toEqual(entry.scenarioSummary.scenarios);
-    expect(firstScenarios.length).toBeGreaterThan(0);
-    expect(firstScenarios.length).toBeLessThanOrEqual(200);
+    const frozen = service.freezeGraph(loaded.state);
+    expect(frozen.result?.ok).toBe(true);
+    expect(frozen.state.graph.status).toBe('frozen');
+    expect(frozen.state.scenarios).toEqual(entry.scenarioSummary.scenarios);
+    expect(frozen.state.scenarios.length).toBeGreaterThan(0);
+    expect(frozen.state.scenarios.length).toBeLessThanOrEqual(200);
 
     const exportedGraph = workflowGraphSchema.parse(
-      JSON.parse(buildGraphContractDownload(loaded.state.graph).content),
+      JSON.parse(buildGraphContractDownload(frozen.state.graph).content),
     );
     const exportedScenarios = JSON.parse(
-      buildGraphScenariosDownload(loaded.state.graph, firstScenarios).content,
+      buildGraphScenariosDownload(frozen.state.graph, frozen.state.scenarios).content,
     ) as {
       graphId: string;
       graphSchemaVersion: string;
@@ -68,21 +69,23 @@ describe('graph library all-template integration', () => {
       graphRelationships: unknown;
       scenarios: unknown;
     };
-    const serializableScenarios = JSON.parse(JSON.stringify(firstScenarios));
+    const serializableScenarios = JSON.parse(JSON.stringify(frozen.state.scenarios));
 
-    expect(exportedGraph).toEqual(loaded.state.graph);
+    expect(exportedGraph).toEqual(frozen.state.graph);
     expect(exportedScenarios).toMatchObject({
-      graphId: loaded.state.graph.id,
-      graphSchemaVersion: loaded.state.graph.schemaVersion,
-      graphCapabilities: loaded.state.graph.capabilities,
-      graphRelationships: loaded.state.graph.relationships,
+      graphId: frozen.state.graph.id,
+      graphSchemaVersion: frozen.state.graph.schemaVersion,
+      graphCapabilities: frozen.state.graph.capabilities,
+      graphRelationships: frozen.state.graph.relationships,
       scenarios: serializableScenarios,
     });
 
     const persistedWorkspace = JSON.parse(JSON.stringify({
       graph: exportedGraph,
       proposal: null,
-      scenarios: firstScenarios,
+      // Scenarios are projection-only. Reload must derive them from the frozen
+      // graph rather than trust an absent or stale persisted array.
+      scenarios: [],
     }));
     const rehydrated = migrateWorkspaceV7(
       persistedWorkspace,
