@@ -366,6 +366,23 @@
   .workspace-panel-command-divider {
     display: none;
   }
+
+  /* Preserve every command at common laptop widths while collapsing the two
+     widest secondary labels. This keeps the center grid track within its
+     bounds instead of extending underneath the human-authority island. */
+  .workspace-library-button,
+  .workspace-auto-layout-button {
+    width: 34px;
+    min-width: 34px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .workspace-library-button span,
+  .workspace-library-button strong,
+  .workspace-auto-layout-button span {
+    display: none;
+  }
 }
 
 @media (max-width: 1180px) {
