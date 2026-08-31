@@ -212,6 +212,11 @@ test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationshi
   expect(scenarioDownload.scenarios.every((scenario) => scenario.relationshipAnnotations.some((annotation) => annotation.relationshipId === relation.id))).toBe(true);
 
   await app.reload();
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
   const reloaded = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(reloaded.graph).toMatchObject({ schemaVersion: '6', status: 'frozen', relationships: [relation] });
 });
