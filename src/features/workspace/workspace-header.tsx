@@ -140,8 +140,8 @@ export function WorkspaceHeader({
           onClick={onOpenLibrary}
         >
           <Books aria-hidden="true" size={15} weight="duotone" />
-          <span>Graph library</span>
-          <strong aria-hidden="true">{libraryEntryCount}</strong>
+          <span className="workspace-library-label">Graph library</span>
+          <strong className="workspace-library-count" aria-hidden="true">{libraryEntryCount}</strong>
         </button>
         <div className="workspace-command-divider workspace-library-command-divider" />
         <div className="workspace-command-group workspace-panel-command-group" role="group" aria-label="Panel controls">

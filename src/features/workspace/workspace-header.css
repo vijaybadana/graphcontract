@@ -442,7 +442,6 @@
   .workspace-history-controls,
   .workspace-edit-command-divider,
   .workspace-edit-command-group,
-  .workspace-library-button,
   .workspace-library-command-divider,
   .workspace-canvas-command-divider,
   .workspace-canvas-command-group {
@@ -458,10 +457,21 @@
     padding: 6px;
   }
 
+  .workspace-library-button {
+    width: 34px;
+    min-width: 34px;
+    justify-content: center;
+    flex: 0 0 34px;
+    padding: 0;
+  }
+
+  .workspace-library-count { display: none; }
+
   .workspace-view-command-group {
     display: grid;
-    width: 100%;
+    width: auto;
     min-width: 0;
+    flex: 1 1 auto;
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 

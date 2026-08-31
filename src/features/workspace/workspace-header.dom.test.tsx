@@ -263,6 +263,9 @@ describe('WorkspaceHeader freeze control', () => {
     expect(screen.getByText('Cases').getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByText('Review').getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByText('Run').getAttribute('aria-hidden')).toBe('true');
+    const library = screen.getByRole('button', { name: 'Graph library, 10 templates' });
+    expect(library.querySelector('.workspace-library-label')?.textContent).toBe('Graph library');
+    expect(library.querySelector('.workspace-library-count')?.textContent).toBe('10');
 
     cleanup();
     render(<WorkspaceHeader {...baseProps} graphStatus="frozen" />);
