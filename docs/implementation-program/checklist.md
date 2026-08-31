@@ -53,7 +53,7 @@
   Acceptance: State, Checkpoint and Store remain separate in schema and UI; inheritance and validation are deterministic.
   Verify: Domain/inheritance/migration/WebMCP tests and browser graph/subgraph/Step editing journey.
 
-- [ ] **8. Implement provenance and system-boundary relationships**
+- [x] **8. Implement provenance and system-boundary relationships**
   Spec ref: `lead-handover.md > Package 5 — provenance, opaque topology and system boundaries`
   What to build: Add evidence metadata/overlay, opaque topology, spawned-run portals, external-orchestration paths and degraded/unimplemented states.
   Acceptance: The canvas never presents external or inferred behavior as a native edge; hiding the overlay preserves metadata.
@@ -65,7 +65,7 @@
   Acceptance: Every template validates, persists, exports/reloads and credits inspiration without copying source code/assets.
   Verify: Per-template validation and scenario snapshots plus browser search/load/replace/undo journey.
 
-- [ ] **10. Complete scenarios and proposal comparison**
+- [x] **10. Complete scenarios and proposal comparison**
   Spec ref: `docs/design-system/implementation-contract.md > Templates, scenarios and proposal review`
   What to build: Add semantic scenario rows, path highlighting, per-case downloads, Design/Scenario/Proposal views and Before/Proposed overview.
   Acceptance: Highlights are projections; all new elements display correct proposal diffs; human authority remains enforced.
@@ -86,3 +86,5 @@
 ## Gate rule
 
 An unchecked item may not be hidden by starting a dependent item. If a package reveals a necessary schema correction, repair and re-close that package before continuing.
+
+Current stop boundary: items 1–10 are complete. Items 11–12 remain an explicit owner-gated competition-closure phase and were not started as part of the frozen final-integration scope.
