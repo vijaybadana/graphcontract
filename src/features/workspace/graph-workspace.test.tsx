@@ -252,6 +252,42 @@ describe('GraphWorkspace subgraph creation', () => {
     expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier')?.label).toBe('Approved classifier');
   }, 10_000);
 
+  it('undoes an invalid edit without racing React Flow selection against history state', async () => {
+    useGraphStore.getState().loadResearchIntakeRoutingDemo();
+    renderWorkspace(false);
+    await screen.findByRole('application');
+
+    useGraphStore.getState().setSelection({
+      nodeIds: [],
+      subgraphIds: [],
+      edgeIds: ['clarify-write-brief'],
+      primary: { type: 'edge', id: 'clarify-write-brief' },
+    });
+
+    const routeLabel = await screen.findByRole('textbox', { name: 'Route label' });
+    expect((routeLabel as HTMLInputElement).value).toBe('ready');
+
+    fireEvent.change(routeLabel, { target: { value: '' } });
+    await waitFor(() => {
+      expect(useGraphStore.getState().graph.edges.find(
+        (candidate) => candidate.id === 'clarify-write-brief',
+      )?.label).toBe('');
+      expect(screen.getByText('Every command edge from “Clarify Request” needs a label.')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(useGraphStore.getState().graph.edges.find(
+        (candidate) => candidate.id === 'clarify-write-brief',
+      )?.label).toBe('ready');
+      expect(useGraphStore.getState().selection.primary).toEqual({
+        type: 'edge',
+        id: 'clarify-write-brief',
+      });
+      expect((screen.getByRole('textbox', { name: 'Route label' }) as HTMLInputElement).value).toBe('ready');
+    });
+  }, 30_000);
+
   it('keeps scenario selection as a projection and clears highlighting when returning to Design', async () => {
     renderWorkspace(false);
 

@@ -132,6 +132,43 @@ describe('workspace subgraph actions', () => {
     });
   });
 
+  it('retains a surviving edge selection across undo and redo', () => {
+    useGraphStore.getState().loadResearchIntakeRoutingDemo();
+    useGraphStore.setState({ past: [], future: [] });
+    const selection: WorkspaceSelection = {
+      nodeIds: [],
+      subgraphIds: [],
+      edgeIds: ['clarify-write-brief'],
+      primary: { type: 'edge', id: 'clarify-write-brief' },
+    };
+    useGraphStore.getState().setSelection(selection);
+
+    useGraphStore.getState().updateEdge('clarify-write-brief', { label: '' });
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().selection).toEqual(selection);
+    expect(useGraphStore.getState().graph.edges.find(
+      (edge) => edge.id === 'clarify-write-brief',
+    )?.label).toBe('ready');
+
+    useGraphStore.getState().redo();
+    expect(useGraphStore.getState().selection).toEqual(selection);
+    expect(useGraphStore.getState().graph.edges.find(
+      (edge) => edge.id === 'clarify-write-brief',
+    )?.label).toBe('');
+  });
+
+  it('prunes selections whose stable IDs are absent from a restored history graph', () => {
+    const existingIds = new Set(useGraphStore.getState().graph.nodes.map((node) => node.id));
+    useGraphStore.getState().addNode('agent', { x: 900, y: 120 });
+    const createdId = useGraphStore.getState().selection.primary?.id;
+    expect(createdId).toBeTruthy();
+    expect(existingIds.has(createdId!)).toBe(false);
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.nodes.some((node) => node.id === createdId)).toBe(false);
+    expect(useGraphStore.getState().selection).toEqual(emptySelection());
+  });
+
   it('keeps Auto-layout inert while a proposal is pending or the graph is frozen', () => {
     const original = structuredClone(useGraphStore.getState().graph);
     expect(useGraphStore.getState().submitProposal({

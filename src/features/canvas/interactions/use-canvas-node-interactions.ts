@@ -150,12 +150,16 @@ export function useCanvasInteractions({
   }, [projectedEdges, setEdges]);
 
   useEffect(() => {
-    setEdges((currentEdges) =>
-      currentEdges.map((edge) => {
+    setEdges((currentEdges) => {
+      let changed = false;
+      const reconciled = currentEdges.map((edge) => {
         const selected = isCanvasEdgeSelected(edge, selectedEdgeIds);
-        return edge.selected === selected ? edge : { ...edge, selected };
-      }),
-    );
+        if (edge.selected === selected) return edge;
+        changed = true;
+        return { ...edge, selected };
+      });
+      return changed ? reconciled : currentEdges;
+    });
   }, [selectedEdgeIds, setEdges]);
 
   const clearRenderedSelection = useCallback(() => {

@@ -110,6 +110,39 @@ const sameSelection = (left: WorkspaceSelection, right: WorkspaceSelection) =>
   left.primary?.type === right.primary?.type &&
   left.primary?.id === right.primary?.id;
 
+/** Keep history navigation and React Flow on one selection authority. Undo and
+ * redo may replace the graph, so retain selections whose stable IDs still
+ * exist and discard only elements that are absent from the restored graph. */
+export function selectionForGraph(
+  graph: WorkflowGraph,
+  selection: WorkspaceSelection,
+): WorkspaceSelection {
+  const nodeIdsInGraph = new Set(graph.nodes.map((node) => node.id));
+  const subgraphIdsInGraph = new Set(graph.subgraphs.map((subgraph) => subgraph.id));
+  const edgeIdsInGraph = new Set(graph.edges.map((edge) => edge.id));
+  const nodeIds = selection.nodeIds.filter((id) => nodeIdsInGraph.has(id));
+  const subgraphIds = selection.subgraphIds.filter((id) => subgraphIdsInGraph.has(id));
+  const edgeIds = selection.edgeIds.filter((id) => edgeIdsInGraph.has(id));
+  const primaryStillExists = selection.primary
+    ? selection.primary.type === 'node'
+      ? nodeIds.includes(selection.primary.id)
+      : selection.primary.type === 'subgraph'
+        ? subgraphIds.includes(selection.primary.id)
+        : edgeIds.includes(selection.primary.id)
+    : false;
+  const primary = primaryStillExists
+    ? selection.primary
+    : nodeIds.length > 0
+      ? { type: 'node' as const, id: nodeIds[nodeIds.length - 1] }
+      : subgraphIds.length > 0
+        ? { type: 'subgraph' as const, id: subgraphIds[subgraphIds.length - 1] }
+        : edgeIds.length > 0
+          ? { type: 'edge' as const, id: edgeIds[edgeIds.length - 1] }
+          : null;
+  const reconciled = { nodeIds, subgraphIds, edgeIds, primary };
+  return sameSelection(selection, reconciled) ? selection : reconciled;
+}
+
 /** Returns true only for a boundary edge currently rendered as a collapsed
  * subgraph proxy. Selection is intentionally not consulted, so a graph edit
  * between selection and Delete cannot make a proxy edge deletable. */
@@ -345,11 +378,12 @@ export const useGraphStore = create<WorkspaceStore>()(
           const state = get();
           if (state.past.length === 0 || state.graph.status === 'frozen' || state.proposal) return;
           const previous = state.past[state.past.length - 1];
+          const restored = coreOf(previous);
           set({
-            ...coreOf(previous),
+            ...restored,
             past: state.past.slice(0, -1),
             future: [coreOf(state), ...state.future.slice(0, 49)],
-            selection: emptySelection(),
+            selection: selectionForGraph(restored.graph, state.selection),
             notice: 'Undid the last graph edit.',
           });
         },
@@ -358,11 +392,12 @@ export const useGraphStore = create<WorkspaceStore>()(
           const state = get();
           if (state.future.length === 0 || state.graph.status === 'frozen' || state.proposal) return;
           const next = state.future[0];
+          const restored = coreOf(next);
           set({
-            ...coreOf(next),
+            ...restored,
             past: [...state.past.slice(-49), coreOf(state)],
             future: state.future.slice(1),
-            selection: emptySelection(),
+            selection: selectionForGraph(restored.graph, state.selection),
             notice: 'Redid the graph edit.',
           });
         },

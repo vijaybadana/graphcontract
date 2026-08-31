@@ -71,6 +71,7 @@ import {
 } from '@/src/features/workspace/panel-collapse-control';
 import { PanelResizer } from '@/src/features/workspace/panel-resizer';
 import { workspaceSelectionFromCanvas } from '@/src/features/workspace/canvas-selection';
+import { useStableEvent } from '@/src/features/workspace/use-stable-event';
 import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
 import { GraphCapabilityStrip } from '@/src/features/workspace/graph-capability-strip';
 import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
@@ -745,7 +746,7 @@ export function GraphWorkspace() {
     [canvas.nodes, canvasEditable, graph, updateEdge],
   );
 
-  const handleSelectionChange = useCallback(
+  const handleSelectionChange = useStableEvent(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
       const selectedSystemRelationship = edges.find(isCanvasSystemRelationshipEdge);
       if (selectedSystemRelationship) {
@@ -775,7 +776,6 @@ export function GraphWorkspace() {
       }
       setSelection(nextSelection);
     },
-    [evidenceMarkerByTarget, evidenceOverlayVisible, openInspectorForSelection, selectSystemRelationship, setSelection],
   );
 
   const makePrimary = useCallback((primary: { type: 'node' | 'edge' | 'subgraph'; id: string }) => {
