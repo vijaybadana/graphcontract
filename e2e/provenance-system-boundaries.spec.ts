@@ -21,6 +21,7 @@ type Relationship = {
 type GraphRead = {
   ok: true;
   graph: {
+    id: string;
     schemaVersion: string;
     status: 'draft' | 'frozen';
     updatedAt: string;
@@ -47,6 +48,8 @@ type ProposalResult = {
 type ScenarioResult = {
   ok: boolean;
   scenarios?: Array<{
+    id: string;
+    name: string;
     orderedPath: string[];
     traversedEdges: Array<{ source: string; target: string }>;
     relationshipAnnotations: Array<{ relationshipId?: string; family: string }>;
@@ -86,6 +89,7 @@ async function submitAndApprove(
 }
 
 test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationship remain review-only until human approval', async ({ app }) => {
+  const canvas = app.getByRole('application');
   expect(await webMcpToolNames(app)).toEqual([
     'get_branch_scenarios',
     'get_graph',
@@ -137,9 +141,9 @@ test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationshi
   const pending = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(pending.graph).toEqual(accepted.graph);
   expect(pending.pendingProposal).toMatchObject({ status: 'pending' });
-  await expect(app.getByTestId('rf__node-classifier').getByLabel(/Opaque or prebuilt/)).toBeVisible();
-  await expect(app.getByTestId('rf__node-classifier').getByLabel(/Degraded readiness/)).toBeVisible();
-  await expect(app.getByLabel('External system Dispatch system. Projection-only boundary tile.')).toBeVisible();
+  await expect(canvas.getByTestId('rf__node-classifier').getByLabel(/Opaque or prebuilt/)).toBeVisible();
+  await expect(canvas.getByTestId('rf__node-classifier').getByLabel(/Degraded readiness/)).toBeVisible();
+  await expect(canvas.getByLabel('External system Dispatch system. Projection-only boundary tile.')).toBeVisible();
 
   await app.getByRole('button', { name: /^Evidence: Hidden, Projection-only overlay/ }).click();
   await expect(app.getByLabel('Evidence overlay legend')).toBeVisible();
@@ -170,7 +174,7 @@ test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationshi
   });
   expect(approved.graph.nodes.find((node) => node.id === 'end')?.outcome).toEqual({ kind: 'completed' });
 
-  await app.getByTestId('rf__node-classifier').click();
+  await canvas.getByTestId('rf__node-classifier').click();
   await expect(app.getByText('Opaque / prebuilt Step', { exact: true })).toBeVisible();
   await expect(app.getByLabel('Opaque factory label')).toHaveValue('create_support_classifier');
   await expect(app.getByLabel('Opaque input ports')).toHaveValue('request');
@@ -213,6 +217,7 @@ test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationshi
 });
 
 test('relationship add, update, and removal previews are projection-only and rejection keeps accepted boundaries intact', async ({ app }) => {
+  const canvas = app.getByRole('application');
   const first = externalRelationship('accepted-runner', 'Accepted runner', 'accepted-runner-system');
   const second = externalRelationship('accepted-archive', 'Accepted archive', 'accepted-archive-system');
   const bootstrapped = await submitAndApprove(
@@ -248,7 +253,7 @@ test('relationship add, update, and removal previews are projection-only and rej
   await expect(app.getByRole('button', { name: /External orchestration: Candidate queue\. Proposed added/ })).toBeVisible();
   await expect(app.getByRole('button', { name: /External orchestration: Candidate runner\. Proposed updated/ })).toBeVisible();
   await expect(app.getByRole('button', { name: /External orchestration: Accepted archive\. Removed · accepted record/ })).toBeVisible();
-  await expect(app.getByLabel('External system Candidate queue. Projection-only boundary tile.')).toBeVisible();
+  await expect(canvas.getByLabel('External system Candidate queue. Projection-only boundary tile.')).toBeVisible();
 
   await app.getByRole('button', { name: 'Reject' }).click();
   const rejected = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
@@ -257,4 +262,109 @@ test('relationship add, update, and removal previews are projection-only and rej
   expect(rejected.graph.edges).toEqual(acceptedEdges);
   await expect(app.getByText('Candidate queue', { exact: true })).toHaveCount(0);
   await expect(app.getByText('Candidate runner', { exact: true })).toHaveCount(0);
+});
+
+test('selected scenarios preserve collapsed native proxies and dim unrelated non-native relationships', async ({ app }) => {
+  const canvas = app.getByRole('application');
+  await app.getByRole('button', { name: 'Graph library, 10 templates' }).click();
+  await expect(app.getByRole('dialog')).toBeVisible();
+  app.once('dialog', async (dialog) => {
+    expect(dialog.type()).toBe('confirm');
+    expect(dialog.message()).toContain('Replace the current canvas with “Hierarchical Deep Research”?');
+    await dialog.accept();
+  });
+  await app.getByRole('button', { name: 'Open Hierarchical Deep Research' }).click();
+  await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph.id).toBe(
+    'library-hierarchical-deep-research',
+  );
+
+  const relationship = (
+    id: string,
+    nodeId: string,
+    externalId: string,
+    label: string,
+  ): Relationship => ({
+    id,
+    kind: 'external-orchestration',
+    source: { kind: 'node', nodeId },
+    target: { kind: 'external', externalId, label },
+    label,
+    provenance: {
+      representation: 'external-orchestration',
+      evidence: {
+        source: `https://example.test/contracts/${externalId}`,
+        evidenceClass: 'external-contract',
+        confidence: 'medium',
+      },
+    },
+  });
+  const activeRelationship = relationship(
+    'frame-review-boundary',
+    'frame-question',
+    'review-boundary',
+    'Review boundary',
+  );
+  const dimmedRelationship = relationship(
+    'evidence-archive-boundary',
+    'inspect-evidence',
+    'archive-boundary',
+    'Archive boundary',
+  );
+  const accepted = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  const proposal = await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
+    expectedGraphUpdatedAt: accepted.graph.updatedAt,
+    rationale: 'E2E collapsed scenario system-boundary projection.',
+    operations: [
+      {
+        type: 'update_graph_capabilities',
+        patch: { provenance: { externalOrchestrationAvailable: true } },
+      },
+      { type: 'add_relationship', relationship: activeRelationship },
+      { type: 'add_relationship', relationship: dimmedRelationship },
+    ],
+  });
+  expect(proposal).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  await app.getByRole('button', { name: 'Approve' }).click();
+  await app.getByRole('button', { name: 'Collapse inspector' }).click();
+  await app.getByRole('button', { name: 'Collapse subgraph Research cell' }).click();
+  await app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' }).click();
+
+  const frozen = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  const scenarios = await callWebMcpTool<ScenarioResult>(app, 'get_branch_scenarios', {});
+  const selected = scenarios.scenarios?.find((scenario) =>
+    scenario.orderedPath.includes('frame-question') &&
+    !scenario.orderedPath.includes('inspect-evidence'),
+  );
+  expect(selected).toBeDefined();
+  expect(selected?.relationshipAnnotations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ relationshipId: activeRelationship.id, family: 'external-orchestration' }),
+  ]));
+  expect(selected?.relationshipAnnotations).not.toEqual(expect.arrayContaining([
+    expect.objectContaining({ relationshipId: dimmedRelationship.id }),
+  ]));
+
+  const scenarioRow = app.locator(`button[data-scenario-id="${selected!.id}"]`);
+  await scenarioRow.click();
+  await expect(scenarioRow).toHaveAttribute('aria-pressed', 'true');
+
+  const proxy = canvas.getByTestId('rf__edge-subgraph-proxy:research-start:research-cell');
+  const activeBoundary = canvas.getByTestId('rf__edge-system-relationship:frame-review-boundary');
+  const dimmedBoundary = canvas.getByTestId('rf__edge-system-relationship:evidence-archive-boundary');
+  await expect(proxy).toHaveClass(/scenario-state--active/);
+  await expect(proxy).toHaveCSS('opacity', '1');
+  await expect(activeBoundary).toHaveClass(/scenario-state--active/);
+  await expect(activeBoundary).toHaveCSS('opacity', '1');
+  await expect(dimmedBoundary).toHaveClass(/scenario-state--dimmed/);
+  await expect(dimmedBoundary).toHaveCSS('opacity', '0.22');
+  await expect(canvas.getByTestId('rf__node-external-system:review-boundary')).toHaveClass(/scenario-state--active/);
+  await expect(canvas.getByTestId('rf__node-external-system:archive-boundary')).toHaveClass(/scenario-state--dimmed/);
+  await expect(app.getByRole('button', { name: /External orchestration: Review boundary.*Not a native control edge/ })).toBeVisible();
+
+  const afterSelection = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(afterSelection.graph).toEqual(frozen.graph);
+  expect(afterSelection.graph.edges.some((edge) => edge.id.startsWith('subgraph-proxy:'))).toBe(false);
+  expect(afterSelection.graph.relationships).toEqual([activeRelationship, dimmedRelationship]);
+  expect(selected?.traversedEdges.flatMap((edge) => [edge.source, edge.target])).not.toEqual(
+    expect.arrayContaining(['review-boundary', 'archive-boundary']),
+  );
 });

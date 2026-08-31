@@ -154,17 +154,33 @@ test('approval applies a multi-operation proposal atomically and persists after 
     rationale: 'E2E atomic two-node approval.',
   });
   expect(proposal.ok).toBe(true);
-  expect(classifierLabel(await callWebMcpTool<GraphRead>(app, 'get_graph', {}))).toBe(
-    'Classifier Agent',
-  );
+  const pending = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(pending.graph).toEqual(accepted.graph);
+
+  const comparison = app.getByRole('region', { name: 'Before / Proposed' });
+  await expect(comparison.getByRole('heading', { name: 'Before', exact: true })).toBeVisible();
+  await expect(comparison.getByRole('heading', { name: 'Proposed', exact: true })).toBeVisible();
+  const summary = comparison.getByLabel('Proposal diff summary');
+  await expect(summary).toContainText('updated classifier (label)');
+  await expect(summary).toContainText('updated billing (label)');
+  await expect(comparison.locator('.proposal-overview-canvas')).toHaveCount(2);
+  expect(await comparison.locator('.proposal-overview-canvas').evaluateAll(
+    (canvases) => canvases.every((canvas) => canvas.getAttribute('aria-hidden') === 'true' && (canvas as HTMLElement & { inert: boolean }).inert),
+  )).toBe(true);
 
   await app.getByRole('button', { name: 'Approve' }).click();
+  await expect(app.getByRole('radiogroup', { name: 'Canvas projection' }).getByRole('radio', { name: 'Design', exact: true })).toHaveAttribute('aria-checked', 'true');
   let approved = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(approved.pendingProposal).toBeUndefined();
   expect(classifierLabel(approved)).toBe('Atomic Classifier');
   expect(approved.graph.nodes.find((node) => node.id === 'billing')?.label).toBe('Atomic Billing');
 
   await app.reload();
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
   approved = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(classifierLabel(approved)).toBe('Atomic Classifier');
   expect(approved.graph.nodes.find((node) => node.id === 'billing')?.label).toBe('Atomic Billing');
@@ -187,13 +203,26 @@ test('approval detects a proposal made stale by a changed accepted timestamp', a
     localStorage.setItem(key, JSON.stringify(persisted));
   });
   await app.reload();
-  await app.getByRole('button', { name: 'Approve' }).click();
-
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
   await expect(app.getByText('stale', { exact: true })).toBeVisible();
-  await expect(app.getByText('Proposal is stale. Ask the agent to read the graph again.')).toBeVisible();
+  await expect(app.getByRole('status').filter({ hasText: 'No candidate was replayed against the current graph' })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Approve' })).toBeDisabled();
+  await expect(app.getByRole('button', { name: 'Reject' })).toBeEnabled();
+  await expect(app.getByRole('heading', { name: 'Before / Proposed' })).toHaveCount(0);
+  await expect(app.getByText('Stale Preview', { exact: true })).toHaveCount(0);
+  await expect(app.getByTestId('rf__node-classifier').getByText('Classifier Agent', { exact: true })).toBeVisible();
   expect(classifierLabel(await callWebMcpTool<GraphRead>(app, 'get_graph', {}))).toBe(
     'Classifier Agent',
   );
+
+  await app.getByRole('button', { name: 'Reject' }).click();
+  const rejected = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(rejected.pendingProposal).toBeUndefined();
+  expect(classifierLabel(rejected)).toBe('Classifier Agent');
 });
 
 test('frozen graph refuses agent proposals until a human unfreezes it', async ({ app }) => {
@@ -277,12 +306,22 @@ test('pending proposal persists across reload and rejection preserves accepted l
   );
 
   await app.reload();
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
   await expect(app.getByText('E2E proposal: Persisted Preview', { exact: true })).toBeVisible();
   expect(classifierLabel(await callWebMcpTool<GraphRead>(app, 'get_graph', {}))).toBe(
     'Classifier Agent',
   );
   await app.getByRole('button', { name: 'Reject' }).click();
   await app.reload();
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).pendingProposal).toBeUndefined();
   expect(classifierLabel(await callWebMcpTool<GraphRead>(app, 'get_graph', {}))).toBe(
     'Classifier Agent',
@@ -292,12 +331,27 @@ test('pending proposal persists across reload and rejection preserves accepted l
 test('reset is undoable and restores the previous accepted graph', async ({ app }) => {
   await loadResearchIntake(app);
   await app.getByRole('button', { name: 'Reset example graph' }).click();
-  await expect(app.getByText('Customer Support Workflow', { exact: true })).toBeVisible();
-  await expect(app.getByText('7 nodes · 8 branches', { exact: true })).toBeVisible();
+  await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toMatchObject({
+    id: 'customer-support-contract',
+    name: 'Customer Support Workflow',
+    nodes: expect.arrayContaining([expect.objectContaining({ id: 'classifier' })]),
+  });
+  await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
 
   await app.getByRole('button', { name: 'Undo' }).click();
-  await expect(app.getByText('Research Intake Routing', { exact: true })).toBeVisible();
-  await expect(app.getByText('9 nodes · 9 branches', { exact: true })).toBeVisible();
+  await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toMatchObject({
+    id: 'research-intake-routing-demo',
+    name: 'Research Intake Routing',
+  });
+  await expect(app.getByLabel('Graph status')).toContainText('9 nodes');
   await app.reload();
-  await expect(app.getByText('Research Intake Routing', { exact: true })).toBeVisible();
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
+  await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toMatchObject({
+    id: 'research-intake-routing-demo',
+    name: 'Research Intake Routing',
+  });
 });

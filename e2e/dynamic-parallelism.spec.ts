@@ -75,7 +75,7 @@ async function loadParallelResearchDemo(app: Parameters<typeof callWebMcpTool>[0
     await dialog.accept();
   });
   await app.getByRole('button', { name: 'Load Parallel research · Send ×N' }).click();
-  await expect(app.getByText('Parallel research · Send ×N', { exact: true })).toBeVisible();
+  await expect(app.getByTestId('rf__node-generate-queries')).toBeVisible();
   await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph.id).toBe(
     'dynamic-parallelism-merge-demo',
   );
@@ -203,12 +203,20 @@ test('invalid Send payload and Merge reducer stay visibly invalid and cannot fre
   );
 });
 
-test('Runtime view projects only read-only fixture instances and never changes get_graph', async ({ app }) => {
+test('Design, Runtime, Proposal, and Scenario remain read-only presentations over accepted truth', async ({ app }) => {
   await loadParallelResearchDemo(app);
   const acceptedBefore = (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph;
+  const projection = app.getByRole('radiogroup', { name: 'Canvas projection' });
+  const mode = (label: string) => projection.getByRole('radio', {
+    name: new RegExp(`^${label}(?: unavailable:.*)?$`),
+  });
 
-  await expect(app.getByRole('radio', { name: 'Runtime' })).toBeEnabled();
-  await app.getByRole('radio', { name: 'Runtime' }).click();
+  await expect(mode('Design')).toHaveAttribute('aria-checked', 'true');
+  await expect(mode('Scenario')).toBeDisabled();
+  await expect(mode('Proposal')).toBeDisabled();
+  await expect(mode('Runtime')).toBeEnabled();
+  await mode('Runtime').click();
+  await expect(mode('Runtime')).toHaveAttribute('aria-checked', 'true');
   await expect(app.getByText('Runtime projection · observed instances are read-only and do not change the contract')).toBeVisible();
   await expect(app.locator('.runtime-instance-node')).toHaveCount(3);
   await expect(app.locator('.runtime-instance-node[data-template-node-id="search-evidence"]')).toHaveCount(3);
@@ -219,9 +227,41 @@ test('Runtime view projects only read-only fixture instances and never changes g
   await expect(app.getByText('Observed trace projection — read-only. This instance is not part of the accepted graph and cannot change the contract.')).toBeVisible();
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(acceptedBefore);
 
-  await app.getByRole('radio', { name: 'Design' }).click();
+  await mode('Design').click();
   await expect(app.locator('.runtime-instance-node')).toHaveCount(0);
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(acceptedBefore);
+
+  expect(await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
+    expectedGraphUpdatedAt: acceptedBefore.updatedAt,
+    rationale: 'E2E presentation-only proposal review.',
+    operations: [
+      { type: 'update_node', nodeId: 'generate-queries', patch: { label: 'Proposed query planner' } },
+    ],
+  })).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  await expect(mode('Proposal')).toHaveAttribute('aria-checked', 'true');
+  await expect(mode('Design')).toBeDisabled();
+  await expect(mode('Scenario')).toBeDisabled();
+  await expect(mode('Runtime')).toBeDisabled();
+  await expect(app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' })).toBeDisabled();
+  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(acceptedBefore);
+
+  await app.getByRole('button', { name: 'Reject' }).click();
+  await expect(mode('Design')).toHaveAttribute('aria-checked', 'true');
+  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(acceptedBefore);
+
+  await app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' }).click();
+  await expect(mode('Scenario')).toHaveAttribute('aria-checked', 'true');
+  const frozen = (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph;
+  expect(frozen.status).toBe('frozen');
+  expect(frozen.nodes).toEqual(acceptedBefore.nodes);
+  expect(frozen.edges).toEqual(acceptedBefore.edges);
+
+  await app.getByRole('button', { name: 'Unfreeze contract; currently frozen' }).click();
+  await expect(mode('Design')).toHaveAttribute('aria-checked', 'true');
+  const unfrozen = (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph;
+  expect(unfrozen.status).toBe('draft');
+  expect(unfrozen.nodes).toEqual(acceptedBefore.nodes);
+  expect(unfrozen.edges).toEqual(acceptedBefore.edges);
 });
 
 test('three review-only tools preserve P3 proposal authority and frozen Send scenario/download metadata', async ({ app }) => {
@@ -237,7 +277,8 @@ test('three review-only tools preserve P3 proposal authority and frozen Send sce
   expect(schema).toContain('"merge"');
   expect(schema).toContain('"loopCap"');
   expect(propose.description).toContain('never creates runtime workers');
-  expect(propose.description).toContain('cannot approve, reject, respond, resume, freeze, mutate runtime projections');
+  expect(propose.description).toContain('cannot approve, reject, respond, resume, freeze, unfreeze');
+  expect(propose.description).toContain('mutate runtime projections');
 
   const accepted = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   const candidate = parallelProposal(accepted.graph.updatedAt);

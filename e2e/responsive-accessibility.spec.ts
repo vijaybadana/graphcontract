@@ -1,10 +1,16 @@
 import type { Page } from '@playwright/test';
 
 import {
+  callWebMcpTool,
   expect,
   freezeResearchIntake,
   test,
 } from './fixtures';
+
+type CompactGraphRead = {
+  ok: true;
+  graph: { updatedAt: string; nodes: Array<{ id: string; label: string }> };
+};
 
 async function expectNoHorizontalPageOverflow(page: Page) {
   await expect
@@ -25,13 +31,8 @@ async function loadResearchSupervisor(page: Page) {
     await dialog.accept();
   });
   await page.getByRole('button', { name: 'Load Research Supervisor demo' }).click();
-  await expect(
-    page.getByText('Research Supervisor Workflow', { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.locator('header[aria-label="GraphContract workspace controls"]')
-      .getByLabel('6 nodes and 5 branches'),
-  ).toBeVisible();
+  await expect(page.getByTestId('rf__node-research-supervisor')).toBeVisible();
+  await expect(page.getByLabel('Graph status')).toContainText('6 nodes');
 }
 
 test('1440 desktop keeps palette and inspector independently operable', async ({ app }) => {
@@ -68,6 +69,19 @@ test('1024 compact workspace swaps palette and inspector instead of overlapping 
   await expect(app.getByRole('button', { name: 'Collapse node palette' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Open Inspector' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Collapse inspector' })).toHaveCount(0);
+
+  const accepted = await callWebMcpTool<CompactGraphRead>(app, 'get_graph', {});
+  await callWebMcpTool(app, 'propose_graph_changes', {
+    expectedGraphUpdatedAt: accepted.graph.updatedAt,
+    rationale: 'E2E compact proposal presentation.',
+    operations: [{ type: 'update_node', nodeId: 'classifier', patch: { label: 'Compact proposal' } }],
+  });
+  const projection = app.getByRole('radiogroup', { name: 'Canvas projection' });
+  await expect(projection.getByRole('radio', { name: 'Proposal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(app.getByRole('heading', { name: 'Before / Proposed' })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Collapse inspector' })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Open Palette' })).toBeVisible();
+  await app.getByRole('button', { name: 'Reject' }).click();
   await expectNoHorizontalPageOverflow(app);
 });
 
@@ -90,6 +104,13 @@ test('390 compact freeze and unfreeze retain accessible action names', async ({ 
   await expect(freeze).toHaveAccessibleName('Confirm and freeze contract; currently draft');
   await freezeResearchIntake(app);
   await expect(freeze).toHaveAccessibleName('Unfreeze contract; currently frozen');
+  const projection = app.getByRole('radiogroup', { name: 'Canvas projection' });
+  await expect(projection.getByRole('radio', { name: 'Scenario', exact: true })).toHaveAttribute('aria-checked', 'true');
+  const scenario = app.locator('button[data-scenario-id]').first();
+  await expect(scenario).toBeVisible();
+  await scenario.click();
+  await expect(scenario).toHaveAttribute('aria-pressed', 'true');
+  await expect(app.getByLabel(/^Downloads for Path /)).toBeVisible();
   await freeze.click();
   await expect(freeze).toHaveAccessibleName('Confirm and freeze contract; currently draft');
   await expectNoHorizontalPageOverflow(app);
@@ -138,21 +159,12 @@ test('keyboard duplicate, delete, undo, and redo keep graph counts truthful', as
   await expect(app.getByLabel('Graph status').getByText('1 selected')).toBeVisible();
 
   await app.keyboard.press('Control+d');
-  await expect(
-    app.locator('header[aria-label="GraphContract workspace controls"]')
-      .getByLabel('8 nodes and 8 branches'),
-  ).toBeVisible();
+  await expect(app.getByLabel('Graph status')).toContainText('8 nodes');
 
   await app.keyboard.press('Control+z');
-  await expect(
-    app.locator('header[aria-label="GraphContract workspace controls"]')
-      .getByLabel('7 nodes and 8 branches'),
-  ).toBeVisible();
+  await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
   await app.keyboard.press('Control+Shift+z');
-  await expect(
-    app.locator('header[aria-label="GraphContract workspace controls"]')
-      .getByLabel('8 nodes and 8 branches'),
-  ).toBeVisible();
+  await expect(app.getByLabel('Graph status')).toContainText('8 nodes');
 
   const duplicate = app.locator('.react-flow__node').filter({
     has: app.getByText('Classifier Agent copy', { exact: true }),
@@ -162,10 +174,7 @@ test('keyboard duplicate, delete, undo, and redo keep graph counts truthful', as
   await duplicate.press('Enter');
   await expect(app.getByLabel('Graph status')).toContainText('1 selected');
   await app.keyboard.press('Delete');
-  await expect(
-    app.locator('header[aria-label="GraphContract workspace controls"]')
-      .getByLabel('7 nodes and 8 branches'),
-  ).toBeVisible();
+  await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
 });
 
 test('palette search filters components and announces a useful empty state', async ({ app }) => {

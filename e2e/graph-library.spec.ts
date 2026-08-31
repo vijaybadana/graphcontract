@@ -18,7 +18,18 @@ type GraphRead = {
     edges: Array<{ id: string; mode: string }>;
     subgraphs: Array<{ id: string }>;
   };
+  validation: { validForFreeze: boolean; issues: unknown[] };
   pendingProposal?: { status: string };
+};
+
+type ScenarioRead = {
+  ok: boolean;
+  graphId?: string;
+  scenarios?: Array<{
+    id: string;
+    name: string;
+    orderedPath: string[];
+  }>;
 };
 
 const entries = [
@@ -122,7 +133,6 @@ test('library replacement confirms Cancel, then Open, Undo, reload, and automati
   await expect(app.getByRole('dialog')).toBeVisible();
 
   await openEntry(app, 'Guarded Coding-Agent Delivery');
-  await expect(app.getByText('Guarded Coding-Agent Delivery', { exact: true })).toBeVisible();
   expect((await readGraph(app)).id).toBe('library-guarded-coding-agent-delivery');
   await expect
     .poll(() => app.locator('.react-flow__viewport').getAttribute('style'))
@@ -165,6 +175,56 @@ test('library loads representative subgraph, HITL, and Send/Merge workflows onto
   await expect(app.locator('[data-edge-id="questions-send"]')).toHaveAttribute('data-mode', 'send');
 });
 
+test('all ten library templates freeze, select a scenario, and persist through reload', async ({ app }) => {
+  test.setTimeout(240_000);
+
+  for (const [title] of entries) {
+    await test.step(title, async () => {
+      await openLibrary(app);
+      await openEntry(app, title);
+
+      const loaded = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+      expect(loaded.graph).toMatchObject({ name: title, status: 'draft' });
+      expect(loaded.validation).toEqual({ validForFreeze: true, issues: [] });
+
+      await app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' }).click();
+      const projection = app.getByRole('radiogroup', { name: 'Canvas projection' });
+      await expect(projection.getByRole('radio', { name: 'Scenario', exact: true })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+
+      const scenarios = await callWebMcpTool<ScenarioRead>(app, 'get_branch_scenarios', {});
+      expect(scenarios).toMatchObject({ ok: true, graphId: loaded.graph.id });
+      const selected = scenarios.scenarios?.[0];
+      expect(selected).toBeDefined();
+      const scenarioRow = app.locator(`button[data-scenario-id="${selected!.id}"]`);
+      await scenarioRow.click();
+      await expect(scenarioRow).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(() => app.locator('.scenario-state--active').count()).toBeGreaterThan(0);
+
+      const frozen = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+      expect(frozen.graph.status).toBe('frozen');
+      await app.reload();
+      await expect.poll(() => webMcpToolNames(app)).toEqual([
+        'get_branch_scenarios',
+        'get_graph',
+        'propose_graph_changes',
+      ]);
+
+      const reloaded = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+      expect(reloaded.graph).toEqual(frozen.graph);
+      expect(reloaded.validation).toEqual({ validForFreeze: true, issues: [] });
+      expect(await callWebMcpTool<ScenarioRead>(app, 'get_branch_scenarios', {})).toEqual(scenarios);
+      await expect(app.locator('.scenario-state--active')).toHaveCount(0);
+      await expect(app.locator('.scenario-state--dimmed')).toHaveCount(0);
+
+      await app.getByRole('button', { name: 'Unfreeze contract; currently frozen' }).click();
+      await expect.poll(async () => (await readGraph(app)).status).toBe('draft');
+    });
+  }
+});
+
 test('frozen and pending proposals block library replacement while the drawer remains reachable', async ({ app }) => {
   await app.getByRole('button', { name: /confirm (?:and|&) freeze/i }).click();
   await openLibrary(app);
@@ -183,7 +243,9 @@ test('frozen and pending proposals block library replacement while the drawer re
   await openLibrary(app);
   const proposalAction = app.getByRole('button', { name: /Open Hierarchical Deep Research unavailable/ });
   await expect(proposalAction).toBeDisabled();
-  await expect(app.getByRole('status')).toContainText('Library replacement is blocked while a proposal awaits human review.');
+  await expect(app.getByRole('status').filter({
+    hasText: 'Library replacement is blocked while a proposal awaits human review.',
+  })).toBeVisible();
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).pendingProposal).toMatchObject({ status: 'pending' });
 });
 
