@@ -240,6 +240,70 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().graph.edges.some((edge) => edge.id === 'billing-refund')).toBe(false);
   });
 
+  it('moves a selected child to its visible parent when collapse hides the child', () => {
+    useGraphStore.getState().createSubgraph({ position: { x: 300, y: 80 } });
+    const subgraphId = useGraphStore.getState().selection.primary!.id;
+    useGraphStore.getState().assignNodesToSubgraph(subgraphId, ['billing']);
+    useGraphStore.setState({ past: [], future: [] });
+    useGraphStore.getState().setSelection({
+      nodeIds: ['billing'],
+      subgraphIds: [],
+      edgeIds: [],
+      primary: { type: 'node', id: 'billing' },
+    });
+    const expandedGraph = structuredClone(useGraphStore.getState().graph);
+
+    useGraphStore.getState().setSubgraphCollapsed(subgraphId, true);
+
+    expect(useGraphStore.getState().selection).toEqual({
+      nodeIds: [],
+      subgraphIds: [subgraphId],
+      edgeIds: [],
+      primary: { type: 'subgraph', id: subgraphId },
+    });
+    expect(useGraphStore.getState().past).toHaveLength(1);
+    expect(useGraphStore.getState().past[0].graph).toEqual(expandedGraph);
+
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.subgraphs.find(
+      (subgraph) => subgraph.id === subgraphId,
+    )?.collapsed).toBe(false);
+    expect(useGraphStore.getState().selection.primary).toEqual({
+      type: 'subgraph',
+      id: subgraphId,
+    });
+
+    useGraphStore.getState().redo();
+    expect(useGraphStore.getState().graph.subgraphs.find(
+      (subgraph) => subgraph.id === subgraphId,
+    )?.collapsed).toBe(true);
+    expect(useGraphStore.getState().selection.primary).toEqual({
+      type: 'subgraph',
+      id: subgraphId,
+    });
+  });
+
+  it('moves a selected internal edge to its visible parent when collapse hides the route', () => {
+    useGraphStore.getState().createSubgraph({ position: { x: 300, y: 80 } });
+    const subgraphId = useGraphStore.getState().selection.primary!.id;
+    useGraphStore.getState().assignNodesToSubgraph(subgraphId, ['classifier', 'billing']);
+    useGraphStore.getState().setSelection({
+      nodeIds: [],
+      subgraphIds: [],
+      edgeIds: ['classifier-billing'],
+      primary: { type: 'edge', id: 'classifier-billing' },
+    });
+
+    useGraphStore.getState().setSubgraphCollapsed(subgraphId, true);
+
+    expect(useGraphStore.getState().selection).toEqual({
+      nodeIds: [],
+      subgraphIds: [subgraphId],
+      edgeIds: [],
+      primary: { type: 'subgraph', id: subgraphId },
+    });
+  });
+
   it('loads the separate demo explicitly', () => {
     const previousGraphId = useGraphStore.getState().graph.id;
     useGraphStore.getState().loadResearchSupervisorDemo();

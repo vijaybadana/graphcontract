@@ -494,7 +494,7 @@ export function GraphWorkspace() {
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
     projectedEdges: canvas.edges,
-    selectedNodeIds: selection.nodeIds,
+    selectedNodeIds: [...selection.nodeIds, ...selection.subgraphIds],
     selectedEdgeIds: selection.edgeIds,
     editable: canvasEditable,
     onCommitPositions: moveCanvasElements,

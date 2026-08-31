@@ -57,7 +57,7 @@ export function positionsForCanvasCommit(
   );
 }
 
-function reconcileProjectedNodes(
+export function reconcileProjectedNodes(
   currentNodes: CanvasFlowNode[],
   projectedNodes: CanvasFlowNode[],
   selectedNodeIds: string[],
@@ -75,7 +75,7 @@ function reconcileProjectedNodes(
     changed = true;
     return {
       ...projectedNode,
-      selected: currentNode.selected,
+      selected: selectedNodeIds.includes(projectedNode.id),
       measured: currentNode.measured,
     };
   });

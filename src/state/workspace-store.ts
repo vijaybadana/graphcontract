@@ -143,6 +143,46 @@ export function selectionForGraph(
   return sameSelection(selection, reconciled) ? selection : reconciled;
 }
 
+function selectionForCollapsedSubgraph(
+  graph: WorkflowGraph,
+  selection: WorkspaceSelection,
+  subgraphId: string,
+): WorkspaceSelection {
+  const memberNodeIds = new Set(
+    graph.nodes
+      .filter((node) => node.parentId === subgraphId)
+      .map((node) => node.id),
+  );
+  const hiddenSelectedNodeIds = new Set(
+    selection.nodeIds.filter((id) => memberNodeIds.has(id)),
+  );
+  const hiddenSelectedEdgeIds = new Set(
+    graph.edges
+      .filter(
+        (edge) =>
+          selection.edgeIds.includes(edge.id) &&
+          memberNodeIds.has(edge.source) &&
+          memberNodeIds.has(edge.target),
+      )
+      .map((edge) => edge.id),
+  );
+  if (hiddenSelectedNodeIds.size === 0 && hiddenSelectedEdgeIds.size === 0) return selection;
+
+  const nodeIds = selection.nodeIds.filter((id) => !hiddenSelectedNodeIds.has(id));
+  const edgeIds = selection.edgeIds.filter((id) => !hiddenSelectedEdgeIds.has(id));
+  const subgraphIds = selection.subgraphIds.includes(subgraphId)
+    ? selection.subgraphIds
+    : [...selection.subgraphIds, subgraphId];
+  const primary =
+    selection.primary &&
+    ((selection.primary.type === 'node' && hiddenSelectedNodeIds.has(selection.primary.id)) ||
+      (selection.primary.type === 'edge' && hiddenSelectedEdgeIds.has(selection.primary.id)))
+      ? { type: 'subgraph' as const, id: subgraphId }
+      : selection.primary;
+  const reconciled = { nodeIds, subgraphIds, edgeIds, primary };
+  return sameSelection(selection, reconciled) ? selection : reconciled;
+}
+
 /** Returns true only for a boundary edge currently rendered as a collapsed
  * subgraph proxy. Selection is intentionally not consulted, so a graph edit
  * between selection and Delete cannot make a proxy edge deletable. */
@@ -264,8 +304,16 @@ export const useGraphStore = create<WorkspaceStore>()(
           commit(workspace.updateStepRetry(currentCore(), id, retry)),
         updateSubgraph: (id, patch) =>
           commit(workspace.updateSubgraph(currentCore(), id, patch)),
-        setSubgraphCollapsed: (id, collapsed) =>
-          commit(workspace.setSubgraphCollapsed(currentCore(), id, collapsed)),
+        setSubgraphCollapsed: (id, collapsed) => {
+          const transition = workspace.setSubgraphCollapsed(currentCore(), id, collapsed);
+          const selection = get().selection;
+          commit(transition, {
+            selection:
+              transition.changed && collapsed
+                ? selectionForCollapsedSubgraph(transition.state.graph, selection, id)
+                : selection,
+          });
+        },
         assignNodesToSubgraph: (subgraphId, nodeIds) =>
           commit(workspace.assignNodesToSubgraph(currentCore(), subgraphId, nodeIds)),
         removeNodeFromSubgraph: (nodeId) =>
