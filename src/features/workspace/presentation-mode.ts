@@ -26,7 +26,7 @@ export function presentationModeAvailable(
   mode: WorkspacePresentationMode,
   availability: WorkspacePresentationAvailability,
 ): boolean {
-  if (mode === 'design') return true;
+  if (mode === 'design') return !availability.proposalPending;
   if (mode === 'proposal') return availability.proposalPending;
   if (mode === 'scenario') return availability.scenarioCount > 0 && !availability.proposalPending;
   return availability.runtimeAvailable && !availability.proposalPending;

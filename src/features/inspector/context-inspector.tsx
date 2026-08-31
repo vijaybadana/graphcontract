@@ -358,16 +358,16 @@ export function ContextInspector({
   const editable = graph.status === 'draft' && !proposalUnderReview && !readOnly;
   const { fitView } = useReactFlow();
   const acceptedGraph = reviewProjection?.accepted ?? graph;
-  const previewGraph = reviewProjection?.kind === 'comparable'
+  const displayGraph = reviewProjection?.kind === 'comparable'
     ? reviewProjection.candidate
     : acceptedGraph;
   const primary = selection.primary;
   const node = primary?.type === 'node'
-    ? previewGraph.nodes.find((item) => item.id === primary.id)
+    ? displayGraph.nodes.find((item) => item.id === primary.id)
     : undefined;
   const subgraph =
     primary?.type === 'subgraph'
-      ? previewGraph.subgraphs.find((item) => item.id === primary.id)
+      ? displayGraph.subgraphs.find((item) => item.id === primary.id)
       : undefined;
   const acceptedEdge =
     primary?.type === 'edge'
@@ -375,10 +375,10 @@ export function ContextInspector({
       : undefined;
   const previewEdge =
     primary?.type === 'edge' && reviewProjection?.kind === 'comparable'
-      ? previewGraph.edges.find((item) => item.id === primary.id)
+      ? displayGraph.edges.find((item) => item.id === primary.id)
       : undefined;
   const edge = previewEdge ?? acceptedEdge;
-  const edgeGraph = previewEdge ? previewGraph : acceptedGraph;
+  const edgeGraph = previewEdge ? displayGraph : acceptedGraph;
   const edgeTarget = edge ? edgeGraph.nodes.find((node) => node.id === edge.target) : undefined;
   const edgeIssues = edge ? edgeValidationIssues(edgeGraph, edge) : [];
   const edgeIsLoop = edge ? topologyDerivedLoopEdgeIds(edgeGraph).has(edge.id) : false;
@@ -386,9 +386,9 @@ export function ContextInspector({
   const edgeDestinations = edge ? edgeDestinationOptions(edgeGraph, edge) : [];
   const sendDestinations = edge ? sendDestinationOptions(edgeGraph, edge) : [];
   const selectedNodeIds = selection.nodeIds.filter((nodeId) =>
-    graph.nodes.some((node) => node.id === nodeId),
+    displayGraph.nodes.some((node) => node.id === nodeId),
   );
-  const parentOptions = subgraphParentOptions(previewGraph.subgraphs);
+  const parentOptions = subgraphParentOptions(displayGraph.subgraphs);
   const stepSectionRefs = useRef<
     Partial<Record<StepModifierInspectorSection, HTMLElement>>
   >({});
@@ -484,7 +484,7 @@ export function ContextInspector({
           </p>
           <GraphDurabilitySettings
             key={graphSettingsRequest?.requestId ?? 'default'}
-            graph={graph}
+            graph={displayGraph}
             editable={editable}
             initialTab={graphSettingsRequest?.tab}
             focusInitialTab={Boolean(graphSettingsRequest)}
@@ -586,11 +586,11 @@ export function ContextInspector({
               </div>
             </div>
           </section>
-          <SubgraphDurabilityOverrides graph={graph} subgraph={subgraph} editable={editable} />
+          <SubgraphDurabilityOverrides graph={displayGraph} subgraph={subgraph} editable={editable} />
           <section className="context-inspector__group context-inspector__group--tinted" aria-labelledby="subgraph-members-heading">
             <div className="context-inspector__toggle-row">
               <h3 id="subgraph-members-heading">Member nodes</h3>
-              <span className="context-inspector__member-count">{graph.nodes.filter((node) => node.parentId === subgraph.id).length}</span>
+              <span className="context-inspector__member-count">{displayGraph.nodes.filter((node) => node.parentId === subgraph.id).length}</span>
             </div>
             <p className="context-inspector__help">Add a Start and End node before freezing this subgraph.</p>
             <button
@@ -602,7 +602,7 @@ export function ContextInspector({
               Add selected nodes ({selectedNodeIds.length})
             </button>
             <ul className="context-inspector__member-list">
-              {graph.nodes
+              {displayGraph.nodes
                 .filter((node) => node.parentId === subgraph.id)
                 .map((member) => (
                   <li key={member.id}>
@@ -620,7 +620,7 @@ export function ContextInspector({
                     </button>
                   </li>
                 ))}
-              {graph.nodes.every((node) => node.parentId !== subgraph.id) && (
+              {displayGraph.nodes.every((node) => node.parentId !== subgraph.id) && (
                 <li className="context-inspector__member-empty">No member nodes yet.</li>
               )}
             </ul>
@@ -813,9 +813,9 @@ export function ContextInspector({
                       <button
                         type="button"
                         className="secondary-button"
-                        disabled={!editable || !graph.edges.some((edge) => edge.source === node.id)}
+                        disabled={!editable || !displayGraph.edges.some((edge) => edge.source === node.id)}
                         onClick={() => {
-                          const edge = graph.edges.find((candidate) => candidate.source === node.id);
+                          const edge = displayGraph.edges.find((candidate) => candidate.source === node.id);
                           if (!edge) return;
                           updateHitlResponse({
                             ...node.hitl!.response!,
@@ -823,7 +823,7 @@ export function ContextInspector({
                               ...node.hitl!.response!.allowedOutcomes,
                               {
                                 id: localId('outcome'),
-                                label: graph.nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target,
+                                label: displayGraph.nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target,
                                 resumeNodeId: edge.target,
                               },
                             ],
@@ -834,11 +834,11 @@ export function ContextInspector({
                       </button>
                     </div>
                     {node.hitl.response?.allowedOutcomes.map((outcome, index) => {
-                      const destinations = graph.edges
+                      const destinations = displayGraph.edges
                         .filter((edge) => edge.source === node.id)
                         .map((edge) => ({
                           value: edge.target,
-                          label: `${graph.nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target} · ${edge.target}`,
+                          label: `${displayGraph.nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target} · ${edge.target}`,
                         }));
                       return (
                         <div key={`${outcome.id}-${index}`} className="context-inspector__contract-item">
@@ -915,7 +915,7 @@ export function ContextInspector({
               )}
             </section>
             <StepDurabilitySettings
-              graph={graph}
+              graph={displayGraph}
               node={node}
               editable={editable}
               storeAccessRef={(element) => { stepSectionRefs.current.storeAccess = element ?? undefined; }}

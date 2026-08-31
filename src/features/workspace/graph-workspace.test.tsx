@@ -35,6 +35,8 @@ function renderWorkspace(compact: boolean) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  if (useGraphStore.getState().graph.status === 'frozen') useGraphStore.getState().unfreezeGraph();
+  if (useGraphStore.getState().proposal) useGraphStore.getState().rejectProposal();
   useGraphStore.getState().resetGraph();
   useGraphStore.setState({
     selection: { nodeIds: [], subgraphIds: [], edgeIds: [], primary: null },
@@ -249,6 +251,69 @@ describe('GraphWorkspace subgraph creation', () => {
     await waitFor(() => expect(reset.disabled).toBe(false));
     expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier')?.label).toBe('Approved classifier');
   }, 10_000);
+
+  it('keeps scenario selection as a projection and clears highlighting when returning to Design', async () => {
+    renderWorkspace(false);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm and freeze contract; currently draft' }));
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: 'Scenario' }).getAttribute('aria-checked')).toBe('true');
+    });
+
+    const scenarioButton = document.querySelector<HTMLButtonElement>('[data-scenario-id]');
+    expect(scenarioButton).toBeTruthy();
+    fireEvent.click(scenarioButton!);
+    await waitFor(() => {
+      expect(document.querySelector('.scenario-state--active')).toBeTruthy();
+      expect(document.querySelector('.scenario-state--dimmed')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Design' }));
+    await waitFor(() => {
+      expect(document.querySelector('.scenario-state--active')).toBeNull();
+      expect(document.querySelector('.scenario-state--dimmed')).toBeNull();
+    });
+    expect(useGraphStore.getState().graph.status).toBe('frozen');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unfreeze contract; currently frozen' }));
+    await waitFor(() => {
+      expect(useGraphStore.getState().graph.status).toBe('draft');
+      expect(screen.getByRole('radio', { name: 'Design' }).getAttribute('aria-checked')).toBe('true');
+    });
+  }, 30_000);
+
+  it('automatically opens a read-only Proposal presentation without mutating the accepted graph', async () => {
+    const accepted = structuredClone(useGraphStore.getState().graph);
+    expect(useGraphStore.getState().submitProposal({
+      rationale: 'Review a stable-ID comparison.',
+      operations: [
+        { type: 'update_node', nodeId: 'classifier', patch: { label: 'Proposed classifier' } },
+        {
+          type: 'update_graph_capabilities',
+          patch: { store: { available: true, namespace: 'proposal-memory' } },
+        },
+      ],
+    }).ok).toBe(true);
+
+    renderWorkspace(false);
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: 'Proposal' }).getAttribute('aria-checked')).toBe('true');
+    });
+    expect(await screen.findByRole('heading', { name: 'Before / Proposed' })).toBeTruthy();
+    expect(screen.getByText('Before')).toBeTruthy();
+    expect(screen.getByText('Proposed')).toBeTruthy();
+    expect(screen.getByRole('button', {
+      name: /Store: Available, Direct Step R\/W available/i,
+    })).toBeTruthy();
+    expect(useGraphStore.getState().graph).toEqual(accepted);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    await waitFor(() => {
+      expect(useGraphStore.getState().proposal).toBeNull();
+      expect(screen.getByRole('radio', { name: 'Design' }).getAttribute('aria-checked')).toBe('true');
+    });
+    expect(useGraphStore.getState().graph).toEqual(accepted);
+  }, 30_000);
 
   it('clears stale local evidence and relationship selections after replacement, reset, load, or approval', () => {
     const selectedEvidence = {

@@ -96,17 +96,65 @@
 }
 
 .proposal-overview-summary li {
+  min-width: 0;
+}
+
+.proposal-overview-summary__section-heading {
   display: grid;
   grid-template-columns: minmax(70px, 0.42fr) minmax(0, 1fr);
   gap: 6px;
 }
 
-.proposal-overview-summary li > span:first-child {
+.proposal-overview-summary__section-heading > span:first-child {
   color: #24322b;
   font-weight: 760;
 }
 
-.proposal-overview-summary li > span:last-child {
+.proposal-overview-summary__section-heading > span:last-child {
+  overflow-wrap: anywhere;
+}
+
+.proposal-overview-summary__values {
+  display: grid;
+  gap: 5px;
+  margin: 5px 0 0 76px;
+}
+
+.proposal-overview-summary__entry {
+  min-width: 0;
+  border-left: 2px solid #dfe6e1;
+  padding-left: 6px;
+}
+
+.proposal-overview-summary__entry > strong {
+  color: #24322b;
+}
+
+.proposal-overview-summary__entry dl,
+.proposal-overview-summary__entry dd {
+  margin: 0;
+}
+
+.proposal-overview-summary__entry dl {
+  display: grid;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.proposal-overview-summary__entry dl > div {
+  min-width: 0;
+}
+
+.proposal-overview-summary__entry dt {
+  color: #59675f;
+  font-weight: 760;
+  overflow-wrap: anywhere;
+}
+
+.proposal-overview-summary__entry dd {
+  display: grid;
+  gap: 1px;
+  color: #35443c;
   overflow-wrap: anywhere;
 }
 
@@ -117,6 +165,10 @@
 
   .proposal-overview-canvas {
     height: 132px;
+  }
+
+  .proposal-overview-summary__values {
+    margin-left: 0;
   }
 }
 

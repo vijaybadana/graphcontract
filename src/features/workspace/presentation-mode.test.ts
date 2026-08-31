@@ -24,11 +24,13 @@ describe('workspace presentation mode', () => {
   it('makes a pending proposal the authoritative review projection', () => {
     const proposal = { ...available, proposalPending: true };
     expect(resolveWorkspacePresentationMode('design', proposal)).toBe('proposal');
+    expect(resolveWorkspacePresentationMode('proposal', proposal)).toBe('proposal');
     expect(resolveWorkspacePresentationMode('scenario', proposal)).toBe('proposal');
     expect(resolveWorkspacePresentationMode('runtime', proposal)).toBe('proposal');
     expect(presentationModeAvailable('scenario', proposal)).toBe(false);
     expect(presentationModeAvailable('runtime', proposal)).toBe(false);
     expect(presentationModeAvailable('proposal', proposal)).toBe(true);
+    expect(presentationModeAvailable('design', proposal)).toBe(false);
   });
 
   it('falls back to Design when the requested projection loses its source', () => {

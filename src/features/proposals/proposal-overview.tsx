@@ -139,6 +139,52 @@ function entrySummary(entry: ProposalComparisonEntry<unknown>) {
   return `${entry.state} ${entry.id}${fields}`;
 }
 
+function valueAtChangedPath(value: unknown, path: string): unknown {
+  if (path === '*') return value;
+  const normalizedPath = path
+    .replace(/^\*/, '')
+    .replace(/\[(\d+)\]/g, '.$1')
+    .replace(/^\./, '');
+  if (!normalizedPath) return value;
+
+  return normalizedPath.split('.').reduce<unknown>((current, segment) => {
+    if (Array.isArray(current)) return current[Number(segment)];
+    if (current && typeof current === 'object') {
+      return (current as Record<string, unknown>)[segment];
+    }
+    return undefined;
+  }, value);
+}
+
+function stableSerializableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableSerializableValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, stableSerializableValue(nested)]),
+    );
+  }
+  return value;
+}
+
+function accessibleComparisonValue(value: unknown): string {
+  if (value === undefined) return 'Not present';
+  if (value === null) return 'None';
+  if (typeof value === 'string') return value.length > 0 ? value : 'Empty text';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(stableSerializableValue(value));
+}
+
+function changedValueRows(entry: ProposalComparisonEntry<unknown>) {
+  const paths = entry.changedFields.length > 0 ? entry.changedFields : ['*'];
+  return paths.map((path) => ({
+    path,
+    before: accessibleComparisonValue(valueAtChangedPath(entry.before, path)),
+    after: accessibleComparisonValue(valueAtChangedPath(entry.after, path)),
+  }));
+}
+
 export function ProposalOverview({
   comparison,
 }: {
@@ -175,8 +221,32 @@ export function ProposalOverview({
           <ul>
             {sections.map((section) => (
               <li key={section.id}>
-                <span>{section.label}</span>
-                <span>{section.entries.map(entrySummary).join('; ')}</span>
+                <div className="proposal-overview-summary__section-heading">
+                  <span>{section.label}</span>
+                  <span>{section.entries.map(entrySummary).join('; ')}</span>
+                </div>
+                <div className="proposal-overview-summary__values">
+                  {section.entries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="proposal-overview-summary__entry"
+                      aria-label={`Changed values for ${entry.id}`}
+                    >
+                      <strong>{entry.id}</strong>
+                      <dl>
+                        {changedValueRows(entry).map((row) => (
+                          <div key={row.path}>
+                            <dt>{row.path === '*' ? 'Value' : row.path}</dt>
+                            <dd>
+                              <span>Before: {row.before}</span>
+                              <span>Proposed: {row.after}</span>
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  ))}
+                </div>
               </li>
             ))}
           </ul>

@@ -445,6 +445,54 @@ describe('ContextInspector routing details', () => {
     expect((screen.getByRole('textbox', { name: 'Sensitive authorization' }) as HTMLInputElement).disabled).toBe(true);
   });
 
+  it('uses one candidate display graph for proposal durability and subgraph membership details', () => {
+    const graph = structuredClone(researchSupervisorGraph);
+    const proposal = createProposal(graph, {
+      rationale: 'Review the complete scoped durability and membership candidate.',
+      operations: [
+        {
+          type: 'update_subgraph',
+          subgraphId: 'research-supervisor',
+          patch: { label: 'Proposed Research Supervisor' },
+        },
+        {
+          type: 'set_subgraph_capability_override',
+          subgraphId: 'research-supervisor',
+          override: { store: { available: true, namespace: 'proposal-memory' } },
+        },
+        {
+          type: 'remove_nodes_from_subgraph',
+          nodeIds: ['research-supervisor-tools'],
+        },
+      ],
+    }).proposal!;
+    const reviewProjection = proposalReviewToCanvasProjection(
+      deriveProposalComparison(graph, proposal),
+    );
+    useGraphStore.setState({
+      graph,
+      proposal,
+      selection: {
+        nodeIds: [],
+        subgraphIds: ['research-supervisor'],
+        edgeIds: [],
+        primary: { type: 'subgraph', id: 'research-supervisor' },
+      },
+    });
+
+    renderInspector(reviewProjection);
+
+    expect((screen.getByDisplayValue('Proposed Research Supervisor') as HTMLInputElement).disabled).toBe(true);
+    expect(document.querySelector('.context-inspector__member-count')?.textContent).toBe('3');
+    expect(screen.queryByText('Supervisor Tools')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Store' }));
+    expect((screen.getByRole('checkbox', { name: 'Override Store' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: 'Override Store' }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('textbox', { name: 'Store namespace' }) as HTMLInputElement).value).toBe('proposal-memory');
+    expect(graph.subgraphs[0].label).toBe('Research Supervisor');
+    expect(graph.nodes.filter((node) => node.parentId === 'research-supervisor')).toHaveLength(4);
+  });
+
   it('keeps Start and End structural so no Step-only fields are exposed', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     selectNode('start');

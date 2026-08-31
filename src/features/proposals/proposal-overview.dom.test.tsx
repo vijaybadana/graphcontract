@@ -54,6 +54,12 @@ describe('ProposalPanel overview', () => {
     expect(screen.getByLabelText('Proposal diff summary').textContent).toContain(
       'Nodesupdated clarify-request (label)',
     );
+    expect(screen.getByLabelText('Changed values for clarify-request').textContent).toContain(
+      'Before: Clarify Request',
+    );
+    expect(screen.getByLabelText('Changed values for clarify-request').textContent).toContain(
+      'Proposed: Clarify Research Request',
+    );
     expect(screen.getByText(proposal.rationale)).toBeTruthy();
     expect(screen.queryByText('Wrong raw replay label')).toBeNull();
     expect(screen.getByText('Clarify Research Request')).toBeTruthy();

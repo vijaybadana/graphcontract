@@ -45,6 +45,7 @@ describe('WorkspaceHeader freeze control', () => {
         canDelete={false}
         canFreeze
         canAutoLayout
+        scenarioCount={0}
         viewMode="design"
         runtimeAvailable={false}
         {...callbacks}
@@ -59,7 +60,7 @@ describe('WorkspaceHeader freeze control', () => {
     expect(onOpenLibrary).toHaveBeenCalledOnce();
   });
 
-  it('exposes Design and Runtime as an accessible projection switch with a truthful unavailable state', () => {
+  it('exposes all four presentation modes with truthful unavailable states', () => {
     const onViewModeChange = vi.fn();
     render(
       <WorkspaceHeader
@@ -80,6 +81,7 @@ describe('WorkspaceHeader freeze control', () => {
         canDelete={false}
         canFreeze
         canAutoLayout
+        scenarioCount={0}
         viewMode="design"
         runtimeAvailable={false}
         runtimeUnavailableReason="No runtime trace or fixture is available."
@@ -89,6 +91,8 @@ describe('WorkspaceHeader freeze control', () => {
     );
 
     expect(screen.getByRole('radio', { name: 'Design' }).getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByRole('radio', { name: /Scenario unavailable:/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('radio', { name: /Proposal unavailable:/ }) as HTMLButtonElement).disabled).toBe(true);
     const runtime = screen.getByRole('radio', { name: /Runtime unavailable:/ });
     expect((runtime as HTMLButtonElement).disabled).toBe(true);
     expect(runtime.getAttribute('title')).toBe('No runtime trace or fixture is available.');
@@ -113,6 +117,7 @@ describe('WorkspaceHeader freeze control', () => {
         canDelete={false}
         canFreeze
         canAutoLayout
+        scenarioCount={0}
         viewMode="runtime"
         runtimeAvailable
         {...callbacks}
@@ -123,6 +128,36 @@ describe('WorkspaceHeader freeze control', () => {
     expect(screen.getByRole('radio', { name: 'Runtime' }).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(design);
     expect(onViewModeChange).toHaveBeenCalledWith('design');
+
+    cleanup();
+    render(
+      <WorkspaceHeader
+        graphName="Frozen support"
+        graphStatus="frozen"
+        webMcpStatus="connected"
+        nodeCount={7}
+        edgeCount={6}
+        issueCount={0}
+        proposalPending={false}
+        libraryOpen={false}
+        libraryEntryCount={10}
+        paletteOpen
+        inspectorOpen
+        canUndo={false}
+        canRedo={false}
+        canDuplicate={false}
+        canDelete={false}
+        canFreeze={false}
+        canAutoLayout={false}
+        scenarioCount={3}
+        viewMode="scenario"
+        runtimeAvailable={false}
+        {...callbacks}
+        onViewModeChange={onViewModeChange}
+      />,
+    );
+    expect(screen.getByRole('radio', { name: 'Scenario' }).getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByRole('radio', { name: 'Scenario' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('keeps compact-safe status-aware names while preserving desktop labels', () => {
@@ -143,6 +178,7 @@ describe('WorkspaceHeader freeze control', () => {
       canDelete: false,
       canFreeze: true,
       canAutoLayout: true,
+      scenarioCount: 0,
       viewMode: 'design' as const,
       runtimeAvailable: false,
       runtimeUnavailableReason: 'No runtime trace or fixture is available.',
@@ -177,6 +213,7 @@ describe('WorkspaceHeader freeze control', () => {
       canDelete: false,
       canFreeze: false,
       canAutoLayout: false,
+      scenarioCount: 0,
       viewMode: 'design' as const,
       runtimeAvailable: false,
       runtimeUnavailableReason: 'No runtime trace or fixture is available.',
@@ -211,6 +248,7 @@ describe('WorkspaceHeader freeze control', () => {
       canDelete: false,
       canFreeze: true,
       canAutoLayout: true,
+      scenarioCount: 0,
       viewMode: 'design' as const,
       runtimeAvailable: false,
       ...callbacks,

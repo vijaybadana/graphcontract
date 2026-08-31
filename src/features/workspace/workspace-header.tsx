@@ -17,6 +17,7 @@ import {
 import type { Icon } from '@phosphor-icons/react';
 
 import './workspace-header.css';
+import type { WorkspacePresentationMode } from './presentation-mode';
 
 export type WebMcpStatus = 'unavailable' | 'registering' | 'connected' | 'error';
 
@@ -38,7 +39,8 @@ type WorkspaceHeaderProps = {
   canDelete: boolean;
   canFreeze: boolean;
   canAutoLayout: boolean;
-  viewMode: 'design' | 'runtime';
+  scenarioCount: number;
+  viewMode: WorkspacePresentationMode;
   runtimeAvailable: boolean;
   runtimeUnavailableReason?: string;
   onTogglePalette: () => void;
@@ -53,7 +55,7 @@ type WorkspaceHeaderProps = {
   onReset: () => void;
   onFreeze: () => void;
   onUnfreeze: () => void;
-  onViewModeChange: (mode: 'design' | 'runtime') => void;
+  onViewModeChange: (mode: WorkspacePresentationMode) => void;
 };
 
 export function WorkspaceHeader({
@@ -74,6 +76,7 @@ export function WorkspaceHeader({
   canDelete,
   canFreeze,
   canAutoLayout,
+  scenarioCount,
   viewMode,
   runtimeAvailable,
   runtimeUnavailableReason,
@@ -143,33 +146,14 @@ export function WorkspaceHeader({
           <HeaderIconButton label={inspectorOpen ? 'Hide inspector' : 'Show inspector'} icon={SidebarSimple} active={inspectorOpen} mirrored onClick={onToggleInspector} />
         </div>
         <div className="workspace-command-divider workspace-edit-command-divider" />
-        <div className="workspace-command-group workspace-view-command-group" role="radiogroup" aria-label="Canvas projection">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={viewMode === 'design'}
-            className={`workspace-view-button ${viewMode === 'design' ? 'is-active' : ''}`}
-            onClick={() => onViewModeChange('design')}
-          >
-            Design
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={viewMode === 'runtime'}
-            aria-label={
-              runtimeAvailable
-                ? 'Runtime'
-                : `Runtime unavailable: ${runtimeUnavailableReason ?? 'No runtime trace or fixture is available.'}`
-            }
-            className={`workspace-view-button ${viewMode === 'runtime' ? 'is-active' : ''}`}
-            disabled={!runtimeAvailable}
-            title={runtimeAvailable ? 'Show observed runtime instances' : runtimeUnavailableReason}
-            onClick={() => onViewModeChange('runtime')}
-          >
-            Runtime
-          </button>
-        </div>
+        <WorkspacePresentationSwitch
+          active={viewMode}
+          scenarioCount={scenarioCount}
+          proposalPending={proposalPending}
+          runtimeAvailable={runtimeAvailable}
+          runtimeUnavailableReason={runtimeUnavailableReason}
+          onChange={onViewModeChange}
+        />
         <div className="workspace-command-divider workspace-view-command-divider" />
         <div className="workspace-command-group workspace-edit-command-group" role="group" aria-label="Edit controls">
           <HeaderIconButton label="Duplicate selection" icon={Copy} disabled={!canDuplicate} onClick={onDuplicate} />
@@ -222,6 +206,78 @@ export function WorkspaceHeader({
         )}
       </section>
     </header>
+  );
+}
+
+function WorkspacePresentationSwitch({
+  active,
+  scenarioCount,
+  proposalPending,
+  runtimeAvailable,
+  runtimeUnavailableReason,
+  onChange,
+}: {
+  active: WorkspacePresentationMode;
+  scenarioCount: number;
+  proposalPending: boolean;
+  runtimeAvailable: boolean;
+  runtimeUnavailableReason?: string;
+  onChange: (mode: WorkspacePresentationMode) => void;
+}) {
+  const options: ReadonlyArray<{
+    mode: WorkspacePresentationMode;
+    label: string;
+    available: boolean;
+    unavailableReason?: string;
+  }> = [
+    {
+      mode: 'design',
+      label: 'Design',
+      available: !proposalPending,
+      unavailableReason: 'A proposal is awaiting human review.',
+    },
+    {
+      mode: 'scenario',
+      label: 'Scenario',
+      available: scenarioCount > 0 && !proposalPending,
+      unavailableReason: proposalPending
+        ? 'A proposal is awaiting human review.'
+        : 'Freeze a valid contract to generate scenarios.',
+    },
+    {
+      mode: 'proposal',
+      label: 'Proposal',
+      available: proposalPending,
+      unavailableReason: 'No proposal is awaiting human review.',
+    },
+    {
+      mode: 'runtime',
+      label: 'Runtime',
+      available: runtimeAvailable && !proposalPending,
+      unavailableReason: proposalPending
+        ? 'A proposal is awaiting human review.'
+        : runtimeUnavailableReason ?? 'No runtime trace or fixture is available.',
+    },
+  ];
+
+  return (
+    <div className="workspace-command-group workspace-view-command-group" role="radiogroup" aria-label="Canvas projection">
+      {options.map((option) => (
+        <button
+          key={option.mode}
+          type="button"
+          role="radio"
+          aria-checked={active === option.mode}
+          aria-label={option.available ? option.label : `${option.label} unavailable: ${option.unavailableReason}`}
+          className={`workspace-view-button ${active === option.mode ? 'is-active' : ''}`}
+          disabled={!option.available}
+          title={option.available ? `Show ${option.label.toLowerCase()} projection` : option.unavailableReason}
+          onClick={() => onChange(option.mode)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

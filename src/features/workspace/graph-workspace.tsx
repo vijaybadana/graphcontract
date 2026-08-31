@@ -27,12 +27,14 @@ import {
   EvidenceMarker,
   isCanvasSystemRelationshipEdge,
   projectGraphToCanvas,
+  proposalReviewToCanvasProjection,
 } from '@/src/adapters/react-flow/project-graph';
 import { getDocumentModelContext, registerWebMcpTools } from '@/src/adapters/webmcp/register-tools';
 import { evaluateConnection } from '@/src/application/connection-policy';
 import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
 import { graphLibraryEntries } from '@/src/application/graph-library';
-import { applyGraphOperations, NodeKind, validateGraph } from '@/src/domain';
+import { deriveProposalComparison } from '@/src/application/proposal-comparison';
+import { NodeKind, validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
@@ -61,6 +63,7 @@ import {
 } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
+import { scenarioPresentationFor } from '@/src/features/scenarios/scenario-presentation';
 import { GraphLibrarySheet } from '@/src/features/library/graph-library-sheet';
 import {
   PanelExpandButton,
@@ -78,6 +81,11 @@ import type { CompactPanelPreference } from '@/src/features/workspace/panel-visi
 import { WebMcpStatus, WorkspaceHeader } from '@/src/features/workspace/workspace-header';
 import { useMediaQuery } from '@/src/features/workspace/use-media-query';
 import { runtimeProjectionAvailability } from '@/src/features/workspace/runtime-projection';
+import {
+  presentationModeAvailable,
+  resolveWorkspacePresentationMode,
+  type WorkspacePresentationMode,
+} from '@/src/features/workspace/presentation-mode';
 import {
   isDomainEdgeProjectedAsCollapsedProxy,
   useGraphStore,
@@ -157,6 +165,8 @@ export function GraphWorkspace() {
   const duplicateSelection = useGraphStore((state) => state.duplicateSelection);
   const undo = useGraphStore((state) => state.undo);
   const redo = useGraphStore((state) => state.redo);
+  const approveProposal = useGraphStore((state) => state.approveProposal);
+  const rejectProposal = useGraphStore((state) => state.rejectProposal);
   const freezeGraph = useGraphStore((state) => state.freezeGraph);
   const unfreezeGraph = useGraphStore((state) => state.unfreezeGraph);
   const resetGraph = useGraphStore((state) => state.resetGraph);
@@ -174,8 +184,14 @@ export function GraphWorkspace() {
   const [paletteWidth, setPaletteWidth] = useState(232);
   const [inspectorWidth, setInspectorWidth] = useState(344);
   const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
-  const [viewMode, setViewMode] = useState<'design' | 'runtime'>('design');
+  const [requestedPresentationMode, setRequestedPresentationMode] =
+    useState<WorkspacePresentationMode>('design');
   const [runtimeSelection, setRuntimeSelection] = useState<RuntimeInstanceNodeData | null>(null);
+  const [scenarioSelection, setScenarioSelection] = useState<{
+    id: string;
+    graphId: string;
+    graphUpdatedAt: string;
+  } | null>(null);
   // These are projection selections, deliberately absent from workspace history/persistence.
   const [evidenceOverlayVisible, setEvidenceOverlayVisible] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceMarker | null>(null);
@@ -183,6 +199,12 @@ export function GraphWorkspace() {
   const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
   const [graphSettingsRequest, setGraphSettingsRequest] = useState<GraphSettingsRequest | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const clearProjectionSelection = useCallback(() => {
+    setRuntimeSelection(null);
+    setSelectedEvidence(null);
+    setSelectedRelationshipId(null);
+    setScenarioSelection(null);
+  }, []);
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
@@ -200,17 +222,48 @@ export function GraphWorkspace() {
     : runtimeAvailability.available
       ? undefined
       : runtimeAvailability.reason;
-  const activeViewMode = viewMode === 'runtime' && runtimeAvailable ? 'runtime' : 'design';
+  const presentationAvailability = useMemo(
+    () => ({
+      scenarioCount: scenarios.length,
+      proposalPending: Boolean(proposal),
+      runtimeAvailable,
+    }),
+    [proposal, runtimeAvailable, scenarios.length],
+  );
+  const activeViewMode = resolveWorkspacePresentationMode(
+    requestedPresentationMode,
+    presentationAvailability,
+  );
+  const selectedScenarioId = scenarioSelection?.graphId === graph.id &&
+    scenarioSelection.graphUpdatedAt === graph.updatedAt &&
+    scenarios.some((scenario) => scenario.id === scenarioSelection.id)
+    ? scenarioSelection.id
+    : null;
+  const selectedScenario = selectedScenarioId
+    ? scenarios.find((scenario) => scenario.id === selectedScenarioId) ?? null
+    : null;
+  const scenarioPresentation = useMemo(
+    () => activeViewMode === 'scenario' ? scenarioPresentationFor(selectedScenario) : null,
+    [activeViewMode, selectedScenario],
+  );
   const canvasEditable = editable && activeViewMode === 'design';
-  const relationshipPreviewGraph = useMemo(
-    () =>
-      proposal?.status === 'pending' || proposal?.status === 'invalid'
-        ? applyGraphOperations(graph, proposal.operations).graph
-        : graph,
+  const proposalReview = useMemo(
+    () => proposal ? deriveProposalComparison(graph, proposal) : null,
     [graph, proposal],
   );
+  const reviewProjection = useMemo(
+    () => proposalReviewToCanvasProjection(proposalReview),
+    [proposalReview],
+  );
+  const acceptedReviewGraph = reviewProjection?.accepted ?? graph;
+  const relationshipPreviewGraph = useMemo(
+    () => reviewProjection?.kind === 'comparable'
+      ? reviewProjection.candidate
+      : acceptedReviewGraph,
+    [acceptedReviewGraph, reviewProjection],
+  );
   const relationshipOverlayGraph = useMemo(() => {
-    if (relationshipPreviewGraph === graph) return graph;
+    if (relationshipPreviewGraph === acceptedReviewGraph) return acceptedReviewGraph;
     const previewIds = new Set(relationshipPreviewGraph.relationships.map((relationship) => relationship.id));
     return {
       ...relationshipPreviewGraph,
@@ -218,10 +271,10 @@ export function GraphWorkspace() {
       // union keeps their evidence selectable without reviving them in state.
       relationships: [
         ...relationshipPreviewGraph.relationships,
-        ...graph.relationships.filter((relationship) => !previewIds.has(relationship.id)),
+        ...acceptedReviewGraph.relationships.filter((relationship) => !previewIds.has(relationship.id)),
       ],
     };
-  }, [graph, relationshipPreviewGraph]);
+  }, [acceptedReviewGraph, relationshipPreviewGraph]);
   const evidenceMarkers = useMemo(
     () => relationshipOverlayGraph.capabilities.provenance.evidenceOverlayAvailable ? evidenceMarkersForGraph(relationshipOverlayGraph) : [],
     [relationshipOverlayGraph],
@@ -232,19 +285,21 @@ export function GraphWorkspace() {
   );
   const selectedRelationship = selectedRelationshipId
     ? relationshipPreviewGraph.relationships.find((relationship) => relationship.id === selectedRelationshipId) ??
-      graph.relationships.find((relationship) => relationship.id === selectedRelationshipId) ??
+      acceptedReviewGraph.relationships.find((relationship) => relationship.id === selectedRelationshipId) ??
       null
     : null;
+  const proposalId = proposal?.id ?? null;
 
   useEffect(() => {
-    if (viewMode !== 'runtime' || runtimeAvailable) return;
-    // Deferring avoids a cascading render while ensuring an invalidated
-    // request never re-enters Runtime after a proposal/revision changes.
+    if (requestedPresentationMode === activeViewMode) return;
+    // Deferring avoids a cascading render while ensuring an unavailable local
+    // projection never re-enters after proposal, freeze, or evidence changes.
     queueMicrotask(() => {
-      setViewMode('design');
+      setRequestedPresentationMode(activeViewMode);
       setRuntimeSelection(null);
     });
-  }, [runtimeAvailable, viewMode]);
+  }, [activeViewMode, requestedPresentationMode]);
+
   useEffect(() => {
     const reconciled = reconcileProjectionSelection(
       selectedEvidence,
@@ -344,7 +399,11 @@ export function GraphWorkspace() {
     compactPreference: compactPanelPreference,
     proposalPending: Boolean(proposal),
   });
-  const inspectorTab = proposal || selection.primary || selectedRelationship ? 'review' : rightTab;
+  const inspectorTab = activeViewMode === 'scenario'
+    ? 'scenarios'
+    : proposal || selection.primary || selectedRelationship
+      ? 'review'
+      : rightTab;
   const inspectorSelectionKey = `${graph.status}:${proposal?.id ?? ''}:${activeViewMode}:${selection.primary?.type ?? ''}:${selection.primary?.id ?? ''}:${runtimeSelection?.runtimeId ?? ''}:${selectedRelationship?.id ?? ''}:${selectedEvidence?.number ?? ''}`;
   const toggleSubgraphCollapse = useCallback(
     (subgraphId: string, collapsed: boolean) => {
@@ -354,9 +413,10 @@ export function GraphWorkspace() {
   );
   const validationIssues = useMemo(() => validateGraph(graph), [graph]);
   const canvas = useMemo(() => {
-    const projected = projectGraphToCanvas(graph, proposal, {
-      mode: activeViewMode,
+    const projected = projectGraphToCanvas(graph, reviewProjection, {
+      mode: activeViewMode === 'runtime' ? 'runtime' : 'design',
       runtimeFixture: runtimeProjectionFixture,
+      scenarioPresentation,
     });
     return {
       ...projected,
@@ -420,8 +480,9 @@ export function GraphWorkspace() {
     activateStepModifier,
     canvasEditable,
     graph,
-    proposal,
+    reviewProjection,
     runtimeProjectionFixture,
+    scenarioPresentation,
     toggleSubgraphCollapse,
     activeViewMode,
     activateEvidence,
@@ -438,15 +499,49 @@ export function GraphWorkspace() {
     onCommitPositions: moveCanvasElements,
   });
   const { clearRenderedSelection } = canvasInteractions;
-  const clearProjectionSelection = useCallback(() => {
-    setRuntimeSelection(null);
-    setSelectedEvidence(null);
-    setSelectedRelationshipId(null);
-  }, []);
+  const resetPresentation = useCallback(
+    (mode: Exclude<WorkspacePresentationMode, 'runtime'> = 'design') => {
+      clearProjectionSelection();
+      clearSelection();
+      clearRenderedSelection();
+      setRequestedPresentationMode(mode);
+      setRightTab(mode === 'scenario' ? 'scenarios' : 'review');
+      setInspectorFocusRequest(null);
+      setGraphSettingsRequest(null);
+    },
+    [clearProjectionSelection, clearRenderedSelection, clearSelection],
+  );
+  useEffect(() => {
+    if (!proposalId) return;
+    queueMicrotask(() => {
+      resetPresentation('proposal');
+      setShowInspector(true);
+      if (isCompactWorkspace) {
+        setShowPalette(false);
+        setCompactPanelPreference('inspector');
+      }
+    });
+  }, [isCompactWorkspace, proposalId, resetPresentation]);
+  const handleApproveProposal = useCallback(() => {
+    const result = approveProposal();
+    if (result.ok) resetPresentation();
+  }, [approveProposal, resetPresentation]);
+  const handleRejectProposal = useCallback(() => {
+    rejectProposal();
+    resetPresentation();
+  }, [rejectProposal, resetPresentation]);
+  const handleUnfreeze = useCallback(() => {
+    unfreezeGraph();
+    resetPresentation();
+  }, [resetPresentation, unfreezeGraph]);
+  const replaceWithDemo = useCallback((loadDemo: () => void) => {
+    loadDemo();
+    resetPresentation();
+  }, [resetPresentation]);
   const handleReset = useCallback(() => {
-    clearProjectionSelection();
     resetGraph();
-  }, [clearProjectionSelection, resetGraph]);
+    resetPresentation();
+  }, [resetGraph, resetPresentation]);
   const currentLibraryEntryId = useMemo(
     () => graphLibraryEntries.find((entry) => entry.graph.id === graph.id)?.id ?? null,
     [graph.id],
@@ -469,14 +564,10 @@ export function GraphWorkspace() {
         return;
       }
       if (!loadGraphLibraryEntry(entry)) return;
-      clearRenderedSelection();
-      clearProjectionSelection();
-      setViewMode('design');
-      setInspectorFocusRequest(null);
-      setRightTab('review');
+      resetPresentation();
       setLibraryOpen(false);
     },
-    [clearProjectionSelection, clearRenderedSelection, graph.edges.length, graph.nodes.length, graph.subgraphs.length, libraryBlockedReason, loadGraphLibraryEntry],
+    [graph.edges.length, graph.nodes.length, graph.subgraphs.length, libraryBlockedReason, loadGraphLibraryEntry, resetPresentation],
   );
   const fitPadding = useMemo(
     () => ({
@@ -568,9 +659,13 @@ export function GraphWorkspace() {
         setRuntimeSelection(null);
         clearSelection();
         clearRenderedSelection();
+        if (scenarios.length > 0 && !proposal) setRequestedPresentationMode('scenario');
+      } else if (activeViewMode === 'scenario') {
+        setScenarioSelection(null);
+        setRequestedPresentationMode('design');
       }
     },
-    [clearRenderedSelection, clearSelection],
+    [activeViewMode, clearRenderedSelection, clearSelection, proposal, scenarios.length],
   );
 
   useEffect(() => {
@@ -772,8 +867,7 @@ export function GraphWorkspace() {
   const handleFreeze = () => {
     const result = freezeGraph();
     if (result.ok) {
-      clearRenderedSelection();
-      setRightTab('scenarios');
+      resetPresentation('scenario');
       setShowInspector(true);
       if (isCompactWorkspace) {
         setShowPalette(false);
@@ -831,6 +925,7 @@ export function GraphWorkspace() {
           canDelete={canvasEditable && hasDeletableSelection}
           canFreeze={validationIssues.length === 0 && !proposal}
           canAutoLayout={editable}
+          scenarioCount={scenarios.length}
           viewMode={activeViewMode}
           runtimeAvailable={runtimeAvailable}
           runtimeUnavailableReason={runtimeUnavailableReason}
@@ -845,11 +940,22 @@ export function GraphWorkspace() {
           onFit={fitGraph}
           onReset={handleReset}
           onFreeze={handleFreeze}
-          onUnfreeze={unfreezeGraph}
+          onUnfreeze={handleUnfreeze}
           onViewModeChange={(mode) => {
-            if (mode === 'runtime' && !runtimeAvailable) return;
+            if (!presentationModeAvailable(mode, presentationAvailability)) return;
             setRuntimeSelection(null);
-            setViewMode(mode);
+            setSelectedEvidence(null);
+            setSelectedRelationshipId(null);
+            clearSelection();
+            clearRenderedSelection();
+            setRequestedPresentationMode(mode);
+            if (mode === 'scenario') {
+              setRightTab('scenarios');
+              setShowInspector(true);
+            } else if (mode === 'proposal') {
+              setRightTab('review');
+              setShowInspector(true);
+            }
           }}
         />
 
@@ -868,10 +974,10 @@ export function GraphWorkspace() {
               }
               validationIssueCount={validationIssues.length}
               onAdd={addAtCenter}
-              onLoadResearchSupervisorDemo={loadResearchSupervisorDemo}
-              onLoadResearchIntakeRoutingDemo={loadResearchIntakeRoutingDemo}
-              onLoadHumanControlHitlDemo={loadHumanControlHitlDemo}
-              onLoadDynamicParallelismDemo={loadDynamicParallelismDemo}
+              onLoadResearchSupervisorDemo={() => replaceWithDemo(loadResearchSupervisorDemo)}
+              onLoadResearchIntakeRoutingDemo={() => replaceWithDemo(loadResearchIntakeRoutingDemo)}
+              onLoadHumanControlHitlDemo={() => replaceWithDemo(loadHumanControlHitlDemo)}
+              onLoadDynamicParallelismDemo={() => replaceWithDemo(loadDynamicParallelismDemo)}
               onCollapse={closePalette}
             />
             <PanelResizer
@@ -902,11 +1008,11 @@ export function GraphWorkspace() {
             />
           )}
           <GraphCapabilityStrip
-            graph={graph}
+            graph={relationshipPreviewGraph}
             onOpenSettings={openGraphSettings}
             evidenceOverlayVisible={evidenceOverlayVisible}
             onToggleEvidenceOverlay={() => {
-              if (!graph.capabilities.provenance.evidenceOverlayAvailable) return;
+              if (!relationshipPreviewGraph.capabilities.provenance.evidenceOverlayAvailable) return;
               setEvidenceOverlayVisible((visible) => !visible);
               setSelectedEvidence(null);
             }}
@@ -952,7 +1058,7 @@ export function GraphWorkspace() {
             nodesDraggable={canvasEditable}
             nodesConnectable={canvasEditable}
             edgesReconnectable={canvasEditable}
-            elementsSelectable
+            elementsSelectable={activeViewMode !== 'scenario'}
             selectionOnDrag
             selectionMode={SelectionMode.Partial}
             panOnScroll
@@ -1036,7 +1142,7 @@ export function GraphWorkspace() {
               aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} relationship={selectedRelationship} evidence={selectedEvidence} readOnly={activeViewMode === 'runtime'} /><ProposalPanel /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} relationship={selectedRelationship} evidence={selectedEvidence} reviewProjection={reviewProjection} readOnly={activeViewMode !== 'design'} /><ProposalPanel proposal={proposal} review={proposalReview} onApprove={handleApproveProposal} onReject={handleRejectProposal} /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} selectedScenarioId={selectedScenarioId} onScenarioSelect={(scenarioId) => setScenarioSelection(scenarioId ? { id: scenarioId, graphId: graph.id, graphUpdatedAt: graph.updatedAt } : null)} />}
             </div>
             <PanelResizer
               side="right"
