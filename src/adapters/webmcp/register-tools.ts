@@ -1,6 +1,6 @@
 import { ProposalResult } from '@/src/application/workspace';
 import {
-  enumerateScenarios,
+  enumerateScenariosBounded,
   validateGraph,
   WorkflowGraph,
   GraphProposal,
@@ -939,11 +939,11 @@ export async function registerWebMcpTools(
         name: 'get_branch_scenarios',
         title: 'Read frozen graph branch scenarios',
         description:
-          'Returns every reachable native-control Start-to-End scenario. Non-native spawned and external relationships remain separate annotations. The human must freeze a valid graph in the UI first.',
+          'Deterministically derives every reachable native-control Start-to-End scenario within the design-time complexity budget. Non-native spawned and external relationships remain separate annotations. The human must freeze a valid graph in the UI first.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false },
         execute: async () => {
-          const { graph, scenarios } = port.getSnapshot();
+          const { graph } = port.getSnapshot();
           if (graph.status !== 'frozen') {
             return {
               ok: false,
@@ -957,11 +957,20 @@ export async function registerWebMcpTools(
               error: { code: 'GRAPH_INVALID', message: 'The frozen graph is invalid.', issues },
             };
           }
-          return {
-            ok: true,
-            graphId: graph.id,
-            scenarios: scenarios.length > 0 ? scenarios : enumerateScenarios(graph),
-          };
+          const enumeration = enumerateScenariosBounded(graph);
+          if (!enumeration.ok) {
+            return {
+              ok: false,
+              error: {
+                code: enumeration.code,
+                message: enumeration.message,
+                budget: enumeration.budget,
+                completedScenarioCount: enumeration.completedScenarioCount,
+                expansions: enumeration.expansions,
+              },
+            };
+          }
+          return { ok: true, graphId: graph.id, scenarios: enumeration.scenarios };
         },
       },
       { signal },

@@ -340,6 +340,30 @@ describe('workspace application service', () => {
     expect(frozen.state.scenarios).toHaveLength(3);
   });
 
+  it('keeps the accepted graph draft when scenario complexity exceeds the freeze budget', () => {
+    const boundedService = createWorkspaceService({
+      now: () => '2026-08-28T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-bounded`,
+      scenarioBudget: { maxScenarios: 2, maxExpansions: 100 },
+    });
+    const initial = boundedService.createInitial();
+    const frozen = boundedService.freezeGraph(initial);
+
+    expect(frozen).toMatchObject({
+      changed: false,
+      state: { graph: { status: 'draft' }, scenarios: [] },
+      notice: expect.stringContaining('Simplify conditional or human-outcome branching'),
+      result: {
+        ok: false,
+        issues: [expect.objectContaining({
+          code: 'SCENARIO_COUNT_BUDGET_EXCEEDED',
+          path: 'scenarios',
+        })],
+      },
+    });
+    expect(frozen.state).toEqual(initial);
+  });
+
   it('locks accepted graph edits while a proposal awaits review', () => {
     const initial = service.createInitial();
     const proposed = service.submitProposal(initial, {

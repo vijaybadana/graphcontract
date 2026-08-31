@@ -1,7 +1,7 @@
 import { buildGraphContractDownload, buildGraphScenariosDownload } from '@/src/adapters/exports/downloads';
 import { migrateWorkspaceV7 } from '@/src/adapters/persistence/migrate-workspace';
-import { enumerateScenarios, validateGraph, workflowGraphSchema } from '@/src/domain';
-import { describe, expect, it } from 'vitest';
+import { enumerateScenarios, enumerateScenariosBounded, validateGraph, workflowGraphSchema } from '@/src/domain';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createGraphLibraryEntries,
@@ -138,5 +138,17 @@ describe('graph library registry', () => {
 
   it('creates derived entries only from a valid registry', () => {
     expect(createGraphLibraryEntries(graphLibraryEntries)).toHaveLength(GRAPH_LIBRARY_ENTRY_COUNT);
+  });
+
+  it('validates and materializes each registry graph with one enumeration pass', () => {
+    const enumerate = vi.fn(enumerateScenariosBounded);
+
+    const entries = createGraphLibraryEntries(graphLibraryEntries, enumerate);
+
+    expect(entries).toHaveLength(GRAPH_LIBRARY_ENTRY_COUNT);
+    expect(enumerate).toHaveBeenCalledTimes(GRAPH_LIBRARY_ENTRY_COUNT);
+    expect(new Set(enumerate.mock.calls.map(([graph]) => graph.id)).size).toBe(
+      GRAPH_LIBRARY_ENTRY_COUNT,
+    );
   });
 });

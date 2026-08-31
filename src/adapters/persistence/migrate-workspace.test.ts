@@ -310,7 +310,33 @@ describe('workspace persistence migration', () => {
       status: 'pending',
       operations: proposal.operations,
     });
-    expect(migrated.scenarios).toEqual(scenarios);
+    expect(scenarios).not.toHaveLength(0);
+    expect(migrated.scenarios).toEqual([]);
+  });
+
+  it('discards persisted scenario arrays and rederives only from a valid frozen graph', () => {
+    const frozenGraph = {
+      ...structuredClone(sampleGraph),
+      status: 'frozen' as const,
+    };
+    const canonicalScenarios = enumerateScenarios(frozenGraph);
+    const staleScenarios = canonicalScenarios.map((scenario) => ({
+      ...scenario,
+      expectedTerminalNode: 'stale-terminal',
+    }));
+
+    const restoredFrozen = migrateWorkspaceV6(
+      { graph: frozenGraph, proposal: null, scenarios: staleScenarios },
+      service.createInitial,
+    );
+    const restoredDraft = migrateWorkspaceV6(
+      { graph: structuredClone(sampleGraph), proposal: null, scenarios: staleScenarios },
+      service.createInitial,
+    );
+
+    expect(restoredFrozen.scenarios).toEqual(canonicalScenarios);
+    expect(restoredFrozen.scenarios).not.toEqual(staleScenarios);
+    expect(restoredDraft.scenarios).toEqual([]);
   });
 
   it('keeps a persisted Command graph with a topology-derived loop', () => {

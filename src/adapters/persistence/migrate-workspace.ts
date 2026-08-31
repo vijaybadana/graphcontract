@@ -1,5 +1,6 @@
 import { WorkspaceCore } from '@/src/application/workspace';
 import {
+  enumerateScenariosBounded,
   graphEdgeSchema,
   graphEdgeV3Schema,
   graphNodeSchema,
@@ -21,12 +22,14 @@ import {
   normalizeLegacyWorkNodeKind,
   normalizeWorkflowGraph,
   ProposalDiff,
+  validateGraph,
   workflowGraphSchema,
   workflowGraphV5Schema,
   workflowGraphV4Schema,
   workflowGraphV3Schema,
   workflowGraphV2Schema,
   workflowGraphV1Schema,
+  WorkflowGraph,
   WorkflowGraphV2,
 } from '@/src/domain';
 
@@ -204,6 +207,29 @@ function migrateV5Proposal(proposal: unknown): unknown {
   };
 }
 
+/**
+ * Scenarios are a deterministic projection of one accepted frozen revision,
+ * never persistence authority. Discard saved arrays and rebuild only when the
+ * canonical graph is both frozen and valid.
+ */
+function restoreWorkspaceProjection(
+  persisted: PersistedWorkspace,
+  graph: WorkflowGraph,
+  proposal: unknown = persisted.proposal,
+): PersistedWorkspace {
+  const normalizedGraph = normalizeWorkflowGraph(graph);
+  const enumeration =
+    normalizedGraph.status === 'frozen' && validateGraph(normalizedGraph).length === 0
+      ? enumerateScenariosBounded(normalizedGraph)
+      : null;
+  return {
+    ...persisted,
+    graph: normalizedGraph,
+    proposal: proposal as WorkspaceCore['proposal'],
+    scenarios: enumeration?.ok ? enumeration.scenarios : [],
+  };
+}
+
 /** Repairs the hackathon demo snapshot without mixing persistence concerns into
  * domain validation or deleting valid user-authored workflows. */
 export function migrateWorkspaceV7(
@@ -220,57 +246,54 @@ export function migrateWorkspaceV7(
   // may legitimately be incomplete while its author is still editing it;
   // canonical validation remains the ordinary derived contract-status signal.
   if (parsed.success) {
-    return {
-      ...persisted,
-      graph: normalizeWorkflowGraph(parsed.data),
-    };
+    return restoreWorkspaceProjection(persisted, parsed.data);
   }
 
   const v5 = workflowGraphV5Schema.safeParse(persisted.graph);
   if (v5.success) {
-    return {
-      ...persisted,
-      graph: migrateWorkflowGraphV5(v5.data),
-      proposal: migrateV5Proposal(persisted.proposal) as WorkspaceCore['proposal'],
-    };
+    return restoreWorkspaceProjection(
+      persisted,
+      migrateWorkflowGraphV5(v5.data),
+      migrateV5Proposal(persisted.proposal),
+    );
   }
 
   const v4 = workflowGraphV4Schema.safeParse(persisted.graph);
   if (v4.success) {
-    return {
-      ...persisted,
-      graph: migrateWorkflowGraphV4(v4.data),
-      proposal: migrateV5Proposal(persisted.proposal) as WorkspaceCore['proposal'],
-    };
+    return restoreWorkspaceProjection(
+      persisted,
+      migrateWorkflowGraphV4(v4.data),
+      migrateV5Proposal(persisted.proposal),
+    );
   }
 
   const v3 = workflowGraphV3Schema.safeParse(persisted.graph);
   if (v3.success) {
-    return {
-      ...persisted,
-      graph: migrateWorkflowGraphV3(v3.data),
-      proposal: migrateV5Proposal(persisted.proposal) as WorkspaceCore['proposal'],
-    };
+    return restoreWorkspaceProjection(
+      persisted,
+      migrateWorkflowGraphV3(v3.data),
+      migrateV5Proposal(persisted.proposal),
+    );
   }
 
   const v2 = workflowGraphV2Schema.safeParse(persisted.graph);
   if (v2.success) {
-    return {
-      ...persisted,
-      graph: migrateWorkflowGraphV2(v2.data),
-      proposal: migrateV5Proposal(migrateV2Proposal(persisted.proposal, v2.data)) as WorkspaceCore['proposal'],
-    };
+    return restoreWorkspaceProjection(
+      persisted,
+      migrateWorkflowGraphV2(v2.data),
+      migrateV5Proposal(migrateV2Proposal(persisted.proposal, v2.data)),
+    );
   }
 
   const legacy = workflowGraphV1Schema.safeParse(persisted.graph);
   if (!legacy.success) return createInitial();
   const v2Graph = migrateWorkflowGraphV1(legacy.data);
 
-  return {
-    ...persisted,
-    graph: migrateWorkflowGraphV2(v2Graph),
-    proposal: migrateV5Proposal(migrateV2Proposal(persisted.proposal, v2Graph)) as WorkspaceCore['proposal'],
-  };
+  return restoreWorkspaceProjection(
+    persisted,
+    migrateWorkflowGraphV2(v2Graph),
+    migrateV5Proposal(migrateV2Proposal(persisted.proposal, v2Graph)),
+  );
 }
 
 /** Compatibility aliases retain old import paths while producing active v6 data. */

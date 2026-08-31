@@ -274,6 +274,44 @@ describe('WebMCP adapter', () => {
     ]);
   });
 
+  it('rederives frozen scenarios from the accepted graph instead of returning stale port data', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-08-30T12:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    const frozen = service.freezeGraph(service.createInitial()).state;
+    const staleScenarios = frozen.scenarios.map((scenario) => ({
+      ...scenario,
+      expectedTerminalNode: 'stale-terminal',
+    }));
+
+    await registerWebMcpTools(
+      {
+        registerTool: async (tool: RegisteredTool) => {
+          registered.set(tool.name, tool);
+        },
+      } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => ({ ...frozen, scenarios: staleScenarios }),
+        submitProposal: () => ({
+          ok: false as const,
+          error: { code: 'UNUSED', message: 'Not used in this scenario read.' },
+        }),
+      },
+      new AbortController().signal,
+    );
+
+    const result = await registered.get('get_branch_scenarios')!.execute({}) as {
+      ok: boolean;
+      scenarios: typeof frozen.scenarios;
+    };
+    expect(result).toMatchObject({ ok: true, graphId: frozen.graph.id });
+    expect(result.scenarios).toEqual(frozen.scenarios);
+    expect(result.scenarios).not.toEqual(staleScenarios);
+    expect([...registered.keys()]).toEqual(['get_graph', 'propose_graph_changes', 'get_branch_scenarios']);
+  });
+
   it('submits complete v3 HITL and sensitive configuration only as a pending human review', async () => {
     const registered = new Map<string, RegisteredTool>();
     const service = createWorkspaceService({

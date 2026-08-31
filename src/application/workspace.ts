@@ -2,7 +2,7 @@ import {
   applyGraphOperations,
   BranchScenario,
   createProposal,
-  enumerateScenarios,
+  enumerateScenariosBounded,
   GraphEdgePatch,
   GraphCapabilities,
   GraphCapabilityOverrides,
@@ -24,6 +24,7 @@ import {
   StepGraphNode,
   StepStoreAccess,
   RetryPolicy,
+  ScenarioEnumerationBudget,
 } from '@/src/domain';
 import { dynamicParallelismDemoGraph } from './package-three-demo';
 import { layoutWorkflowGraph } from './layout-workflow';
@@ -56,6 +57,8 @@ export type WorkspaceTransition<Result = undefined> = {
 export type WorkspaceDependencies = {
   now: () => string;
   makeId: (prefix: string) => string;
+  /** Optional only for deterministic tests or stricter embedding hosts. */
+  scenarioBudget?: ScenarioEnumerationBudget;
 };
 
 /**
@@ -824,7 +827,21 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         };
       }
       const graph = { ...state.graph, status: 'frozen' as const, updatedAt: dependencies.now() };
-      const scenarios = enumerateScenarios(graph);
+      const enumeration = enumerateScenariosBounded(graph, dependencies.scenarioBudget);
+      if (!enumeration.ok) {
+        const issues = [{
+          code: enumeration.code,
+          message: enumeration.message,
+          path: 'scenarios',
+        }];
+        return {
+          state,
+          changed: false,
+          notice: enumeration.message,
+          result: { ok: false, issues },
+        };
+      }
+      const scenarios = enumeration.scenarios;
       return {
         state: { graph, proposal: null, scenarios },
         changed: true,

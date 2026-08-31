@@ -5,6 +5,7 @@ import {
   createProposal,
   createDefaultGraphCapabilities,
   enumerateScenarios,
+  enumerateScenariosBounded,
   graphOperationSchema,
   graphNodePatchSchema,
   normalizeWorkflowGraph,
@@ -778,6 +779,33 @@ describe('routing edge semantics', () => {
       graphCapabilities: researchIntakeRoutingGraph.capabilities,
       subgraphCapabilityOverrides: [],
     });
+  });
+
+  it('returns no partial scenarios when explicit path or expansion budgets are exceeded', () => {
+    const pathLimited = enumerateScenariosBounded(researchIntakeRoutingGraph, {
+      maxScenarios: 2,
+      maxExpansions: 200,
+    });
+    const expansionLimited = enumerateScenariosBounded(researchIntakeRoutingGraph, {
+      maxScenarios: 20,
+      maxExpansions: 2,
+    });
+
+    expect(pathLimited).toMatchObject({
+      ok: false,
+      code: 'SCENARIO_COUNT_BUDGET_EXCEEDED',
+      completedScenarioCount: 2,
+      budget: { maxScenarios: 2, maxExpansions: 200 },
+    });
+    expect(pathLimited).not.toHaveProperty('scenarios');
+    expect(expansionLimited).toMatchObject({
+      ok: false,
+      code: 'SCENARIO_EXPANSION_BUDGET_EXCEEDED',
+      completedScenarioCount: 0,
+      expansions: 2,
+    });
+    expect(expansionLimited).not.toHaveProperty('scenarios');
+    expect(enumerateScenarios(researchIntakeRoutingGraph)).toHaveLength(5);
   });
 
   it('enumerates configured human outcomes in stable order through only their canonical outgoing edges', () => {

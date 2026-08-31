@@ -1070,6 +1070,38 @@ export type BranchScenario = {
   expectedTerminalOutcome: EndOutcome;
 };
 
+/**
+ * Scenario enumeration is a design-time projection and must remain bounded
+ * even when authored conditional branches and loop caps multiply paths.
+ */
+export type ScenarioEnumerationBudget = {
+  maxScenarios: number;
+  maxExpansions: number;
+};
+
+export const DEFAULT_SCENARIO_ENUMERATION_BUDGET: Readonly<ScenarioEnumerationBudget> =
+  Object.freeze({
+    maxScenarios: 512,
+    maxExpansions: 2_048,
+  });
+
+export type ScenarioEnumerationResult =
+  | {
+      ok: true;
+      scenarios: BranchScenario[];
+      expansions: number;
+      budget: ScenarioEnumerationBudget;
+    }
+  | {
+      ok: false;
+      code: 'SCENARIO_COUNT_BUDGET_EXCEEDED' | 'SCENARIO_EXPANSION_BUDGET_EXCEEDED';
+      message: string;
+      /** Completed paths are reported as a count only; partial scenarios are never returned. */
+      completedScenarioCount: number;
+      expansions: number;
+      budget: ScenarioEnumerationBudget;
+    };
+
 export type RuntimeProjectionInstance = {
   id: string;
   sendEdgeId: string;
@@ -3693,11 +3725,34 @@ export function createProposal(
   };
 }
 
-export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
-  if (validateGraph(graph).length > 0) return [];
+function normalizeScenarioEnumerationBudget(
+  budget: ScenarioEnumerationBudget,
+): ScenarioEnumerationBudget {
+  const positiveSafeInteger = (value: number, fallback: number) =>
+    Number.isSafeInteger(value) && value > 0 ? value : fallback;
+  return {
+    maxScenarios: positiveSafeInteger(
+      budget.maxScenarios,
+      DEFAULT_SCENARIO_ENUMERATION_BUDGET.maxScenarios,
+    ),
+    maxExpansions: positiveSafeInteger(
+      budget.maxExpansions,
+      DEFAULT_SCENARIO_ENUMERATION_BUDGET.maxExpansions,
+    ),
+  };
+}
+
+export function enumerateScenariosBounded(
+  graph: WorkflowGraph,
+  requestedBudget: ScenarioEnumerationBudget = DEFAULT_SCENARIO_ENUMERATION_BUDGET,
+): ScenarioEnumerationResult {
+  const budget = normalizeScenarioEnumerationBudget(requestedBudget);
+  if (validateGraph(graph).length > 0) {
+    return { ok: true, scenarios: [], expansions: 0, budget };
+  }
   const normalized = normalizeWorkflowGraph(workflowGraphSchema.parse(graph));
   const start = normalized.nodes.find((node) => node.kind === 'start' && !node.parentId);
-  if (!start) return [];
+  if (!start) return { ok: true, scenarios: [], expansions: 0, budget };
 
   const nodeMap = new Map(normalized.nodes.map((node) => [node.id, node]));
   const outgoing = new Map<string, GraphEdge[]>();
@@ -3711,6 +3766,8 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
   const loopEdgeIds = new Set(deriveTopologyLoops(start.id, outgoing).map((loop) => loop.loopEdgeId));
 
   const scenarios: BranchScenario[] = [];
+  let expansions = 0;
+  let budgetFailure: Extract<ScenarioEnumerationResult, { ok: false }> | null = null;
   const walk = (
     nodeId: string,
     path: string[],
@@ -3721,6 +3778,21 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
     merges: ScenarioMerge[],
     traversedLoopCounts: ReadonlyMap<string, number>,
   ) => {
+    if (budgetFailure) return;
+    if (expansions >= budget.maxExpansions) {
+      budgetFailure = {
+        ok: false,
+        code: 'SCENARIO_EXPANSION_BUDGET_EXCEEDED',
+        message:
+          `Scenario expansion exceeded the ${budget.maxExpansions}-step design-time budget. ` +
+          'Simplify branching or reduce loop caps before freezing.',
+        completedScenarioCount: scenarios.length,
+        expansions,
+        budget,
+      };
+      return;
+    }
+    expansions += 1;
     const node = nodeMap.get(nodeId);
     if (!node) return;
     const nextPath = [...path, nodeId];
@@ -3738,6 +3810,19 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
           ]
         : merges;
     if (node.kind === 'end' && !node.parentId) {
+      if (scenarios.length >= budget.maxScenarios) {
+        budgetFailure = {
+          ok: false,
+          code: 'SCENARIO_COUNT_BUDGET_EXCEEDED',
+          message:
+            `Scenario enumeration exceeded the ${budget.maxScenarios}-path design-time budget. ` +
+            'Simplify conditional or human-outcome branching before freezing.',
+          completedScenarioCount: scenarios.length,
+          expansions,
+          budget,
+        };
+        return;
+      }
       const number = scenarios.length + 1;
       const humanOutcomeSuffix = humanOutcomes.length
         ? ` [${humanOutcomes.map((outcome) => outcome.outcomeLabel).join(', ')}]`
@@ -3804,6 +3889,7 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
       : (outgoing.get(nodeId) ?? []).map((edge) => ({ edge, outcome: undefined }));
 
     for (const { edge, outcome } of choices) {
+      if (budgetFailure) break;
       const isLoop = loopEdgeIds.has(edge.id);
       const loopCap = edge.loopCap ?? 1;
       const loopCount = traversedLoopCounts.get(edge.id) ?? 0;
@@ -3876,7 +3962,17 @@ export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
   };
 
   walk(start.id, [], [], [], [], [], [], new Map());
-  return scenarios;
+  return budgetFailure ?? { ok: true, scenarios, expansions, budget };
+}
+
+/**
+ * Compatibility API for deterministic callers that already consume an array.
+ * Bounded callers that must distinguish complexity from an empty graph should
+ * use enumerateScenariosBounded instead.
+ */
+export function enumerateScenarios(graph: WorkflowGraph): BranchScenario[] {
+  const result = enumerateScenariosBounded(graph);
+  return result.ok ? result.scenarios : [];
 }
 
 export function buildPythonTestSkeleton(

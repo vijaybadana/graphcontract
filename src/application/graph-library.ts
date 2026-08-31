@@ -1,12 +1,13 @@
 import {
   createDefaultGraphCapabilities,
-  enumerateScenarios,
+  enumerateScenariosBounded,
   normalizeWorkflowGraph,
   validateGraph,
   type GraphNode,
   type GraphCapabilities,
   type OpaqueStepMetadata,
   type StepExecutor,
+  type ScenarioEnumerationResult,
   type WorkflowGraph,
 } from '@/src/domain';
 
@@ -388,16 +389,25 @@ const definitions: readonly GraphLibraryDefinition[] = [
 ];
 
 export type GraphLibraryRegistryIssue = {
-  code: 'ENTRY_COUNT' | 'DUPLICATE_ID' | 'INVALID_SOURCE' | 'INVALID_GRAPH' | 'EMPTY_SCENARIOS';
+  code:
+    | 'ENTRY_COUNT'
+    | 'DUPLICATE_ID'
+    | 'INVALID_SOURCE'
+    | 'INVALID_GRAPH'
+    | 'EMPTY_SCENARIOS'
+    | 'SCENARIO_BUDGET_EXCEEDED';
   entryId?: string;
   reason?: string;
 };
 
-/** Validation keeps fixtures honest before presentation code consumes them. */
-export function validateGraphLibraryDefinitions(
+type ScenarioEnumerator = (graph: WorkflowGraph) => ScenarioEnumerationResult;
+
+function inspectGraphLibraryDefinitions(
   entries: readonly GraphLibraryDefinition[],
-): GraphLibraryRegistryIssue[] {
+  enumerate: ScenarioEnumerator,
+): { issues: GraphLibraryRegistryIssue[]; materialized: GraphLibraryEntry[] } {
   const issues: GraphLibraryRegistryIssue[] = [];
+  const materialized: GraphLibraryEntry[] = [];
   if (entries.length !== GRAPH_LIBRARY_ENTRY_COUNT) issues.push({ code: 'ENTRY_COUNT' });
   const ids = new Set<string>();
   for (const entry of entries) {
@@ -410,25 +420,51 @@ export function validateGraphLibraryDefinitions(
     const graphIssues = validateGraph(entry.graph);
     if (graphIssues.length > 0) {
       issues.push({ code: 'INVALID_GRAPH', entryId: entry.id, reason: graphIssues.map((issue) => `${issue.code}@${issue.path ?? ''}`).join('|') });
+      continue;
     }
-    if (enumerateScenarios(entry.graph).length === 0) issues.push({ code: 'EMPTY_SCENARIOS', entryId: entry.id });
+    const enumeration = enumerate(entry.graph);
+    if (!enumeration.ok) {
+      issues.push({
+        code: 'SCENARIO_BUDGET_EXCEEDED',
+        entryId: entry.id,
+        reason: `${enumeration.code}: ${enumeration.message}`,
+      });
+      continue;
+    }
+    if (enumeration.scenarios.length === 0) {
+      issues.push({ code: 'EMPTY_SCENARIOS', entryId: entry.id });
+      continue;
+    }
+    materialized.push({
+      ...entry,
+      scenarioSummary: {
+        pathCount: enumeration.scenarios.length,
+        scenarios: enumeration.scenarios,
+      },
+    });
   }
-  return issues;
+  return { issues, materialized };
+}
+
+/** Validation keeps fixtures honest before presentation code consumes them. */
+export function validateGraphLibraryDefinitions(
+  entries: readonly GraphLibraryDefinition[],
+  enumerate: ScenarioEnumerator = enumerateScenariosBounded,
+): GraphLibraryRegistryIssue[] {
+  return inspectGraphLibraryDefinitions(entries, enumerate).issues;
 }
 
 export function createGraphLibraryEntries(
   entries: readonly GraphLibraryDefinition[],
+  enumerate: ScenarioEnumerator = enumerateScenariosBounded,
 ): readonly GraphLibraryEntry[] {
-  const issues = validateGraphLibraryDefinitions(entries);
+  const { issues, materialized } = inspectGraphLibraryDefinitions(entries, enumerate);
   if (issues.length > 0) {
     throw new Error(
       `Invalid graph library registry: ${issues.map((issue) => `${issue.code}${issue.entryId ? `:${issue.entryId}` : ''}${issue.reason ? ` (${issue.reason})` : ''}`).join(', ')}`,
     );
   }
-  return entries.map((entry) => {
-    const scenarios = enumerateScenarios(entry.graph);
-    return { ...entry, scenarioSummary: { pathCount: scenarios.length, scenarios } };
-  });
+  return materialized;
 }
 
 /** The complete display-only library; callers clone a graph through the contract helper before loading it. */

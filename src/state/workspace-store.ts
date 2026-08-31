@@ -465,15 +465,23 @@ export const useGraphStore = create<WorkspaceStore>()(
     },
     {
       name: 'graphcontract-workspace-v1',
-      version: 7,
+      // v8 stops treating scenario projections as persistence authority and
+      // forces existing v7 snapshots through deterministic rehydration.
+      version: 8,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
       migrate: (persistedState) =>
         migrateWorkspaceV7(persistedState, workspace.createInitial) as WorkspaceStore,
+      // Zustand only invokes migrate when the stored version changes. Merge
+      // also normalizes same-version snapshots so every frozen reload rebuilds
+      // scenarios from its canonical graph rather than from persisted arrays.
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...migrateWorkspaceV7(persistedState, workspace.createInitial),
+      }) as WorkspaceStore,
       partialize: (state) => ({
         graph: state.graph,
         proposal: state.proposal,
-        scenarios: state.scenarios,
       }),
     },
   ),

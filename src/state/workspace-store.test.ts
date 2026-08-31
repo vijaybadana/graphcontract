@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { sampleGraph, validateGraph } from '@/src/domain';
+import { enumerateScenarios, normalizeWorkflowGraph, sampleGraph, validateGraph } from '@/src/domain';
 import type { WorkspaceSelection } from './workspace-store';
 
 const persisted = new Map<string, string>();
@@ -347,13 +347,35 @@ describe('workspace persistence reload', () => {
       },
     });
     const serialized = JSON.parse(persisted.get('graphcontract-workspace-v1')!);
-    expect(serialized.state).toEqual({ graph: canonicalGraph, proposal: null, scenarios: [] });
+    expect(serialized.state).toEqual({ graph: canonicalGraph, proposal: null });
     expect(serialized.state).not.toHaveProperty('selection');
     expect(serialized.state).not.toHaveProperty('runtimeProjectionFixture');
     expect(serialized.state).not.toHaveProperty('clipboardNodeIds');
 
     await useGraphStore.persist.rehydrate();
     expect(useGraphStore.getState().graph).toEqual(canonicalGraph);
+  });
+
+  it.each([7, 8])('rehydrates v%s frozen state from the graph instead of trusting saved scenarios', async (version) => {
+    const frozenGraph = { ...structuredClone(sampleGraph), status: 'frozen' as const };
+    const staleScenarios = enumerateScenarios(frozenGraph).map((scenario) => ({
+      ...scenario,
+      expectedTerminalNode: 'stale-terminal',
+    }));
+    persisted.set(
+      'graphcontract-workspace-v1',
+      JSON.stringify({
+        state: { graph: frozenGraph, proposal: null, scenarios: staleScenarios },
+        version,
+      }),
+    );
+
+    await useGraphStore.persist.rehydrate();
+
+    expect(useGraphStore.getState().graph).toEqual(normalizeWorkflowGraph(frozenGraph));
+    expect(useGraphStore.getState().scenarios).toEqual(enumerateScenarios(frozenGraph));
+    expect(useGraphStore.getState().scenarios).not.toEqual(staleScenarios);
+    useGraphStore.getState().unfreezeGraph();
   });
 
   it('keeps canonical Step fields through copy/paste, undo/redo, and persisted rehydration', async () => {
