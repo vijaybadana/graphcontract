@@ -1,4 +1,5 @@
-import { expect, freezeResearchIntake, test } from './fixtures';
+import { expect, freezeResearchIntake, test, webMcpToolNames } from './fixtures';
+import { readGraph } from './helpers/graph';
 
 test('freeze locks editing, survives reload, and unfreeze restores authoring', async ({ app }) => {
   await freezeResearchIntake(app);
@@ -8,16 +9,20 @@ test('freeze locks editing, survives reload, and unfreeze restores authoring', a
   await expect(app.getByRole('button', { name: 'Undo' })).toBeDisabled();
 
   await app.reload();
-  await expect(app.getByText('Research Intake Routing', { exact: true })).toBeVisible();
-  await expect(
-    app
-      .locator('header[aria-label="GraphContract workspace controls"]')
-      .getByText('Frozen contract', { exact: true }),
-  ).toBeVisible();
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
+  await expect.poll(async () => await readGraph(app)).toMatchObject({
+    id: 'research-intake-routing-demo',
+    name: 'Research Intake Routing',
+    status: 'frozen',
+  });
   await expect(app.getByRole('button', { name: 'Unfreeze' })).toBeVisible();
 
   await app.getByRole('button', { name: 'Unfreeze' }).click();
-  await expect(app.getByText('Valid draft', { exact: true })).toBeVisible();
+  await expect.poll(async () => (await readGraph(app)).status).toBe('draft');
   await expect(app.getByRole('button', { name: 'Agent' })).toBeEnabled();
   await expect(app.locator('.workspace-freeze-button')).toBeEnabled();
 });

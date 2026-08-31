@@ -38,10 +38,10 @@ async function loadHumanControlDemo(app: Parameters<typeof callWebMcpTool>[0]) {
     await dialog.accept();
   });
   await app.getByRole('button', { name: 'Load Human Control & HITL demo' }).click();
-  await expect(app.getByText('Human Control · Deploy Change', { exact: true })).toBeVisible();
   await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph.id).toBe(
     'human-control-hitl-demo',
   );
+  await expect(app.getByTestId('rf__node-deploy-change')).toBeVisible();
 }
 
 async function selectNode(app: Parameters<typeof callWebMcpTool>[0], id: string) {

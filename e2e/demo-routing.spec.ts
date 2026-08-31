@@ -1,4 +1,5 @@
 import { expect, loadResearchIntake, test } from './fixtures';
+import { readGraph } from './helpers/graph';
 
 test('demo replacement is confirmation-protected and exposes the routing inventory', async ({ app }) => {
   app.once('dialog', async (dialog) => {
@@ -7,7 +8,8 @@ test('demo replacement is confirmation-protected and exposes the routing invento
     await dialog.dismiss();
   });
   await app.getByRole('button', { name: 'Load Research Intake Routing' }).click();
-  await expect(app.getByText('Customer Support Workflow', { exact: true })).toBeVisible();
+  await expect.poll(async () => (await readGraph(app)).id).toBe('customer-support-contract');
+  await expect(app.getByTestId('rf__node-classifier')).toBeVisible();
 
   await loadResearchIntake(app);
 

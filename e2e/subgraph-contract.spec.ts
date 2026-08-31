@@ -68,22 +68,28 @@ test('subgraph inspector resizes, assigns membership, and focuses the container'
 test('reset restores the example graph and undo returns the prior demo', async ({ app }) => {
   await loadResearchSupervisor(app);
   await app.getByRole('button', { name: 'Reset example graph' }).click();
-  await expect(app.getByText('Customer Support Workflow', { exact: true })).toBeVisible();
-  expect((await readGraph(app)).id).toBe('customer-support-contract');
+  await expect.poll(async () => (await readGraph(app)).id).toBe('customer-support-contract');
+  await expect(app.getByTestId('rf__node-classifier')).toBeVisible();
 
   await app.getByRole('button', { name: 'Undo' }).click();
-  await expect(app.getByText('Research Supervisor Workflow', { exact: true })).toBeVisible();
-  expect((await readGraph(app)).id).toBe('research-supervisor-demo');
+  await expect.poll(async () => (await readGraph(app)).id).toBe('research-supervisor-demo');
+  await expect(app.getByTestId('rf__node-research-supervisor')).toBeVisible();
 });
 
 test('freezing a subgraph contract locks collapse, resize, membership, and node editing', async ({ app }) => {
   await loadResearchSupervisor(app);
   await app.getByRole('button', { name: /confirm (?:and|&) freeze/i }).click();
-  await expect(
-    app
-      .locator('header[aria-label="GraphContract workspace controls"]')
-      .getByText('Frozen contract', { exact: true }),
-  ).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Unfreeze contract; currently frozen' })).toBeVisible();
+  const projection = app.getByRole('radiogroup', { name: 'Canvas projection' });
+  await expect(projection.getByRole('radio', { name: 'Scenario', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await projection.getByRole('radio', { name: 'Design', exact: true }).click();
+  await expect(projection.getByRole('radio', { name: 'Design', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
 
   await app
     .getByTestId('rf__node-research-supervisor')

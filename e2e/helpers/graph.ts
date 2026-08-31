@@ -49,8 +49,17 @@ export async function loadResearchSupervisor(page: Page) {
     await dialog.accept();
   });
   await page.getByRole('button', { name: 'Load Research Supervisor demo' }).click();
-  await expect(page.getByText('Research Supervisor Workflow', { exact: true })).toBeVisible();
-  await expect(page.getByText('6 nodes · 5 branches', { exact: true })).toBeVisible();
+  await expect.poll(async () => {
+    const graph = await readGraph(page);
+    return { id: graph.id, name: graph.name, nodes: graph.nodes.length, edges: graph.edges.length };
+  }).toEqual({
+    id: 'research-supervisor-demo',
+    name: 'Research Supervisor Workflow',
+    nodes: 6,
+    edges: 5,
+  });
+  await expect(page.getByTestId('rf__node-research-supervisor')).toBeVisible();
+  await expect(page.getByLabel('Graph status')).toContainText('6 nodes');
 }
 
 export async function chooseInspectorOption(
