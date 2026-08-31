@@ -59,4 +59,48 @@ describe('ScenarioPanel', () => {
     expect(onScenarioSelect).toHaveBeenLastCalledWith(null);
     expect(screen.getAllByRole('link', { name: /Download / })).toHaveLength(3);
   });
+
+  it('paginates large scenario sets, preserves selection downloads, and announces bounded loop behavior', () => {
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL')
+      .mockImplementation((() => 'blob:scenario-download') as typeof URL.createObjectURL);
+    vi.spyOn(URL, 'revokeObjectURL');
+    const graph = { ...sampleGraph, status: 'frozen' as const };
+    const baseScenario = enumerateScenarios(graph)[0];
+    const scenarios = Array.from({ length: 143 }, (_, index) => ({
+      ...baseScenario,
+      id: `scenario-${index + 1}`,
+      name: `Scenario ${index + 1}`,
+    }));
+
+    render(<ScenarioPanel graph={graph} scenarios={scenarios} />);
+
+    expect(screen.getByText(
+      'Bounded deterministic execution scenarios. Authored loop traversal caps are honored; loops without a cap default to one traversal per path.',
+    )).toBeTruthy();
+    expect(screen.getByText('Showing 1–24 of 143 scenarios. Page 1 of 6.')).toBeTruthy();
+    expect(screen.getAllByRole('listitem')).toHaveLength(24);
+    expect(screen.getByRole('button', { name: /^Scenario 24Conditions/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Scenario 25Conditions/ })).toBeNull();
+    expect(createObjectUrl).toHaveBeenCalledTimes(3);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Scenario 1Conditions/ }));
+    expect(screen.getByRole('complementary', { name: 'Selected scenario: Scenario 1' })).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: /Download / })).toHaveLength(5);
+    expect(createObjectUrl).toHaveBeenCalledTimes(5);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next scenario page' }));
+
+    const pageStatus = screen.getByText('Showing 25–48 of 143 scenarios. Page 2 of 6.');
+    expect(document.activeElement).toBe(pageStatus);
+    expect(screen.getAllByRole('listitem')).toHaveLength(24);
+    expect(screen.getByRole('button', { name: /^Scenario 25Conditions/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Scenario 1Conditions/ })).toBeNull();
+    expect(screen.getByRole('complementary', { name: 'Selected scenario: Scenario 1' })).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: /Download / })).toHaveLength(5);
+    expect(createObjectUrl).toHaveBeenCalledTimes(5);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous scenario page' }));
+    expect(document.activeElement).toBe(screen.getByText('Showing 1–24 of 143 scenarios. Page 1 of 6.'));
+    expect(screen.getByRole('button', { name: /^Scenario 1Conditions/ }).getAttribute('aria-pressed')).toBe('true');
+  });
 });

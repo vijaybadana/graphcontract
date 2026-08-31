@@ -1,5 +1,8 @@
 'use client';
 
+import { useRef } from 'react';
+import type { KeyboardEvent } from 'react';
+
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -227,18 +230,21 @@ function WorkspacePresentationSwitch({
   const options: ReadonlyArray<{
     mode: WorkspacePresentationMode;
     label: string;
+    compactLabel: string;
     available: boolean;
     unavailableReason?: string;
   }> = [
     {
       mode: 'design',
       label: 'Design',
+      compactLabel: 'Design',
       available: !proposalPending,
       unavailableReason: 'A proposal is awaiting human review.',
     },
     {
       mode: 'scenario',
       label: 'Scenario',
+      compactLabel: 'Cases',
       available: scenarioCount > 0 && !proposalPending,
       unavailableReason: proposalPending
         ? 'A proposal is awaiting human review.'
@@ -247,12 +253,14 @@ function WorkspacePresentationSwitch({
     {
       mode: 'proposal',
       label: 'Proposal',
+      compactLabel: 'Review',
       available: proposalPending,
       unavailableReason: 'No proposal is awaiting human review.',
     },
     {
       mode: 'runtime',
       label: 'Runtime',
+      compactLabel: 'Run',
       available: runtimeAvailable && !proposalPending,
       unavailableReason: proposalPending
         ? 'A proposal is awaiting human review.'
@@ -260,21 +268,61 @@ function WorkspacePresentationSwitch({
     },
   ];
 
+  const optionRefs = useRef<Partial<Record<WorkspacePresentationMode, HTMLButtonElement | null>>>({});
+  const availableOptions = options.filter((option) => option.available);
+  const rovingMode = options.some((option) => option.mode === active && option.available)
+    ? active
+    : availableOptions[0]?.mode;
+
+  const selectByKeyboard = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentMode: WorkspacePresentationMode,
+  ) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+
+    const currentIndex = availableOptions.findIndex((option) => option.mode === currentMode);
+    if (currentIndex < 0 || availableOptions.length === 0) return;
+
+    let nextIndex = currentIndex;
+    if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = availableOptions.length - 1;
+    else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % availableOptions.length;
+    } else {
+      nextIndex = (currentIndex - 1 + availableOptions.length) % availableOptions.length;
+    }
+
+    const nextMode = availableOptions[nextIndex]?.mode;
+    if (!nextMode) return;
+    optionRefs.current[nextMode]?.focus();
+    if (nextMode !== active) onChange(nextMode);
+  };
+
   return (
-    <div className="workspace-command-group workspace-view-command-group" role="radiogroup" aria-label="Canvas projection">
+    <div
+      className="workspace-command-group workspace-view-command-group"
+      role="radiogroup"
+      aria-label="Canvas projection"
+      aria-orientation="horizontal"
+    >
       {options.map((option) => (
         <button
           key={option.mode}
+          ref={(element) => { optionRefs.current[option.mode] = element; }}
           type="button"
           role="radio"
           aria-checked={active === option.mode}
           aria-label={option.available ? option.label : `${option.label} unavailable: ${option.unavailableReason}`}
           className={`workspace-view-button ${active === option.mode ? 'is-active' : ''}`}
           disabled={!option.available}
+          tabIndex={option.available && option.mode === rovingMode ? 0 : -1}
           title={option.available ? `Show ${option.label.toLowerCase()} projection` : option.unavailableReason}
           onClick={() => onChange(option.mode)}
+          onKeyDown={(event) => selectByKeyboard(event, option.mode)}
         >
-          {option.label}
+          <span className="workspace-view-label-full" aria-hidden="true">{option.label}</span>
+          <span className="workspace-view-label-compact" aria-hidden="true">{option.compactLabel}</span>
         </button>
       ))}
     </div>

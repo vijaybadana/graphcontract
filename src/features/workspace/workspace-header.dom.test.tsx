@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -160,6 +161,76 @@ describe('WorkspaceHeader freeze control', () => {
     expect((screen.getByRole('radio', { name: 'Scenario' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('uses roving radio focus and skips unavailable modes with every navigation key', () => {
+    function PresentationHarness() {
+      const [viewMode, setViewMode] = useState<'design' | 'scenario' | 'proposal' | 'runtime'>('design');
+      return (
+        <WorkspaceHeader
+          graphName="Parallel research"
+          graphStatus="frozen"
+          webMcpStatus="connected"
+          nodeCount={6}
+          edgeCount={5}
+          issueCount={0}
+          proposalPending={false}
+          libraryOpen={false}
+          libraryEntryCount={10}
+          paletteOpen
+          inspectorOpen
+          canUndo={false}
+          canRedo={false}
+          canDuplicate={false}
+          canDelete={false}
+          canFreeze={false}
+          canAutoLayout={false}
+          scenarioCount={4}
+          viewMode={viewMode}
+          runtimeAvailable
+          {...callbacks}
+          onViewModeChange={setViewMode}
+        />
+      );
+    }
+
+    render(<PresentationHarness />);
+
+    const design = screen.getByRole('radio', { name: 'Design' });
+    const scenario = screen.getByRole('radio', { name: 'Scenario' });
+    const proposal = screen.getByRole('radio', { name: /Proposal unavailable:/ });
+    const runtime = screen.getByRole('radio', { name: 'Runtime' });
+
+    expect(design.tabIndex).toBe(0);
+    expect(scenario.tabIndex).toBe(-1);
+    expect(proposal.tabIndex).toBe(-1);
+    expect(runtime.tabIndex).toBe(-1);
+
+    design.focus();
+    fireEvent.keyDown(design, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(scenario);
+    expect(scenario.getAttribute('aria-checked')).toBe('true');
+    expect(scenario.tabIndex).toBe(0);
+
+    fireEvent.keyDown(scenario, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(runtime);
+    expect(runtime.getAttribute('aria-checked')).toBe('true');
+
+    fireEvent.keyDown(runtime, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(design);
+    expect(design.getAttribute('aria-checked')).toBe('true');
+
+    fireEvent.keyDown(design, { key: 'ArrowLeft' });
+    expect(document.activeElement).toBe(runtime);
+
+    fireEvent.keyDown(runtime, { key: 'Home' });
+    expect(document.activeElement).toBe(design);
+
+    fireEvent.keyDown(design, { key: 'End' });
+    expect(document.activeElement).toBe(runtime);
+
+    fireEvent.keyDown(runtime, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(scenario);
+  });
+
   it('keeps compact-safe status-aware names while preserving desktop labels', () => {
     const baseProps = {
       graphName: 'Research Intake',
@@ -188,6 +259,10 @@ describe('WorkspaceHeader freeze control', () => {
     render(<WorkspaceHeader {...baseProps} graphStatus="draft" />);
     expect(screen.getByRole('button', { name: 'Confirm and freeze contract; currently draft' })).toBeTruthy();
     expect(screen.getByText('Confirm & freeze')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Design' })).toBeTruthy();
+    expect(screen.getByText('Cases').getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByText('Review').getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByText('Run').getAttribute('aria-hidden')).toBe('true');
 
     cleanup();
     render(<WorkspaceHeader {...baseProps} graphStatus="frozen" />);

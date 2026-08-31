@@ -18,6 +18,8 @@ type ScenarioPanelProps = {
   onScenarioSelect?: (scenarioId: string | null) => void;
 };
 
+const SCENARIO_PAGE_SIZE = 24;
+
 const outcomeLabel = (scenario: BranchScenario) =>
   scenario.expectedTerminalOutcome.detail?.trim() ||
   scenario.expectedTerminalOutcome.kind.replaceAll('-', ' ');
@@ -29,10 +31,18 @@ export function ScenarioPanel({
   onScenarioSelect,
 }: ScenarioPanelProps) {
   const [localSelectedScenarioId, setLocalSelectedScenarioId] = useState<string | null>(null);
+  const [requestedPageIndex, setRequestedPageIndex] = useState(0);
+  const pageStatusRef = useRef<HTMLParagraphElement>(null);
+  const focusPageStatusAfterRenderRef = useRef(false);
   const activeScenarioId = selectedScenarioId === undefined
     ? localSelectedScenarioId
     : selectedScenarioId;
   const selectedScenario = scenarios.find((scenario) => scenario.id === activeScenarioId) ?? null;
+  const pageCount = Math.max(1, Math.ceil(scenarios.length / SCENARIO_PAGE_SIZE));
+  const pageIndex = Math.min(requestedPageIndex, pageCount - 1);
+  const pageStart = pageIndex * SCENARIO_PAGE_SIZE;
+  const pageEnd = Math.min(pageStart + SCENARIO_PAGE_SIZE, scenarios.length);
+  const visibleScenarios = scenarios.slice(pageStart, pageEnd);
   const nodeLabels = useMemo(
     () => new Map(graph.nodes.map((node) => [node.id, node.label])),
     [graph.nodes],
@@ -59,6 +69,16 @@ export function ScenarioPanel({
     if (selectedScenarioId === undefined) setLocalSelectedScenarioId(nextScenarioId);
     onScenarioSelect?.(nextScenarioId);
   };
+  const showPage = (nextPageIndex: number) => {
+    focusPageStatusAfterRenderRef.current = true;
+    setRequestedPageIndex(Math.max(0, Math.min(nextPageIndex, pageCount - 1)));
+  };
+
+  useLayoutEffect(() => {
+    if (!focusPageStatusAfterRenderRef.current) return;
+    focusPageStatusAfterRenderRef.current = false;
+    pageStatusRef.current?.focus();
+  }, [pageIndex]);
 
   if (graph.status !== 'frozen') {
     return (
@@ -74,13 +94,48 @@ export function ScenarioPanel({
       <div className="rounded-2xl bg-[#18211d] p-4 text-white">
         <p className="eyebrow !text-white/50">Frozen contract</p>
         <p className="mt-2 text-2xl font-semibold">{scenarios.length} paths</p>
-        <p className="mt-1 text-[11px] leading-5 text-white/60">Bounded deterministic execution scenarios; each loop is traversed at most once per path.</p>
+        <p className="mt-1 text-[11px] leading-5 text-white/60">
+          Bounded deterministic execution scenarios. Authored loop traversal caps are honored; loops without a cap default to one traversal per path.
+        </p>
       </div>
-      <div className="mt-3 max-h-[300px] space-y-2 overflow-y-auto pr-1">
-        {scenarios.map((scenario) => (
+      {scenarios.length > 0 && (
+        <nav className="scenario-pagination" aria-label="Scenario pages">
+          <p
+            ref={pageStatusRef}
+            className="scenario-pagination__status"
+            tabIndex={-1}
+            aria-live="polite"
+          >
+            Showing {pageStart + 1}–{pageEnd} of {scenarios.length} scenarios. Page {pageIndex + 1} of {pageCount}.
+          </p>
+          {pageCount > 1 && (
+            <div className="scenario-pagination__controls">
+              <button
+                type="button"
+                disabled={pageIndex === 0}
+                aria-label="Previous scenario page"
+                onClick={() => showPage(pageIndex - 1)}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={pageIndex === pageCount - 1}
+                aria-label="Next scenario page"
+                onClick={() => showPage(pageIndex + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </nav>
+      )}
+      <div className="mt-3 max-h-[300px] space-y-2 overflow-y-auto pr-1" role="list" aria-label="Generated scenarios">
+        {visibleScenarios.map((scenario) => (
           <article
             key={scenario.id}
             className={`scenario-row ${activeScenarioId === scenario.id ? 'is-selected' : ''}`}
+            role="listitem"
           >
             <button
               type="button"
@@ -107,16 +162,22 @@ export function ScenarioPanel({
                 <span>{outcomeLabel(scenario)}</span>
               </span>
             </button>
-            {activeScenarioId === scenario.id && (
-              <div className="scenario-row__downloads" aria-label={`Downloads for ${scenario.name}`}>
-                {selectedDownloads.map((download) => (
-                  <DownloadLink key={download.filename} artifact={download} compact />
-                ))}
-              </div>
-            )}
           </article>
         ))}
       </div>
+      {selectedScenario && (
+        <aside className="scenario-selection-summary" aria-label={`Selected scenario: ${selectedScenario.name}`}>
+          <div>
+            <strong>{selectedScenario.name}</strong>
+            <span>Per-case downloads remain available while browsing other pages.</span>
+          </div>
+          <div className="scenario-row__downloads" aria-label={`Downloads for ${selectedScenario.name}`}>
+            {selectedDownloads.map((download) => (
+              <DownloadLink key={download.filename} artifact={download} compact />
+            ))}
+          </div>
+        </aside>
+      )}
       <div className="mt-4 space-y-2">
         {downloads.map((download) => <DownloadLink key={download.filename} artifact={download} />)}
       </div>

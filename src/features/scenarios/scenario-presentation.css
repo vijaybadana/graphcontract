@@ -49,9 +49,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: .4rem;
-  border-top: 1px solid rgb(15 23 42 / 9%);
-  padding: .6rem .75rem;
-  background: rgb(37 99 235 / 4%);
 }
 
 .scenario-row__download {
@@ -63,6 +60,93 @@
   font-size: .625rem;
   font-weight: 700;
   text-decoration: none;
+}
+
+.scenario-row__download:focus-visible,
+.scenario-pagination__controls button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.scenario-pagination {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-top: .75rem;
+}
+
+.scenario-pagination__status {
+  border-radius: .35rem;
+  color: rgb(15 23 42 / 64%);
+  font-size: .625rem;
+  line-height: 1rem;
+}
+
+.scenario-pagination__status:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.scenario-pagination__controls {
+  display: flex;
+  gap: .35rem;
+}
+
+.scenario-pagination__controls button {
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid rgb(15 23 42 / 14%);
+  border-radius: .45rem;
+  background: #fff;
+  padding: 0 .55rem;
+  color: rgb(15 23 42 / 72%);
+  font-size: .625rem;
+  font-weight: 700;
+}
+
+.scenario-pagination__controls button:disabled {
+  cursor: not-allowed;
+  opacity: .38;
+}
+
+.scenario-selection-summary {
+  display: grid;
+  gap: .6rem;
+  margin-top: .75rem;
+  border: 1px solid rgb(37 99 235 / 20%);
+  border-radius: .75rem;
+  background: rgb(37 99 235 / 4%);
+  padding: .7rem .75rem;
+}
+
+.scenario-selection-summary > div:first-child {
+  display: grid;
+  gap: .1rem;
+}
+
+.scenario-selection-summary strong {
+  font-size: .6875rem;
+  line-height: 1rem;
+}
+
+.scenario-selection-summary span {
+  color: rgb(15 23 42 / 60%);
+  font-size: .625rem;
+  line-height: 1rem;
+}
+
+@media (max-width: 520px) {
+  .scenario-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scenario-pagination__controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 /* Scenario state is attached only to ephemeral React Flow projection objects. */
