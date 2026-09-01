@@ -25,10 +25,23 @@ Requirements: Node.js 22.13 or newer.
 
 ```bash
 npm install
-npm run dev
+npm run local:run -- --run-id graphcontract-local
 ```
 
-Open `http://localhost:3000` in ChatGPT's in-app browser or a WebMCP-enabled Chrome build.
+Open `http://127.0.0.1:3000` in ChatGPT's in-app browser or a WebMCP-enabled Chrome build.
+
+`local:run` is the canonical local operator command. It binds explicitly to IPv4,
+rebuilds stale output, reuses an already healthy owned runtime, and reports ready
+only after the page and all referenced JavaScript and CSS assets pass health checks.
+
+```bash
+npm run local:status -- --run-id graphcontract-local
+npm run local:restart -- --run-id graphcontract-local
+npm run local:stop -- --run-id graphcontract-local
+```
+
+For low-level hot-reload development, `npm run dev -- --hostname 127.0.0.1` remains
+available, but it is intentionally outside the managed lifecycle above.
 
 ## Build
 
