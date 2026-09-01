@@ -1,0 +1,6 @@
+interface:
+  display_name: "GraphContract"
+  short_description: "Plan agent workflows with human approval"
+  default_prompt: "Use $graphcontract to plan this agent workflow through human review and a frozen handoff."
+policy:
+  allow_implicit_invocation: true
