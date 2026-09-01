@@ -49,6 +49,12 @@ available, but it is intentionally outside the managed lifecycle above.
 npm run build
 ```
 
+## Operator and validation commands
+
+The supported command surface and the capabilities intentionally not exposed by
+this authentication-free hackathon build are documented in
+[docs/operator-commands.md](docs/operator-commands.md).
+
 ## License
 
 Released under the [MIT License](LICENSE).

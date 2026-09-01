@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const port = Number(process.env.PW_PORT ?? '3217');
-const baseURL = `http://localhost:${port}`;
+const hostname = '127.0.0.1';
+const baseURL = `http://${hostname}:${port}`;
 
 export default defineConfig({
   testDir: './e2e',
@@ -24,7 +25,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: `npm run build && npm run start -- --port ${port}`,
+    command: `npm run build && npm run start -- --hostname ${hostname} --port ${port}`,
     url: baseURL,
     reuseExistingServer: process.env.PW_REUSE_SERVER === '1',
     timeout: 300_000,

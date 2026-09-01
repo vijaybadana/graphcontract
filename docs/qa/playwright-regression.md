@@ -3,7 +3,7 @@
 `npm run test:e2e` is the protected browser acceptance gate for GraphContract.
 Run it on every candidate integration after unit tests and before deployment.
 The gate builds the exact tree and owns its Vinext production server on
-`localhost:3217`; set `PW_PORT` to avoid a port conflict. It reuses an existing
+`127.0.0.1:3217`; set `PW_PORT` to avoid a port conflict. It reuses an existing
 server only when `PW_REUSE_SERVER=1`.
 
 The initial Chromium suite protects these user-visible contracts:

@@ -17,6 +17,9 @@
     "local:stop": "node scripts/local-runtime.mjs stop",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:dev": "npm run lint && npm run test:unit",
+    "test:integration": "playwright test",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report"
