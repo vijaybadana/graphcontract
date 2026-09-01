@@ -91,6 +91,22 @@ describe('GraphContract agent skill foundation', () => {
     ]);
   });
 
+  it('scopes Netlify content types and public CORS to the machine-readable skill artifacts', () => {
+    const configuration = readFileSync(resolve(repositoryRoot, 'netlify.toml'), 'utf8');
+    const headerBlocks = configuration.split('[[headers]]').slice(1);
+    const blockFor = (path: string) => headerBlocks.find((block) => block.includes(`for = "${path}"`));
+    const skillHeaders = blockFor('/.well-known/agent-skills/graphcontract/SKILL.md');
+    const indexHeaders = blockFor('/.well-known/agent-skills/index.json');
+    const appHeaders = blockFor('/*');
+
+    expect(skillHeaders).toContain('Content-Type = "text/markdown; charset=utf-8"');
+    expect(skillHeaders).toContain('Access-Control-Allow-Origin = "*"');
+    expect(indexHeaders).toContain('Content-Type = "application/json; charset=utf-8"');
+    expect(indexHeaders).toContain('Access-Control-Allow-Origin = "*"');
+    expect(appHeaders).not.toContain('Access-Control-Allow-Origin');
+    expect(appHeaders).not.toContain('\n    Content-Type =');
+  });
+
   it('leaves GraphContract registered as exactly three review-bound WebMCP tools', async () => {
     const registered: string[] = [];
     const modelContext = {

@@ -34,12 +34,28 @@ import { CONTRACT_NODE_HEIGHT, CONTRACT_NODE_WIDTH } from './canvas-geometry';
 export type WorkspaceCore = {
   graph: WorkflowGraph;
   proposal: GraphProposal | null;
+  /** Human-authored revision feedback. It is review state, never graph data. */
+  reviewRequest?: ProposalReviewRequest | null;
   scenarios: BranchScenario[];
+};
+
+export type ProposalReviewRequest = {
+  status: 'changes_requested';
+  feedback: string;
+  proposalId: string;
+  proposalCreatedAt: string;
+  reviewedGraphId: string;
+  reviewedGraphUpdatedAt: string;
+  reviewedAt: string;
 };
 
 export type ProposalResult =
   | { ok: true; proposal: GraphProposal }
   | { ok: false; error: { code: string; message: string; issues?: ValidationIssue[] } };
+
+export type RequestChangesResult =
+  | { ok: true; reviewRequest: ProposalReviewRequest }
+  | { ok: false; error: { code: string; message: string } };
 
 export type FreezeResult =
   | { ok: true; scenarios: BranchScenario[] }
@@ -173,6 +189,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
   const createInitial = (): WorkspaceCore => ({
     graph: normalizeWorkflowGraph({ ...clone(sampleGraph), updatedAt: dependencies.now() }),
     proposal: null,
+    reviewRequest: null,
     scenarios: [],
   });
 
@@ -185,7 +202,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     notice:
       state.graph.status === 'frozen'
         ? 'Unfreeze the contract before editing.'
-        : 'Approve or reject the agent proposal before editing the accepted graph.',
+        : 'Resolve the agent proposal before editing the accepted graph.',
   });
 
   const changeGraph = (
@@ -197,7 +214,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     const graph = normalizeWorkflowGraph(updater(clone(state.graph)));
     graph.updatedAt = dependencies.now();
     graph.status = 'draft';
-    return { state: { graph, proposal: null, scenarios: [] }, changed: true, notice };
+    return { state: { ...state, graph, proposal: null, scenarios: [] }, changed: true, notice };
   };
 
   const isLayoutAffectingProposalOperation = (operation: GraphProposal['operations'][number]) => {
@@ -740,7 +757,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         return { state, changed: false, result: { ok: false, error: result.error! } };
       }
       return {
-        state: { ...state, proposal: result.proposal },
+        state: {
+          ...state,
+          proposal: result.proposal,
+          reviewRequest:
+            result.proposal.status === 'pending'
+              ? null
+              : state.reviewRequest ?? null,
+        },
         changed: true,
         notice:
           result.proposal.status === 'pending'
@@ -792,7 +816,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         : applied.graph;
       const graph = { ...acceptedGraph, status: 'draft' as const, updatedAt: dependencies.now() };
       return {
-        state: { graph, proposal: null, scenarios: [] },
+        state: { ...state, graph, proposal: null, reviewRequest: null, scenarios: [] },
         changed: true,
         notice: 'Proposal approved and applied to the accepted graph.',
         result: { ok: true, proposal: { ...proposal, status: 'approved' } },
@@ -809,11 +833,48 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       };
     },
 
+    requestProposalChanges(
+      state: WorkspaceCore,
+      feedback: string,
+    ): WorkspaceTransition<RequestChangesResult> {
+      const proposal = state.proposal;
+      if (!proposal) {
+        const error = {
+          code: 'PROPOSAL_MISSING',
+          message: 'There is no proposal awaiting human review.',
+        };
+        return { state, changed: false, result: { ok: false, error } };
+      }
+      const normalizedFeedback = feedback.trim();
+      if (normalizedFeedback.length < 3) {
+        const error = {
+          code: 'REVIEW_FEEDBACK_REQUIRED',
+          message: 'Describe the requested revision using at least 3 non-space characters.',
+        };
+        return { state, changed: false, result: { ok: false, error } };
+      }
+      const reviewRequest: ProposalReviewRequest = {
+        status: 'changes_requested',
+        feedback: normalizedFeedback,
+        proposalId: proposal.id,
+        proposalCreatedAt: proposal.createdAt,
+        reviewedGraphId: state.graph.id,
+        reviewedGraphUpdatedAt: state.graph.updatedAt,
+        reviewedAt: dependencies.now(),
+      };
+      return {
+        state: { ...state, proposal: null, reviewRequest },
+        changed: true,
+        notice: 'Changes requested. The accepted graph was not changed.',
+        result: { ok: true, reviewRequest },
+      };
+    },
+
     freezeGraph(state: WorkspaceCore): WorkspaceTransition<FreezeResult> {
       if (state.proposal) {
         const issues = [{
           code: 'PENDING_PROPOSAL_EXISTS',
-          message: 'Approve or reject the proposal before freezing.',
+          message: 'Resolve the proposal before freezing.',
         }];
         return { state, changed: false, notice: issues[0].message, result: { ok: false, issues } };
       }
@@ -843,7 +904,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       }
       const scenarios = enumeration.scenarios;
       return {
-        state: { graph, proposal: null, scenarios },
+        state: { ...state, graph, proposal: null, scenarios },
         changed: true,
         notice: `Contract frozen with ${scenarios.length} reachable paths.`,
         result: { ok: true, scenarios },
@@ -854,6 +915,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       if (state.graph.status !== 'frozen') return { state, changed: false };
       return {
         state: {
+          ...state,
           graph: { ...state.graph, status: 'draft', updatedAt: dependencies.now() },
           proposal: null,
           scenarios: [],

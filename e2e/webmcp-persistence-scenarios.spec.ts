@@ -20,6 +20,15 @@ type GraphRead = {
   };
   validation: { validForFreeze: boolean; issues: unknown[] };
   pendingProposal?: { id: string; status: string; rationale: string };
+  reviewRequest?: {
+    status: 'changes_requested';
+    feedback: string;
+    proposalId: string;
+    reviewedGraphId: string;
+    reviewedGraphUpdatedAt: string;
+    reviewedAt: string;
+    contentTrust: 'untrusted-human-authored';
+  };
 };
 
 type ProposalResult = {
@@ -141,6 +150,89 @@ test('a second proposal is rejected until the human resolves the first', async (
   });
   await expect(app.getByText('E2E proposal: First Preview', { exact: true })).toBeVisible();
   await expect(app.getByText('E2E proposal: Second Preview', { exact: true })).toHaveCount(0);
+});
+
+test('human review feedback survives reload and is consumed only by a valid revised proposal', async ({ app }) => {
+  expect(await webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
+  const accepted = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  const proposal = await callWebMcpTool<ProposalResult>(
+    app,
+    'propose_graph_changes',
+    updateClassifier('Needs clearer routing', accepted.graph.updatedAt),
+  );
+  expect(proposal).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(accepted.graph);
+
+  const requestChanges = app.getByRole('button', { name: 'Request changes' });
+  await requestChanges.click();
+  const dialog = app.getByRole('dialog', { name: 'Request proposal changes' });
+  const feedback = dialog.getByLabel('Requested changes');
+  await expect(dialog).toBeVisible();
+  await expect(feedback).toBeFocused();
+  await expect(dialog.getByRole('button', { name: 'Submit request' })).toBeDisabled();
+  await app.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(requestChanges).toBeFocused();
+
+  await requestChanges.click();
+  const requestedText = 'Keep the classifier name and clarify the technical route.';
+  await dialog.getByLabel('Requested changes').fill(requestedText);
+  await dialog.getByRole('button', { name: 'Submit request' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(app.getByText('Changes requested', { exact: true })).toBeVisible();
+  let reviewed = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(reviewed.graph).toEqual(accepted.graph);
+  expect(reviewed.pendingProposal).toBeUndefined();
+  expect(reviewed.reviewRequest).toMatchObject({
+    status: 'changes_requested',
+    feedback: requestedText,
+    reviewedGraphId: accepted.graph.id,
+    reviewedGraphUpdatedAt: accepted.graph.updatedAt,
+    contentTrust: 'untrusted-human-authored',
+  });
+
+  await app.reload();
+  await expect.poll(() => webMcpToolNames(app)).toEqual([
+    'get_branch_scenarios',
+    'get_graph',
+    'propose_graph_changes',
+  ]);
+  reviewed = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(reviewed.reviewRequest?.feedback).toBe(requestedText);
+
+  const stale = await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
+    ...updateClassifier('Stale revision', '2000-01-01T00:00:00.000Z'),
+  });
+  expect(stale).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).reviewRequest?.feedback).toBe(requestedText);
+
+  const invalid = await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
+    expectedGraphUpdatedAt: accepted.graph.updatedAt,
+    operations: [{ type: 'remove_node', nodeId: 'end' }],
+    rationale: 'Invalid revision must not consume the human review request.',
+  });
+  expect(invalid).toMatchObject({ ok: true, proposal: { status: 'invalid' } });
+  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).reviewRequest?.feedback).toBe(requestedText);
+  await app.getByRole('button', { name: 'Reject' }).click();
+
+  const revised = await callWebMcpTool<ProposalResult>(
+    app,
+    'propose_graph_changes',
+    updateClassifier('Technical Routing Classifier', accepted.graph.updatedAt),
+  );
+  expect(revised).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  const pendingRevision = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(pendingRevision.reviewRequest).toBeUndefined();
+  expect(pendingRevision.graph).toEqual(accepted.graph);
+  await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
+  await app.getByRole('button', { name: 'Approve' }).click();
+  const approved = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(classifierLabel(approved)).toBe('Technical Routing Classifier');
+  expect(approved.reviewRequest).toBeUndefined();
 });
 
 test('approval applies a multi-operation proposal atomically and persists after reload', async ({ app }) => {

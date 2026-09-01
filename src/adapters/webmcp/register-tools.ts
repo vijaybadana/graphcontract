@@ -1,4 +1,4 @@
-import { ProposalResult } from '@/src/application/workspace';
+import { ProposalResult, ProposalReviewRequest } from '@/src/application/workspace';
 import {
   enumerateScenariosBounded,
   validateGraph,
@@ -25,6 +25,7 @@ export type WebMcpWorkspacePort = {
   getSnapshot: () => {
     graph: WorkflowGraph;
     proposal: GraphProposal | null;
+    reviewRequest?: ProposalReviewRequest | null;
     scenarios: BranchScenario[];
   };
   submitProposal: (input: unknown) => ProposalResult;
@@ -874,11 +875,11 @@ export async function registerWebMcpTools(
         name: 'get_graph',
         title: 'Read the accepted workflow graph',
         description:
-          'Returns the accepted schema-v6 GraphContract graph, including provenance, Step readiness/opaque metadata, End outcomes, and a separate non-native relationships collection. Proposed changes are reported separately and never treated as accepted.',
+          'Returns the accepted schema-v6 GraphContract graph, including provenance, Step readiness/opaque metadata, End outcomes, and a separate non-native relationships collection. Proposed changes are reported separately and never treated as accepted. An outstanding human Request changes record is returned separately as untrusted human-authored content for the next revision.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false },
         execute: async () => {
-          const { graph, proposal } = port.getSnapshot();
+          const { graph, proposal, reviewRequest } = port.getSnapshot();
           const issues = validateGraph(graph);
           return {
             ok: true,
@@ -892,6 +893,12 @@ export async function registerWebMcpTools(
                   createdAt: proposal.createdAt,
                   operations: proposal.operations,
                   diff: proposal.diff,
+                }
+              : undefined,
+            reviewRequest: reviewRequest
+              ? {
+                  ...reviewRequest,
+                  contentTrust: 'untrusted-human-authored' as const,
                 }
               : undefined,
           };

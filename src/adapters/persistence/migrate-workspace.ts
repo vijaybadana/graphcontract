@@ -1,4 +1,4 @@
-import { WorkspaceCore } from '@/src/application/workspace';
+import { ProposalReviewRequest, WorkspaceCore } from '@/src/application/workspace';
 import {
   enumerateScenariosBounded,
   graphEdgeSchema,
@@ -37,6 +37,29 @@ type PersistedWorkspace = Partial<WorkspaceCore> & Record<string, unknown>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
+
+function normalizeReviewRequest(value: unknown): ProposalReviewRequest | null {
+  if (!isRecord(value)) return null;
+  const feedback = typeof value.feedback === 'string' ? value.feedback.trim() : '';
+  if (
+    value.status !== 'changes_requested'
+    || feedback.length < 3
+    || typeof value.proposalId !== 'string'
+    || typeof value.proposalCreatedAt !== 'string'
+    || typeof value.reviewedGraphId !== 'string'
+    || typeof value.reviewedGraphUpdatedAt !== 'string'
+    || typeof value.reviewedAt !== 'string'
+  ) return null;
+  return {
+    status: 'changes_requested',
+    feedback,
+    proposalId: value.proposalId,
+    proposalCreatedAt: value.proposalCreatedAt,
+    reviewedGraphId: value.reviewedGraphId,
+    reviewedGraphUpdatedAt: value.reviewedGraphUpdatedAt,
+    reviewedAt: value.reviewedAt,
+  };
+}
 
 const proposalDiffArrayKeys = [
   'addedNodeIds',
@@ -226,6 +249,7 @@ function restoreWorkspaceProjection(
     ...persisted,
     graph: normalizedGraph,
     proposal: proposal as WorkspaceCore['proposal'],
+    reviewRequest: normalizeReviewRequest(persisted.reviewRequest),
     scenarios: enumeration?.ok ? enumeration.scenarios : [],
   };
 }

@@ -117,6 +117,83 @@ describe('workspace application service', () => {
     expect(approved.state.proposal).toBeNull();
   });
 
+  it('keeps human revision feedback durable until a valid replacement proposal is pending', () => {
+    const initial = service.createInitial();
+    const acceptedBefore = structuredClone(initial.graph);
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Clarify the billing specialist.',
+      expectedGraphUpdatedAt: initial.graph.updatedAt,
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } },
+      ],
+    });
+    const empty = service.requestProposalChanges(proposed.state, '  ');
+
+    expect(empty.changed).toBe(false);
+    expect(empty.result).toMatchObject({ ok: false, error: { code: 'REVIEW_FEEDBACK_REQUIRED' } });
+    expect(empty.state.proposal?.status).toBe('pending');
+
+    const requested = service.requestProposalChanges(
+      proposed.state,
+      '  Keep the original label and document the escalation route instead.  ',
+    );
+    expect(requested.result).toMatchObject({
+      ok: true,
+      reviewRequest: {
+        status: 'changes_requested',
+        feedback: 'Keep the original label and document the escalation route instead.',
+        proposalId: proposed.state.proposal?.id,
+        reviewedGraphId: initial.graph.id,
+        reviewedGraphUpdatedAt: initial.graph.updatedAt,
+      },
+    });
+    expect(requested.state.graph).toEqual(acceptedBefore);
+    expect(requested.state.proposal).toBeNull();
+
+    const stale = service.submitProposal(requested.state, {
+      rationale: 'Use a stale read.',
+      expectedGraphUpdatedAt: '2020-01-01T00:00:00.000Z',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } }],
+    });
+    expect(stale.result).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+    expect(stale.state.reviewRequest).toEqual(requested.state.reviewRequest);
+
+    const invalid = service.submitProposal(requested.state, {
+      rationale: 'Reference a missing node.',
+      expectedGraphUpdatedAt: initial.graph.updatedAt,
+      operations: [{ type: 'update_node', nodeId: 'missing', patch: { label: 'Missing' } }],
+    });
+    expect(invalid.result).toMatchObject({ ok: true, proposal: { status: 'invalid' } });
+    expect(invalid.state.reviewRequest).toEqual(requested.state.reviewRequest);
+
+    const clearedInvalid = service.rejectProposal(invalid.state);
+    expect(clearedInvalid.state.reviewRequest).toEqual(requested.state.reviewRequest);
+    const revised = service.submitProposal(clearedInvalid.state, {
+      rationale: 'Document the escalation route without changing its identity.',
+      expectedGraphUpdatedAt: initial.graph.updatedAt,
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } }],
+    });
+    expect(revised.result).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(revised.state.reviewRequest).toBeNull();
+    expect(revised.state.graph).toEqual(acceptedBefore);
+  });
+
+  it('keeps rejection terminal and does not manufacture revision feedback', () => {
+    const initial = service.createInitial();
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Clarify the billing specialist.',
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } },
+      ],
+    });
+
+    const rejected = service.rejectProposal(proposed.state);
+
+    expect(rejected.state.graph).toEqual(initial.graph);
+    expect(rejected.state.proposal).toBeNull();
+    expect(rejected.state.reviewRequest ?? null).toBeNull();
+  });
+
   it('keeps the accepted graph immutable for an invalid multi-operation proposal', () => {
     const initial = service.createInitial();
     const before = structuredClone(initial.graph);
@@ -484,7 +561,7 @@ describe('workspace application service', () => {
       const reset = service.resetGraph(reviewState);
 
       expect(reset.changed).toBe(false);
-      expect(reset.notice).toBe('Approve or reject the agent proposal before editing the accepted graph.');
+      expect(reset.notice).toBe('Resolve the agent proposal before editing the accepted graph.');
       expect(reset.state).toEqual(before);
     }
   });

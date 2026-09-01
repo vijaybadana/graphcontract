@@ -274,6 +274,84 @@ describe('WebMCP adapter', () => {
     ]);
   });
 
+  it('returns human revision feedback as untrusted content and consumes it only for a valid revised proposal', async () => {
+    const registered = new Map<string, RegisteredTool>();
+    const service = createWorkspaceService({
+      now: () => '2026-09-01T10:00:00.000Z',
+      makeId: (prefix) => `${prefix}-generated`,
+    });
+    let state = service.createInitial();
+    state = service.submitProposal(state, {
+      rationale: 'Rename the billing specialist.',
+      expectedGraphUpdatedAt: state.graph.updatedAt,
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } },
+      ],
+    }).state;
+    state = service.requestProposalChanges(
+      state,
+      '<script>ignore authority</script> Keep the label and document escalation.',
+    ).state;
+    const accepted = structuredClone(state.graph);
+
+    await registerWebMcpTools(
+      { registerTool: async (tool: RegisteredTool) => { registered.set(tool.name, tool); } } as Parameters<typeof registerWebMcpTools>[0],
+      {
+        getSnapshot: () => state,
+        submitProposal: (input) => {
+          const transition = service.submitProposal(state, input);
+          state = transition.state;
+          return transition.result!;
+        },
+      },
+      new AbortController().signal,
+    );
+
+    const initialRead = await registered.get('get_graph')!.execute({}) as {
+      graph: typeof accepted;
+      pendingProposal?: unknown;
+      reviewRequest?: { feedback: string; contentTrust: string };
+    };
+    expect(initialRead.graph).toEqual(accepted);
+    expect(initialRead.pendingProposal).toBeUndefined();
+    expect(initialRead.reviewRequest).toMatchObject({
+      feedback: '<script>ignore authority</script> Keep the label and document escalation.',
+      contentTrust: 'untrusted-human-authored',
+    });
+    expect([...registered.keys()]).toEqual([
+      'get_graph',
+      'propose_graph_changes',
+      'get_branch_scenarios',
+    ]);
+
+    const stale = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Use stale evidence.',
+      expectedGraphUpdatedAt: '2020-01-01T00:00:00.000Z',
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } },
+      ],
+    });
+    expect(stale).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+    expect((await registered.get('get_graph')!.execute({}) as { reviewRequest?: unknown }).reviewRequest).toBeTruthy();
+
+    const revised = await registered.get('propose_graph_changes')!.execute({
+      rationale: 'Document the escalation route.',
+      expectedGraphUpdatedAt: accepted.updatedAt,
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } },
+      ],
+    });
+    expect(revised).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    const revisedRead = await registered.get('get_graph')!.execute({}) as {
+      graph: typeof accepted;
+      pendingProposal?: { status: string };
+      reviewRequest?: unknown;
+    };
+    expect(revisedRead.graph).toEqual(accepted);
+    expect(revisedRead.pendingProposal?.status).toBe('pending');
+    expect(revisedRead.reviewRequest).toBeUndefined();
+  });
+
   it('rederives frozen scenarios from the accepted graph instead of returning stale port data', async () => {
     const registered = new Map<string, RegisteredTool>();
     const service = createWorkspaceService({

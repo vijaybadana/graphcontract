@@ -9,7 +9,7 @@ import {
 } from './fixtures';
 
 const workspaceStorageKey = 'graphcontract-workspace-v1';
-const currentPersistVersion = 8;
+const currentPersistVersion = 9;
 const expectedToolNames = [
   'get_branch_scenarios',
   'get_graph',

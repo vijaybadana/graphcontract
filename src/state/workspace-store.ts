@@ -9,6 +9,7 @@ import {
   FreezeResult,
   NodeCreationPreset,
   ProposalResult,
+  RequestChangesResult,
   WorkspaceCore,
   WorkspaceTransition,
 } from '@/src/application/workspace';
@@ -83,6 +84,7 @@ type WorkspaceStore = WorkspaceCore & {
   redo: () => void;
   submitProposal: (input: unknown) => ProposalResult;
   approveProposal: () => ProposalResult;
+  requestProposalChanges: (feedback: string) => RequestChangesResult;
   rejectProposal: () => void;
   freezeGraph: () => FreezeResult;
   unfreezeGraph: () => void;
@@ -210,6 +212,7 @@ export function isDomainEdgeProjectedAsCollapsedProxy(
 const coreOf = (state: WorkspaceCore): WorkspaceCore => ({
   graph: structuredClone(state.graph),
   proposal: structuredClone(state.proposal),
+  reviewRequest: structuredClone(state.reviewRequest ?? null),
   scenarios: structuredClone(state.scenarios),
 });
 const makeId = (prefix: string) =>
@@ -465,6 +468,12 @@ export const useGraphStore = create<WorkspaceStore>()(
           return transition.result!;
         },
 
+        requestProposalChanges: (feedback) => {
+          const transition = workspace.requestProposalChanges(currentCore(), feedback);
+          commit(transition, { history: false, selection: emptySelection() });
+          return transition.result!;
+        },
+
         rejectProposal: () =>
           commit(workspace.rejectProposal(currentCore()), { history: false }),
 
@@ -548,9 +557,9 @@ export const useGraphStore = create<WorkspaceStore>()(
     },
     {
       name: 'graphcontract-workspace-v1',
-      // v8 stops treating scenario projections as persistence authority and
-      // forces existing v7 snapshots through deterministic rehydration.
-      version: 8,
+      // v9 persists compact human revision feedback while scenario
+      // projections remain derived exclusively from the canonical graph.
+      version: 9,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
       migrate: (persistedState) =>
@@ -565,6 +574,7 @@ export const useGraphStore = create<WorkspaceStore>()(
       partialize: (state) => ({
         graph: state.graph,
         proposal: state.proposal,
+        reviewRequest: state.reviewRequest ?? null,
       }),
     },
   ),

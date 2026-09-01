@@ -23,6 +23,7 @@ beforeEach(() => {
   persisted.clear();
   useGraphStore.getState().resetGraph();
   useGraphStore.setState({
+    reviewRequest: null,
     selection: emptySelection(),
     clipboardNodeIds: [],
     past: [],
@@ -448,13 +449,68 @@ describe('workspace persistence reload', () => {
       },
     });
     const serialized = JSON.parse(persisted.get('graphcontract-workspace-v1')!);
-    expect(serialized.state).toEqual({ graph: canonicalGraph, proposal: null });
+    expect(serialized.state).toEqual({ graph: canonicalGraph, proposal: null, reviewRequest: null });
     expect(serialized.state).not.toHaveProperty('selection');
     expect(serialized.state).not.toHaveProperty('runtimeProjectionFixture');
     expect(serialized.state).not.toHaveProperty('clipboardNodeIds');
 
     await useGraphStore.persist.rehydrate();
     expect(useGraphStore.getState().graph).toEqual(canonicalGraph);
+  });
+
+  it('persists compact human revision feedback and consumes it only for a valid pending replacement', async () => {
+    const accepted = structuredClone(useGraphStore.getState().graph);
+    expect(useGraphStore.getState().submitProposal({
+      rationale: 'Rename the billing specialist.',
+      expectedGraphUpdatedAt: accepted.updatedAt,
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } },
+      ],
+    }).ok).toBe(true);
+    const pendingId = useGraphStore.getState().proposal!.id;
+    expect(useGraphStore.getState().requestProposalChanges(
+      'Keep the label and document the escalation route.',
+    ).ok).toBe(true);
+    const requested = structuredClone(useGraphStore.getState().reviewRequest);
+
+    expect(useGraphStore.getState().graph).toEqual(accepted);
+    expect(requested).toMatchObject({
+      status: 'changes_requested',
+      proposalId: pendingId,
+      reviewedGraphUpdatedAt: accepted.updatedAt,
+    });
+    const serialized = JSON.parse(persisted.get('graphcontract-workspace-v1')!);
+    expect(serialized.state).toEqual({
+      graph: accepted,
+      proposal: null,
+      reviewRequest: requested,
+    });
+
+    await useGraphStore.persist.rehydrate();
+    expect(useGraphStore.getState().reviewRequest).toEqual(requested);
+    expect(useGraphStore.getState().graph).toEqual(accepted);
+
+    const stale = useGraphStore.getState().submitProposal({
+      rationale: 'Use a stale accepted revision.',
+      expectedGraphUpdatedAt: '2020-01-01T00:00:00.000Z',
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } },
+      ],
+    });
+    expect(stale).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+    expect(useGraphStore.getState().reviewRequest).toEqual(requested);
+
+    const revised = useGraphStore.getState().submitProposal({
+      rationale: 'Document the escalation route.',
+      expectedGraphUpdatedAt: accepted.updatedAt,
+      operations: [
+        { type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } },
+      ],
+    });
+    expect(revised).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(useGraphStore.getState().reviewRequest).toBeNull();
+    expect(useGraphStore.getState().graph).toEqual(accepted);
+    useGraphStore.getState().rejectProposal();
   });
 
   it.each([7, 8])('rehydrates v%s frozen state from the graph instead of trusting saved scenarios', async (version) => {
@@ -628,7 +684,7 @@ describe('workspace reset authority', () => {
     expect(useGraphStore.getState().graph).toEqual(accepted);
     expect(useGraphStore.getState().proposal).toEqual(proposal);
     expect(useGraphStore.getState().notice).toBe(
-      'Approve or reject the agent proposal before editing the accepted graph.',
+      'Resolve the agent proposal before editing the accepted graph.',
     );
   });
 });

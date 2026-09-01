@@ -144,6 +144,7 @@ export function reconcileProjectionSelection(
 export function GraphWorkspace() {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
+  const reviewRequest = useGraphStore((state) => state.reviewRequest ?? null);
   const scenarios = useGraphStore((state) => state.scenarios);
   const selection = useGraphStore((state) => state.selection);
   const notice = useGraphStore((state) => state.notice);
@@ -167,6 +168,7 @@ export function GraphWorkspace() {
   const undo = useGraphStore((state) => state.undo);
   const redo = useGraphStore((state) => state.redo);
   const approveProposal = useGraphStore((state) => state.approveProposal);
+  const requestProposalChanges = useGraphStore((state) => state.requestProposalChanges);
   const rejectProposal = useGraphStore((state) => state.rejectProposal);
   const freezeGraph = useGraphStore((state) => state.freezeGraph);
   const unfreezeGraph = useGraphStore((state) => state.unfreezeGraph);
@@ -531,6 +533,11 @@ export function GraphWorkspace() {
     rejectProposal();
     resetPresentation();
   }, [rejectProposal, resetPresentation]);
+  const handleRequestProposalChanges = useCallback((feedback: string) => {
+    const result = requestProposalChanges(feedback);
+    if (result.ok) resetPresentation();
+    return result;
+  }, [requestProposalChanges, resetPresentation]);
   const handleUnfreeze = useCallback(() => {
     unfreezeGraph();
     resetPresentation();
@@ -602,7 +609,12 @@ export function GraphWorkspace() {
       {
         getSnapshot: () => {
           const state = useGraphStore.getState();
-          return { graph: state.graph, proposal: state.proposal, scenarios: state.scenarios };
+          return {
+            graph: state.graph,
+            proposal: state.proposal,
+            reviewRequest: state.reviewRequest ?? null,
+            scenarios: state.scenarios,
+          };
         },
         submitProposal: (input) => useGraphStore.getState().submitProposal(input),
       },
@@ -1142,7 +1154,7 @@ export function GraphWorkspace() {
               aria-labelledby={activeInspectorTabId(inspectorTab)}
               className="workspace-inspector-content"
             >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} relationship={selectedRelationship} evidence={selectedEvidence} reviewProjection={reviewProjection} readOnly={activeViewMode !== 'design'} /><ProposalPanel proposal={proposal} review={proposalReview} onApprove={handleApproveProposal} onReject={handleRejectProposal} /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} selectedScenarioId={selectedScenarioId} onScenarioSelect={(scenarioId) => setScenarioSelection(scenarioId ? { id: scenarioId, graphId: graph.id, graphUpdatedAt: graph.updatedAt } : null)} />}
+              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} relationship={selectedRelationship} evidence={selectedEvidence} reviewProjection={reviewProjection} readOnly={activeViewMode !== 'design'} /><ProposalPanel proposal={proposal} review={proposalReview} reviewRequest={reviewRequest} onApprove={handleApproveProposal} onRequestChanges={handleRequestProposalChanges} onReject={handleRejectProposal} /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} selectedScenarioId={selectedScenarioId} onScenarioSelect={(scenarioId) => setScenarioSelection(scenarioId ? { id: scenarioId, graphId: graph.id, graphUpdatedAt: graph.updatedAt } : null)} />}
             </div>
             <PanelResizer
               side="right"

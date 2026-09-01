@@ -44,6 +44,37 @@ const legacyV1Graph = (): WorkflowGraphV1 => {
 };
 
 describe('workspace persistence migration', () => {
+  it('preserves only a compact schema-safe human review request', () => {
+    const reviewRequest = {
+      status: 'changes_requested' as const,
+      feedback: '  Add a clearer fallback route.  ',
+      proposalId: 'proposal-1',
+      proposalCreatedAt: '2026-09-01T09:00:00.000Z',
+      reviewedGraphId: sampleGraph.id,
+      reviewedGraphUpdatedAt: sampleGraph.updatedAt,
+      reviewedAt: '2026-09-01T10:00:00.000Z',
+    };
+    const migrated = migrateWorkspaceV6(
+      { graph: structuredClone(sampleGraph), proposal: null, reviewRequest },
+      service.createInitial,
+    );
+    const malformed = migrateWorkspaceV6(
+      {
+        graph: structuredClone(sampleGraph),
+        proposal: null,
+        reviewRequest: { ...reviewRequest, feedback: ' ', candidateGraph: sampleGraph },
+      },
+      service.createInitial,
+    );
+
+    expect(migrated.reviewRequest).toEqual({
+      ...reviewRequest,
+      feedback: 'Add a clearer fallback route.',
+    });
+    expect(migrated.reviewRequest).not.toHaveProperty('candidateGraph');
+    expect(malformed.reviewRequest).toBeNull();
+  });
+
   it('preserves schema-safe incomplete drafts for ordinary validation', () => {
     const invalid = legacyV1Graph();
     invalid.nodes.push({
