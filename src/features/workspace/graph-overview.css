@@ -69,6 +69,28 @@
 }
 
 @media (max-width: 1099px) {
+  .workspace-stage .canvas-minimap {
+    bottom: 56px !important;
+    left: 12px !important;
+    width: 136px !important;
+    height: 78px !important;
+  }
+
+  .workspace-stage .canvas-minimap-title {
+    bottom: 134px;
+    left: 12px;
+    width: 136px;
+  }
+
+  .workspace-stage .canvas-minimap-viewport-overlay {
+    bottom: 56px;
+    left: 12px;
+    width: 136px;
+    height: 78px;
+  }
+}
+
+@media (max-width: 639px) {
   .workspace-stage .canvas-minimap,
   .workspace-stage .canvas-minimap-viewport-overlay,
   .workspace-stage .canvas-minimap-title {

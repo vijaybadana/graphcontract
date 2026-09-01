@@ -57,8 +57,8 @@ test('1440 desktop keeps palette and inspector independently operable', async ({
 test('1024 compact workspace swaps palette and inspector instead of overlapping them', async ({ app }) => {
   await app.setViewportSize({ width: 1024, height: 768 });
 
-  await expect(app.getByText('Graph overview', { exact: true })).toBeHidden();
-  await expect(app.getByRole('img', { name: /Graph overview navigator/ })).toBeHidden();
+  await expect(app.getByText('Graph overview', { exact: true })).toBeVisible();
+  await expect(app.getByRole('img', { name: /Graph overview navigator/ })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Fit view' })).toBeVisible();
   await expect(app.getByLabel('Graph status')).toBeVisible();
 
@@ -104,6 +104,9 @@ test('768 tablet keeps editor chrome and inspector tabs reachable', async ({ app
 
 test('390 compact freeze and unfreeze retain accessible action names', async ({ app }) => {
   await app.setViewportSize({ width: 390, height: 844 });
+
+  await expect(app.getByText('Graph overview', { exact: true })).toBeHidden();
+  await expect(app.getByRole('img', { name: /Graph overview navigator/ })).toBeHidden();
 
   const freeze = app.locator('.workspace-freeze-button');
   await expect(freeze).toHaveAccessibleName('Confirm and freeze contract; currently draft');
