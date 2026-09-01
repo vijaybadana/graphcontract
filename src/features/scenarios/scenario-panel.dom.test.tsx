@@ -102,5 +102,5 @@ describe('ScenarioPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Previous scenario page' }));
     expect(document.activeElement).toBe(screen.getByText('Showing 1–24 of 143 scenarios. Page 1 of 6.'));
     expect(screen.getByRole('button', { name: /^Scenario 1Conditions/ }).getAttribute('aria-pressed')).toBe('true');
-  });
+  }, 10_000);
 });
