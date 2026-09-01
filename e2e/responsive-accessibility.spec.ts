@@ -57,6 +57,11 @@ test('1440 desktop keeps palette and inspector independently operable', async ({
 test('1024 compact workspace swaps palette and inspector instead of overlapping them', async ({ app }) => {
   await app.setViewportSize({ width: 1024, height: 768 });
 
+  await expect(app.getByText('Graph overview', { exact: true })).toBeHidden();
+  await expect(app.getByRole('img', { name: /Graph overview navigator/ })).toBeHidden();
+  await expect(app.getByRole('button', { name: 'Fit view' })).toBeVisible();
+  await expect(app.getByLabel('Graph status')).toBeVisible();
+
   await expect(app.getByRole('button', { name: 'Collapse node palette' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Open Inspector' })).toBeVisible();
   await app.getByRole('button', { name: 'Show inspector' }).click();
@@ -147,9 +152,26 @@ test('canvas chrome exposes named zoom, fit, reset, and minimap controls', async
   await expect(app.getByRole('button', { name: 'Fit view' })).toBeEnabled();
   await expect(app.getByRole('button', { name: 'Fit graph' })).toBeEnabled();
   await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeEnabled();
-  await expect(app.getByRole('img', { name: 'Mini Map' })).toBeVisible();
+  await expect(app.getByText('Graph overview', { exact: true })).toBeVisible();
+  const overview = app.getByRole('img', { name: /Graph overview navigator/ });
+  await expect(overview).toBeVisible();
+  await expect(overview.locator('.react-flow__minimap-mask')).toHaveCount(1);
+  await expect(overview.locator('.graph-overview-node')).toHaveCount(7);
 
+  const mask = overview.locator('.react-flow__minimap-mask');
+  const maskBeforeZoom = await mask.getAttribute('d');
   await app.getByRole('button', { name: 'Zoom in' }).click();
+  await expect.poll(() => mask.getAttribute('d')).not.toBe(maskBeforeZoom);
+
+  const viewport = app.locator('.react-flow__viewport');
+  const transformBeforePan = await viewport.evaluate((element) => getComputedStyle(element).transform);
+  const overviewBox = await overview.boundingBox();
+  if (!overviewBox) throw new Error('Expected a measurable graph overview.');
+  await overview.click({ position: { x: overviewBox.width - 12, y: overviewBox.height - 12 } });
+  await expect
+    .poll(() => viewport.evaluate((element) => getComputedStyle(element).transform))
+    .not.toBe(transformBeforePan);
+
   await app.getByRole('button', { name: 'Zoom out' }).click();
   await app.getByRole('button', { name: 'Fit graph' }).click();
 });

@@ -1,0 +1,66 @@
+.workspace-stage .canvas-minimap {
+  bottom: 58px !important;
+  left: calc(var(--palette-offset) + 16px) !important;
+  width: 154px !important;
+  height: 110px !important;
+  overflow: hidden;
+  border: 1px solid rgb(17 24 39 / 16%) !important;
+  border-radius: 10px !important;
+  background: #f8faf9 !important;
+  box-shadow: 0 5px 18px rgb(35 43 39 / 9%);
+  transition: left 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.workspace-stage .canvas-minimap-title {
+  position: absolute;
+  z-index: 26;
+  bottom: 146px;
+  left: calc(var(--palette-offset) + 16px);
+  width: 154px;
+  min-height: 22px;
+  border-bottom: 1px solid rgb(17 24 39 / 10%);
+  color: #33413a;
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  line-height: 22px;
+  pointer-events: none;
+  text-align: center;
+  text-transform: uppercase;
+  transition: left 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.workspace-stage .canvas-minimap .react-flow__minimap-svg {
+  width: 100%;
+  height: calc(100% - 22px);
+  margin-top: 22px;
+}
+
+.workspace-stage .canvas-minimap .react-flow__minimap-mask {
+  shape-rendering: geometricPrecision;
+  stroke-linejoin: round;
+}
+
+.workspace-stage .canvas-minimap .graph-overview-node {
+  opacity: 0.95;
+  shape-rendering: geometricPrecision;
+}
+
+.workspace-stage .canvas-minimap .graph-overview-node.is-selected {
+  stroke: #1d4ed8;
+  stroke-width: 3;
+}
+
+@media (max-width: 1099px) {
+  .workspace-stage .canvas-minimap,
+  .workspace-stage .canvas-minimap-title {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-stage .canvas-minimap,
+  .workspace-stage .canvas-minimap-title {
+    transition: none;
+  }
+}

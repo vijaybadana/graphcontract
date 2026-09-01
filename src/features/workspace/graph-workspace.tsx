@@ -7,7 +7,6 @@ import {
   ConnectionLineType,
   Controls,
   DefaultEdgeOptions,
-  MiniMap,
   NodeMouseHandler,
   OnSelectionChangeParams,
   OnReconnect,
@@ -34,7 +33,7 @@ import { evaluateConnection } from '@/src/application/connection-policy';
 import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
 import { graphLibraryEntries } from '@/src/application/graph-library';
 import { deriveProposalComparison } from '@/src/application/proposal-comparison';
-import { NodeKind, validateGraph } from '@/src/domain';
+import { validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
@@ -74,6 +73,7 @@ import { workspaceSelectionFromCanvas } from '@/src/features/workspace/canvas-se
 import { useStableEvent } from '@/src/features/workspace/use-stable-event';
 import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
 import { GraphCapabilityStrip } from '@/src/features/workspace/graph-capability-strip';
+import { GraphOverview } from '@/src/features/workspace/graph-overview';
 import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
 import {
   resolveWorkspacePanelVisibility,
@@ -108,13 +108,6 @@ const defaultEdgeOptions: DefaultEdgeOptions = {
   type: 'smoothstep',
   pathOptions: { borderRadius: 16, offset: 28 },
 };
-const minimapColors: Record<NodeKind, string> = {
-  start: '#34d399',
-  step: '#64748b',
-  merge: '#526477',
-  end: '#52525b',
-};
-
 /**
  * Local canvas selections are not canonical workspace state. Keep only
  * selections whose projection targets still exist after a load, reset, or
@@ -1095,25 +1088,7 @@ export function GraphWorkspace() {
           >
             <AlignmentGuides guides={canvasInteractions.guides} />
             <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="#e2e6e1" />
-            <MiniMap
-              pannable
-              zoomable
-              position="bottom-left"
-              nodeColor={(node) =>
-                node.type === 'contractNode'
-                  ? minimapColors[node.data.kind] ?? '#94a3b8'
-                  : node.type === 'mergeJunction'
-                    ? '#526477'
-                    : node.type === 'runtimeInstance'
-                      ? '#5969c8'
-                      : '#5c8f7d'
-              }
-              nodeStrokeColor="#ffffff"
-              nodeStrokeWidth={2}
-              nodeBorderRadius={10}
-              maskColor="rgb(24 33 29 / 7%)"
-              className="canvas-minimap"
-            />
+            <GraphOverview />
             <Controls
               showInteractive={false}
               position="bottom-right"

@@ -52,6 +52,25 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('GraphWorkspace subgraph creation', () => {
+  it('presents one labelled graph overview with normalized semantic node marks', async () => {
+    renderWorkspace(false);
+
+    expect(await screen.findByText('Graph overview')).toBeTruthy();
+    const overview = screen.getByRole('img', {
+      name: 'Graph overview navigator. Drag or click to pan; scroll to zoom.',
+    });
+    expect(overview.querySelectorAll('.react-flow__minimap-mask')).toHaveLength(1);
+
+    await waitFor(() => {
+      const marks = overview.querySelectorAll<SVGRectElement>('.graph-overview-node');
+      expect(marks.length).toBe(useGraphStore.getState().graph.nodes.length);
+      for (const mark of marks) {
+        expect(Number(mark.getAttribute('width'))).toBeLessThanOrEqual(180);
+        expect(Number(mark.getAttribute('height'))).toBeLessThanOrEqual(90);
+      }
+    });
+  }, 30_000);
+
   it('opens and refocuses the requested graph capability settings from the strip', async () => {
     renderWorkspace(false);
 
