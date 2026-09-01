@@ -155,7 +155,18 @@ test('canvas chrome exposes named zoom, fit, reset, and minimap controls', async
   await expect(app.getByText('Graph overview', { exact: true })).toBeVisible();
   const overview = app.getByRole('img', { name: /Graph overview navigator/ });
   await expect(overview).toBeVisible();
+  await expect
+    .poll(() => overview.evaluate((element) => getComputedStyle(element.parentElement!).margin))
+    .toBe('0px');
   await expect(overview.locator('.react-flow__minimap-mask')).toHaveCount(1);
+  await expect(app.locator('.graph-overview-viewport')).toHaveCount(1);
+  await expect
+    .poll(() =>
+      overview.locator('.react-flow__minimap-mask').evaluate((element) =>
+        getComputedStyle(element).stroke,
+      ),
+    )
+    .toBe('rgba(0, 0, 0, 0)');
   await expect(overview.locator('.graph-overview-node')).toHaveCount(7);
 
   const mask = overview.locator('.react-flow__minimap-mask');

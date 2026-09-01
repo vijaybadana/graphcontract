@@ -60,6 +60,10 @@ describe('GraphWorkspace subgraph creation', () => {
       name: 'Graph overview navigator. Drag or click to pan; scroll to zoom.',
     });
     expect(overview.querySelectorAll('.react-flow__minimap-mask')).toHaveLength(1);
+    expect(document.querySelectorAll('.graph-overview-viewport')).toHaveLength(1);
+    expect(overview.closest('.canvas-minimap')?.getAttribute('style')).toContain(
+      '--xy-minimap-mask-stroke-color-props: transparent',
+    );
 
     await waitFor(() => {
       const marks = overview.querySelectorAll<SVGRectElement>('.graph-overview-node');
