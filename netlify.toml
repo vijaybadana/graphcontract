@@ -4,6 +4,9 @@
 
 [build.environment]
   NODE_VERSION = "22.13.0"
+  # Vinext is adapted by Nitro; Netlify's separate Next.js Runtime must not
+  # post-process the same build output.
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
 
 [[headers]]
   for = "/*"
