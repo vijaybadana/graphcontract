@@ -240,6 +240,28 @@ export const useGraphStore = create<WorkspaceStore>()(
       };
 
       const currentCore = (): WorkspaceCore => coreOf(get());
+      const applyAsyncLayout = (
+        sourceGraph: WorkflowGraph,
+        layoutPromise: Promise<WorkflowGraph>,
+        selection: WorkspaceSelection,
+      ) => {
+        const sourceSignature = JSON.stringify(sourceGraph);
+        void layoutPromise.then((graph) => {
+          // Never let a completed worker result overwrite an intervening edit.
+          if (JSON.stringify(get().graph) !== sourceSignature) return;
+          commit({
+            state: { ...currentCore(), graph, scenarios: [] },
+            changed: false,
+            notice: 'Workflow arranged with deterministic left-to-right layout.',
+            layoutApplied: true,
+          }, { history: false, selection });
+          set((state) => ({ fitViewRevision: state.fitViewRevision + 1 }));
+        }).catch(() => {
+          if (JSON.stringify(get().graph) === sourceSignature) {
+            set({ notice: 'Workflow arrangement could not complete.' });
+          }
+        });
+      };
       const initial = workspace.createInitial();
 
       return {
@@ -254,10 +276,9 @@ export const useGraphStore = create<WorkspaceStore>()(
 
         autoLayout: () => {
           const transition = workspace.autoLayout(currentCore());
-          commit(transition, { selection: transition.changed ? emptySelection() : get().selection });
-          if (transition.layoutApplied) {
-            set((state) => ({ fitViewRevision: state.fitViewRevision + 1 }));
-          }
+          const selection = transition.changed ? emptySelection() : get().selection;
+          commit(transition, { selection });
+          if (transition.layoutPromise) applyAsyncLayout(transition.state.graph, transition.layoutPromise, selection);
         },
 
         addNode: (preset, position = { x: 360, y: 180 }) => {
@@ -462,8 +483,8 @@ export const useGraphStore = create<WorkspaceStore>()(
         approveProposal: () => {
           const transition = workspace.approveProposal(currentCore());
           commit(transition, { history: false, selection: emptySelection() });
-          if (transition.layoutApplied) {
-            set((state) => ({ fitViewRevision: state.fitViewRevision + 1 }));
+          if (transition.layoutPromise) {
+            applyAsyncLayout(transition.state.graph, transition.layoutPromise, emptySelection());
           }
           return transition.result!;
         },

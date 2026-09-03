@@ -99,7 +99,7 @@ describe('workspace subgraph actions', () => {
     useGraphStore.getState().unfreezeGraph();
   });
 
-  it('auto-lays out the accepted graph as one undoable selection-clearing action', () => {
+  it('auto-lays out the accepted graph as one undoable selection-clearing action', async () => {
     const original = structuredClone(useGraphStore.getState().graph);
     const graph = structuredClone(original);
     graph.nodes.find((node) => node.id === 'billing')!.position = { x: 5000, y: 5000 };
@@ -115,6 +115,10 @@ describe('workspace subgraph actions', () => {
     const revision = useGraphStore.getState().fitViewRevision;
 
     useGraphStore.getState().autoLayout();
+
+    await vi.waitFor(() => {
+      expect(useGraphStore.getState().fitViewRevision).toBe(revision + 1);
+    });
 
     expect(useGraphStore.getState()).toMatchObject({
       selection: emptySelection(),

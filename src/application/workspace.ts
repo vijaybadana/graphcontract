@@ -68,6 +68,8 @@ export type WorkspaceTransition<Result = undefined> = {
   result?: Result;
   /** Signals the UI store to coalesce a non-animated viewport fit. */
   layoutApplied?: boolean;
+  /** Geometry is asynchronous; callers commit it only if their source revision remains current. */
+  layoutPromise?: Promise<WorkflowGraph>;
 };
 
 export type WorkspaceDependencies = {
@@ -263,12 +265,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     autoLayout(state: WorkspaceCore): WorkspaceTransition {
       if (!editable(state)) return blocked(state);
       return {
-        ...changeGraph(
-          state,
-          (graph) => layoutWorkflowGraph(graph),
-          'Workflow arranged with deterministic left-to-right layout.',
-        ),
-        layoutApplied: true,
+        state: { ...state, scenarios: [] },
+        changed: true,
+        notice: 'Workflow arrangement started.',
+        layoutPromise: layoutWorkflowGraph(clone(state.graph)).then((graph) => ({
+          ...graph,
+          status: 'draft' as const,
+          updatedAt: dependencies.now(),
+        })),
       };
     },
 
@@ -856,16 +860,16 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         };
       }
       const hasStructuralChanges = proposal.operations.some(isLayoutAffectingProposalOperation);
-      const acceptedGraph = hasStructuralChanges
-        ? layoutWorkflowGraph(applied.graph)
-        : applied.graph;
-      const graph = { ...acceptedGraph, status: 'draft' as const, updatedAt: dependencies.now() };
+      const graph = { ...applied.graph, status: 'draft' as const, updatedAt: dependencies.now() };
       return {
         state: { ...state, graph, proposal: null, reviewRequest: null, scenarios: [] },
         changed: true,
         notice: 'Proposal approved and applied to the accepted graph.',
         result: { ok: true, proposal: { ...proposal, status: 'approved' } },
-        layoutApplied: hasStructuralChanges,
+        ...(hasStructuralChanges ? {
+          layoutApplied: true,
+          layoutPromise: layoutWorkflowGraph(graph),
+        } : {}),
       };
     },
 

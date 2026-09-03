@@ -1,5 +1,11 @@
 # Third-party notices
 
+## ELK.js
+
+GraphContract uses [ELK.js](https://github.com/kieler/elkjs) 0.12.0 for
+compound workflow geometry. ELK.js is licensed under
+EPL-2.0 OR GPL-3.0-or-later.
+
 ## Breakscale
 
 GraphContract's floating canvas shell and panel-resizer interaction are adapted

@@ -170,14 +170,14 @@ describe('graph library registry', () => {
     }
   });
 
-  it('materializes template geometry with the shared deterministic auto-layout', () => {
+  it('materializes template geometry with the shared deterministic auto-layout', async () => {
     const sourceDefinitions = structuredClone(graphLibraryEntries);
     const unlaidGraph = sourceDefinitions[0]!.graph;
     unlaidGraph.nodes = unlaidGraph.nodes.map((node) => ({ ...node, position: { x: 0, y: 0 } }));
     unlaidGraph.subgraphs = unlaidGraph.subgraphs.map((subgraph) => ({ ...subgraph, position: { x: 0, y: 0 } }));
 
-    const materialized = createGraphLibraryEntries(sourceDefinitions);
-    expect(materialized[0]!.graph).toEqual(layoutWorkflowGraph(unlaidGraph));
+    const materialized = await createGraphLibraryEntries(sourceDefinitions);
+    expect(materialized[0]!.graph).toEqual(await layoutWorkflowGraph(unlaidGraph));
   });
 
   it('retains the original breadth while allowing focused built-in verification variants', () => {
@@ -224,14 +224,14 @@ describe('graph library registry', () => {
     }
   });
 
-  it('creates derived entries only from a valid registry', () => {
-    expect(createGraphLibraryEntries(graphLibraryEntries)).toHaveLength(GRAPH_LIBRARY_ENTRY_COUNT);
+  it('creates derived entries only from a valid registry', async () => {
+    expect(await createGraphLibraryEntries(graphLibraryEntries)).toHaveLength(GRAPH_LIBRARY_ENTRY_COUNT);
   });
 
-  it('validates and materializes each registry graph with one enumeration pass', () => {
+  it('validates and materializes each registry graph with one enumeration pass', async () => {
     const enumerate = vi.fn(enumerateScenariosBounded);
 
-    const entries = createGraphLibraryEntries(graphLibraryEntries, enumerate);
+    const entries = await createGraphLibraryEntries(graphLibraryEntries, enumerate);
 
     expect(entries).toHaveLength(GRAPH_LIBRARY_ENTRY_COUNT);
     expect(enumerate).toHaveBeenCalledTimes(GRAPH_LIBRARY_ENTRY_COUNT);

@@ -515,14 +515,7 @@ function inspectGraphLibraryDefinitions(
     if (!/^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/.test(entry.source.url) || entry.source.url !== canonicalUrl) {
       issues.push({ code: 'INVALID_SOURCE', entryId: entry.id });
     }
-    const graph = entry.layout?.preserveGraphGeometry
-      ? structuredClone(entry.graph)
-      : layoutWorkflowGraph(
-        entry.graph,
-        entry.layout?.authoredSubgraphIds
-          ? { authoredSubgraphIds: new Set(entry.layout.authoredSubgraphIds) }
-          : undefined,
-      );
+    const graph = structuredClone(entry.graph);
     const graphIssues = validateGraph(graph);
     if (graphIssues.length > 0) {
       issues.push({ code: 'INVALID_GRAPH', entryId: entry.id, reason: graphIssues.map((issue) => `${issue.code}@${issue.path ?? ''}`).join('|') });
@@ -564,6 +557,29 @@ export function validateGraphLibraryDefinitions(
 export function createGraphLibraryEntries(
   entries: readonly GraphLibraryDefinition[],
   enumerate: ScenarioEnumerator = enumerateScenariosBounded,
+): Promise<readonly GraphLibraryEntry[]> {
+  return Promise.all(entries.map(async (entry) => ({
+    ...entry,
+    graph: entry.layout?.preserveGraphGeometry
+      ? structuredClone(entry.graph)
+      : await layoutWorkflowGraph(
+        entry.graph,
+        entry.layout?.authoredSubgraphIds
+          ? { authoredSubgraphIds: new Set(entry.layout.authoredSubgraphIds) }
+          : undefined,
+      ),
+  }))).then((laidOutEntries) => {
+    const { issues, materialized } = inspectGraphLibraryDefinitions(laidOutEntries, enumerate);
+    if (issues.length === 0) return materialized;
+    throw new Error(
+      `Invalid graph library registry: ${issues.map((issue) => `${issue.code}${issue.entryId ? `:${issue.entryId}` : ''}${issue.reason ? ` (${issue.reason})` : ''}`).join(', ')}`,
+    );
+  });
+}
+
+function createPrelaidGraphLibraryEntries(
+  entries: readonly GraphLibraryDefinition[],
+  enumerate: ScenarioEnumerator = enumerateScenariosBounded,
 ): readonly GraphLibraryEntry[] {
   const { issues, materialized } = inspectGraphLibraryDefinitions(entries, enumerate);
   if (issues.length > 0) {
@@ -574,5 +590,9 @@ export function createGraphLibraryEntries(
   return materialized;
 }
 
-/** The complete display-only library; callers clone a graph through the contract helper before loading it. */
-export const graphLibraryEntries = createGraphLibraryEntries(definitions);
+/**
+ * Display code needs a synchronous registry. These source fixtures carry their
+ * authored geometry already; callers that materialize supplied definitions use
+ * the asynchronous ELK-backed `createGraphLibraryEntries` above.
+ */
+export const graphLibraryEntries = createPrelaidGraphLibraryEntries(definitions);

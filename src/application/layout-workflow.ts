@@ -1,3 +1,5 @@
+import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js';
+
 import {
   GraphEdge,
   GraphNode,
@@ -11,383 +13,418 @@ import {
   CONTRACT_NODE_WIDTH,
 } from './canvas-geometry';
 
-const COLUMN_GAP = 120;
-const ROW_GAP = 64;
 const ORIGIN = { x: 80, y: 100 };
 const SUBGRAPH_BODY_INSET = 36;
 const SUBGRAPH_HEADER_HEIGHT = 56;
 const MIN_SUBGRAPH_WIDTH = 340;
 const MIN_SUBGRAPH_HEIGHT = 244;
-const LOOP_CORRIDOR_OFFSET = 80;
+const ROOT_ID = '__graphcontract_elk_root__';
+const LAYOUT_CACHE_LIMIT = 64;
 
 type Dimensions = { width: number; height: number };
+type PortSide = 'WEST' | 'EAST';
 
-type LayoutUnit = {
+/** React Flow handle ids shared with the render registry. */
+export const CANVAS_INPUT_PORT_ID = 'graphcontract-west';
+export const CANVAS_OUTPUT_PORT_ID = 'graphcontract-east';
+
+/**
+ * A schema-independent compound input. The workflow schema presently has one
+ * subgraph level, but this adapter deliberately accepts arbitrary depth so
+ * layout behavior is not coupled to that current persistence limitation.
+ */
+export type CompoundLayoutNode<T> = {
   id: string;
+  value?: T;
+  dimensions: Dimensions;
+  children?: readonly CompoundLayoutNode<T>[];
+};
+
+export type CompoundLayoutEdge = {
+  id: string;
+  source: string;
+  target: string;
+};
+
+export type CompoundLayoutGeometry = {
   position: GraphPosition;
   dimensions: Dimensions;
+  parentId?: string;
 };
 
-type LayoutEdge = Pick<GraphEdge, 'id' | 'source' | 'target' | 'mode' | 'label' | 'condition'>;
-
-type LayoutResult = {
-  positions: Map<string, GraphPosition>;
-  maxX: number;
-  maxY: number;
-};
+export type ElkLayoutRunner = (graph: ElkNode) => Promise<ElkNode>;
 
 export type WorkflowLayoutOptions = {
   /** Preserve authored relative child positions while still recomputing bounds. */
   authoredSubgraphIds?: ReadonlySet<string>;
+  /** Keep an authored fixture byte-for-byte, including all geometry. */
+  preserveGraphGeometry?: boolean;
 };
 
-const compareText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
+const elk = new ELK();
+const layoutGeometryCache = new Map<string, Promise<Map<string, CompoundLayoutGeometry>>>();
 
-const comparePositions = (left: GraphPosition, right: GraphPosition) =>
-  left.y - right.y || left.x - right.x;
+export const canvasPortId = (side: PortSide) => (
+  side === 'WEST' ? CANVAS_INPUT_PORT_ID : CANVAS_OUTPUT_PORT_ID
+);
 
-const compareUnits = (left: LayoutUnit, right: LayoutUnit) =>
-  comparePositions(left.position, right.position) || compareText(left.id, right.id);
+const elkPortId = (nodeId: string, side: PortSide) => `${nodeId}::${canvasPortId(side)}`;
 
-/**
- * Keep the primary continuation ahead of explicitly labelled branches, then
- * order branches by their stable semantic text rather than their insertion
- * order. This makes conditional lanes repeatable after persistence round trips.
- */
-const compareEdges = (left: LayoutEdge, right: LayoutEdge) => {
-  const branchRank = (edge: LayoutEdge) =>
-    edge.mode === 'normal' || edge.mode === 'send' ? 0 : edge.mode === 'fallback' ? 2 : 1;
-  return (
-    branchRank(left) - branchRank(right) ||
-    compareText(left.label ?? '', right.label ?? '') ||
-    compareText(left.condition ?? '', right.condition ?? '') ||
-    compareText(left.target, right.target) ||
-    compareText(left.id, right.id)
-  );
-};
-
-const comparePath = (left: readonly number[], right: readonly number[]) => {
-  const sharedLength = Math.min(left.length, right.length);
-  for (let index = 0; index < sharedLength; index += 1) {
-    const difference = left[index]! - right[index]!;
-    if (difference !== 0) return difference;
-  }
-  return left.length - right.length;
-};
-
-/**
- * A return edge is presentation-derived, so the layout identifies the same
- * deterministic DFS back edges locally. They are excluded from rank assignment
- * and instead reserve vertical separation for the router's loop corridor.
- */
-function loopEdgeIds(units: readonly LayoutUnit[], edges: readonly LayoutEdge[]): Set<string> {
-  const unitById = new Map(units.map((unit) => [unit.id, unit]));
-  const outgoing = new Map<string, LayoutEdge[]>();
-  for (const edge of edges) {
-    if (!unitById.has(edge.source) || !unitById.has(edge.target)) continue;
-    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
-  }
-  for (const candidates of outgoing.values()) candidates.sort(compareEdges);
-
-  const state = new Map<string, 'visiting' | 'visited'>();
-  const loops = new Set<string>();
-  const visit = (unitId: string) => {
-    state.set(unitId, 'visiting');
-    for (const edge of outgoing.get(unitId) ?? []) {
-      if (state.get(edge.target) === 'visiting') {
-        loops.add(edge.id);
-      } else if (!state.has(edge.target)) {
-        visit(edge.target);
-      }
-    }
-    state.set(unitId, 'visited');
-  };
-
-  for (const unit of [...units].sort(compareUnits)) {
-    if (!state.has(unit.id)) visit(unit.id);
-  }
-  return loops;
-}
-
-/**
- * Lays one scope with a compact Sugiyama-style LR pass. The graph model has
- * one subgraph containment level today, but the scope routine is deliberately
- * recursive at the caller so each compound container owns relative child
- * coordinates and its own dimensions.
- */
-function layoutScope(
-  units: readonly LayoutUnit[],
-  edges: readonly LayoutEdge[],
-  origin: GraphPosition,
-): LayoutResult {
-  if (units.length === 0) {
-    return { positions: new Map(), maxX: origin.x, maxY: origin.y };
-  }
-
-  const unitById = new Map(units.map((unit) => [unit.id, unit]));
-  const validEdges = edges.filter(
-    (edge) => unitById.has(edge.source) && unitById.has(edge.target) && edge.source !== edge.target,
-  );
-  const loops = loopEdgeIds(units, validEdges);
-  const outgoing = new Map<string, LayoutEdge[]>();
-  const indegree = new Map(units.map((unit) => [unit.id, 0]));
-  const loopBias = new Map(units.map((unit) => [unit.id, 0]));
-
-  for (const edge of validEdges) {
-    if (loops.has(edge.id)) {
-      loopBias.set(edge.source, (loopBias.get(edge.source) ?? 0) + 1);
-      loopBias.set(edge.target, (loopBias.get(edge.target) ?? 0) - 1);
-      continue;
-    }
-    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge]);
-    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
-  }
-  for (const candidates of outgoing.values()) candidates.sort(compareEdges);
-
-  const queue = [...units].filter((unit) => indegree.get(unit.id) === 0).sort(compareUnits);
-  const rank = new Map(units.map((unit) => [unit.id, 0]));
-  const path = new Map<string, number[]>();
-  queue.forEach((unit, index) => path.set(unit.id, [index]));
-  const ordered: string[] = [];
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    ordered.push(current.id);
-    const currentPath = path.get(current.id) ?? [Number.MAX_SAFE_INTEGER];
-    for (const [edgeIndex, edge] of (outgoing.get(current.id) ?? []).entries()) {
-      const targetPath = [...currentPath, edgeIndex];
-      const knownPath = path.get(edge.target);
-      if (!knownPath || comparePath(targetPath, knownPath) < 0) path.set(edge.target, targetPath);
-      rank.set(edge.target, Math.max(rank.get(edge.target) ?? 0, (rank.get(current.id) ?? 0) + 1));
-      const remaining = (indegree.get(edge.target) ?? 0) - 1;
-      indegree.set(edge.target, remaining);
-      if (remaining === 0) {
-        queue.push(unitById.get(edge.target)!);
-        queue.sort(compareUnits);
-      }
-    }
-  }
-
-  // Removing DFS back edges must make every component acyclic. Keep this
-  // defensive fallback deterministic for incomplete drafts instead of leaving
-  // their geometry unchanged or leaking projection-only identifiers.
-  for (const unit of [...units].sort(compareUnits)) {
-    if (!ordered.includes(unit.id)) {
-      ordered.push(unit.id);
-      path.set(unit.id, [Number.MAX_SAFE_INTEGER, ordered.length]);
-    }
-  }
-
-  const layers = new Map<number, string[]>();
-  for (const unitId of ordered) {
-    const layer = rank.get(unitId) ?? 0;
-    layers.set(layer, [...(layers.get(layer) ?? []), unitId]);
-  }
-  for (const unitIds of layers.values()) {
-    unitIds.sort((leftId, rightId) => {
-      const pathOrder = comparePath(path.get(leftId) ?? [], path.get(rightId) ?? []);
-      return pathOrder || compareUnits(unitById.get(leftId)!, unitById.get(rightId)!);
-    });
-  }
-
-  const layerHeights = new Map<number, number>();
-  const layerWidths = new Map<number, number>();
-  for (const [layer, unitIds] of layers) {
-    const layerUnits = unitIds.map((unitId) => unitById.get(unitId)!);
-    layerHeights.set(
-      layer,
-      layerUnits.reduce((height, unit) => height + unit.dimensions.height, 0) +
-        Math.max(0, layerUnits.length - 1) * ROW_GAP,
-    );
-    layerWidths.set(layer, Math.max(...layerUnits.map((unit) => unit.dimensions.width)));
-  }
-  const canvasHeight = Math.max(...layerHeights.values());
-  const positions = new Map<string, GraphPosition>();
-  let columnX = origin.x;
-
-  for (const layer of [...layers.keys()].sort((left, right) => left - right)) {
-    const unitIds = layers.get(layer)!;
-    let rowY = origin.y + (canvasHeight - (layerHeights.get(layer) ?? 0)) / 2;
-    for (const unitId of unitIds) {
-      const unit = unitById.get(unitId)!;
-      const desiredY = rowY + (loopBias.get(unitId) ?? 0) * LOOP_CORRIDOR_OFFSET;
-      // A layer never overlaps even where several loop corridors meet. The
-      // deterministic positive clearance is a geometry hint for the existing
-      // SVG/React Flow loop router, not new canonical edge data.
-      const position = { x: columnX, y: Math.max(rowY, desiredY) };
-      positions.set(unitId, position);
-      rowY = position.y + unit.dimensions.height + ROW_GAP;
-    }
-    columnX += (layerWidths.get(layer) ?? 0) + COLUMN_GAP;
-  }
-
-  const allPositions = [...positions.entries()];
-  const minimumY = Math.min(...allPositions.map(([, position]) => position.y));
-  if (minimumY < origin.y) {
-    const correction = origin.y - minimumY;
-    for (const [unitId, position] of allPositions) {
-      positions.set(unitId, { ...position, y: position.y + correction });
-    }
-  }
-
-  const maxX = Math.max(
-    ...[...positions.entries()].map(([unitId, position]) =>
-      position.x + unitById.get(unitId)!.dimensions.width,
-    ),
-  );
-  const maxY = Math.max(
-    ...[...positions.entries()].map(([unitId, position]) =>
-      position.y + unitById.get(unitId)!.dimensions.height,
-    ),
-  );
-  return { positions, maxX, maxY };
-}
-
-const nodeUnit = (node: GraphNode): LayoutUnit => ({
-  id: node.id,
-  position: node.position,
-  dimensions: { width: CONTRACT_NODE_WIDTH, height: CONTRACT_NODE_HEIGHT },
+const explicitPort = (nodeId: string, side: PortSide) => ({
+  id: elkPortId(nodeId, side),
+  width: 1,
+  height: 1,
+  layoutOptions: { 'elk.port.side': side },
 });
 
-const geometryForSubgraph = (
+const descendants = <T>(node: CompoundLayoutNode<T>): readonly CompoundLayoutNode<T>[] =>
+  [node, ...(node.children ?? []).flatMap(descendants)];
+
+const nodeIds = <T>(root: CompoundLayoutNode<T>) => new Set(descendants(root).map((node) => node.id));
+
+/**
+ * Converts a reusable compound tree into ELK's hierarchy format. Every real
+ * node receives stable WEST/EAST ports; the only translated edge data lives in
+ * this transient ELK request and never reaches the canonical workflow graph.
+ */
+export function toElkCompoundGraph<T>(
+  root: CompoundLayoutNode<T>,
+  edges: readonly CompoundLayoutEdge[],
+): ElkNode {
+  const ids = nodeIds(root);
+  const convert = (node: CompoundLayoutNode<T>, isRoot = false): ElkNode => ({
+    id: node.id,
+    width: node.dimensions.width,
+    height: node.dimensions.height,
+    ...(!isRoot ? {
+      ports: [explicitPort(node.id, 'WEST'), explicitPort(node.id, 'EAST')],
+      layoutOptions: node.children
+        ? {
+            'elk.padding': `[top=${SUBGRAPH_HEADER_HEIGHT + SUBGRAPH_BODY_INSET},left=${SUBGRAPH_BODY_INSET},bottom=${SUBGRAPH_BODY_INSET},right=${SUBGRAPH_BODY_INSET}]`,
+            'elk.portConstraints': 'FIXED_SIDE',
+          }
+        : { 'elk.portConstraints': 'FIXED_SIDE' },
+    } : {
+      layoutOptions: {
+        'elk.algorithm': 'layered',
+        'elk.direction': 'RIGHT',
+        'elk.edgeRouting': 'ORTHOGONAL',
+        'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+        'elk.spacing.nodeNode': '64',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '120',
+        'elk.layered.cycleBreaking.strategy': 'DEPTH_FIRST',
+      },
+    }),
+    ...(node.children ? { children: node.children.map((child) => convert(child)) } : {}),
+  });
+
+  const elkRoot = convert(root, true);
+  elkRoot.edges = edges
+    .filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+    .map((edge) => ({
+      id: edge.id,
+      sources: [elkPortId(edge.source, 'EAST')],
+      targets: [elkPortId(edge.target, 'WEST')],
+    }));
+  return elkRoot;
+}
+
+/** Maps ELK output back to the source hierarchy without leaking ELK edge data. */
+export function mapElkCompoundGeometry<T>(
+  root: CompoundLayoutNode<T>,
+  laidOutRoot: ElkNode,
+): Map<string, CompoundLayoutGeometry> {
+  const geometry = new Map<string, CompoundLayoutGeometry>();
+  const visit = (
+    source: CompoundLayoutNode<T>,
+    laidOut: ElkNode,
+    parentId?: string,
+  ) => {
+    if (source.id !== ROOT_ID) {
+      geometry.set(source.id, {
+        position: { x: laidOut.x ?? 0, y: laidOut.y ?? 0 },
+        dimensions: {
+          width: laidOut.width ?? source.dimensions.width,
+          height: laidOut.height ?? source.dimensions.height,
+        },
+        ...(parentId ? { parentId } : {}),
+      });
+    }
+    const laidOutChildren = new Map((laidOut.children ?? []).map((child) => [child.id, child]));
+    for (const child of source.children ?? []) {
+      const laidOutChild = laidOutChildren.get(child.id);
+      if (!laidOutChild) continue;
+      visit(child, laidOutChild, source.id === ROOT_ID ? undefined : source.id);
+    }
+  };
+  visit(root, laidOutRoot);
+  return geometry;
+}
+
+/** Runs ELK and returns only node/container geometry, recursively parent-relative. */
+export async function layoutCompoundGeometry<T>(
+  root: CompoundLayoutNode<T>,
+  edges: readonly CompoundLayoutEdge[],
+  runner: ElkLayoutRunner = (graph) => elk.layout(graph),
+): Promise<Map<string, CompoundLayoutGeometry>> {
+  const laidOut = await runner(toElkCompoundGraph(root, edges));
+  return mapElkCompoundGeometry(root, laidOut);
+}
+
+type AuthoredSubgraphGeometry = {
+  positions: Map<string, GraphPosition>;
+  dimensions: Dimensions;
+};
+
+const containsDeclaredTemplateAnatomy = (
+  children: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+) => {
+  const childIds = new Set(children.map((child) => child.id));
+  return edges.some((edge) => (
+    edge.mode === 'send'
+    && Boolean(edge.send.templateAnatomy)
+    && childIds.has(edge.target)
+  ));
+};
+
+/**
+ * The explicit authored-layout escape hatch is intentionally local. It keeps
+ * child positions stable while normalizing their origin and fitting the parent
+ * around every declared child/template extent.
+ */
+function authoredSubgraphGeometry(
   subgraph: GraphSubgraph,
   children: readonly GraphNode[],
   edges: readonly GraphEdge[],
-  preserveAuthoredComposition: boolean,
-) => {
-  if (preserveAuthoredComposition && children.length > 0) {
-    const childById = new Map(children.map((child) => [child.id, child]));
-    const declaredTemplateBounds = edges.flatMap((edge) => {
-      if (edge.mode !== 'send' || !edge.send.templateAnatomy) return [];
-      const template = childById.get(edge.target);
-      const anatomy = edge.send.templateAnatomy;
-      const anchor = anatomy.nodes.find((node) => node.id === anatomy.canonicalTemplateNodeId);
-      if (!template || !anchor) return [];
-      return [{
-        x: template.position.x - anchor.position.x,
-        y: template.position.y - anchor.position.y,
-        width: anatomy.dimensions.width,
-        height: anatomy.dimensions.height,
-      }];
-    });
-    const minimumX = Math.min(
-      ...children.map((child) => child.position.x),
-      ...declaredTemplateBounds.map((bounds) => bounds.x),
-    );
-    const minimumY = Math.min(
-      ...children.map((child) => child.position.y),
-      ...declaredTemplateBounds.map((bounds) => bounds.y),
-    );
-    const shiftX = Math.max(0, SUBGRAPH_BODY_INSET - minimumX);
-    const shiftY = Math.max(0, SUBGRAPH_HEADER_HEIGHT + SUBGRAPH_BODY_INSET - minimumY);
-    const positions = new Map(
-      children.map((child) => [
-        child.id,
-        { x: child.position.x + shiftX, y: child.position.y + shiftY },
-      ]),
-    );
-    const maxX = Math.max(
-      ...[...positions.values()].map((position) => position.x + CONTRACT_NODE_WIDTH),
-      ...declaredTemplateBounds.map((bounds) => bounds.x + shiftX + bounds.width),
-    );
-    const maxY = Math.max(
-      ...[...positions.values()].map((position) => position.y + CONTRACT_NODE_HEIGHT),
-      ...declaredTemplateBounds.map((bounds) => bounds.y + shiftY + bounds.height),
-    );
+): AuthoredSubgraphGeometry {
+  if (children.length === 0) {
     return {
-      positions,
-      subgraph: {
-        ...subgraph,
-        dimensions: {
-          // Authored compound layouts may intentionally reserve workspace for
-          // readable nested flows. Content can grow the boundary, but repeated
-          // layout passes must not shrink that declared canvas.
-          width: Math.max(subgraph.dimensions.width, MIN_SUBGRAPH_WIDTH, maxX + SUBGRAPH_BODY_INSET),
-          height: Math.max(subgraph.dimensions.height, MIN_SUBGRAPH_HEIGHT, maxY + SUBGRAPH_BODY_INSET),
-        },
+      positions: new Map(),
+      dimensions: {
+        width: Math.max(subgraph.dimensions.width, MIN_SUBGRAPH_WIDTH),
+        height: Math.max(subgraph.dimensions.height, MIN_SUBGRAPH_HEIGHT),
       },
     };
   }
-
-  const childIds = new Set(children.map((child) => child.id));
-  const result = layoutScope(
-    children.map(nodeUnit),
-    edges.filter((edge) => childIds.has(edge.source) && childIds.has(edge.target)),
-    { x: SUBGRAPH_BODY_INSET, y: SUBGRAPH_HEADER_HEIGHT + SUBGRAPH_BODY_INSET },
+  const childById = new Map(children.map((child) => [child.id, child]));
+  const declaredTemplateBounds = edges.flatMap((edge) => {
+    if (edge.mode !== 'send' || !edge.send.templateAnatomy) return [];
+    const template = childById.get(edge.target);
+    const anatomy = edge.send.templateAnatomy;
+    const anchor = anatomy.nodes.find((node) => node.id === anatomy.canonicalTemplateNodeId);
+    if (!template || !anchor) return [];
+    return [{
+      x: template.position.x - anchor.position.x,
+      y: template.position.y - anchor.position.y,
+      width: anatomy.dimensions.width,
+      height: anatomy.dimensions.height,
+    }];
+  });
+  const minimumX = Math.min(
+    ...children.map((child) => child.position.x),
+    ...declaredTemplateBounds.map((bounds) => bounds.x),
+  );
+  const minimumY = Math.min(
+    ...children.map((child) => child.position.y),
+    ...declaredTemplateBounds.map((bounds) => bounds.y),
+  );
+  const shiftX = Math.max(0, SUBGRAPH_BODY_INSET - minimumX);
+  const shiftY = Math.max(0, SUBGRAPH_HEADER_HEIGHT + SUBGRAPH_BODY_INSET - minimumY);
+  const positions = new Map(
+    children.map((child) => [
+      child.id,
+      { x: child.position.x + shiftX, y: child.position.y + shiftY },
+    ]),
+  );
+  const maxX = Math.max(
+    ...[...positions.values()].map((position) => position.x + CONTRACT_NODE_WIDTH),
+    ...declaredTemplateBounds.map((bounds) => bounds.x + shiftX + bounds.width),
+  );
+  const maxY = Math.max(
+    ...[...positions.values()].map((position) => position.y + CONTRACT_NODE_HEIGHT),
+    ...declaredTemplateBounds.map((bounds) => bounds.y + shiftY + bounds.height),
   );
   return {
-    positions: result.positions,
-    subgraph: {
-      ...subgraph,
-      dimensions: {
-        width: Math.max(MIN_SUBGRAPH_WIDTH, result.maxX + SUBGRAPH_BODY_INSET),
-        height: Math.max(MIN_SUBGRAPH_HEIGHT, result.maxY + SUBGRAPH_BODY_INSET),
-      },
+    positions,
+    dimensions: {
+      width: Math.max(subgraph.dimensions.width, MIN_SUBGRAPH_WIDTH, maxX + SUBGRAPH_BODY_INSET),
+      height: Math.max(subgraph.dimensions.height, MIN_SUBGRAPH_HEIGHT, maxY + SUBGRAPH_BODY_INSET),
     },
   };
+}
+
+type WorkflowTree = CompoundLayoutNode<GraphNode | GraphSubgraph>;
+
+type WorkflowLayoutInput = {
+  root: WorkflowTree;
+  edges: CompoundLayoutEdge[];
+  authoredGeometry: Map<string, AuthoredSubgraphGeometry>;
 };
 
-/**
- * Produces canonical node and subgraph geometry without mutating the input.
- * Edges remain byte-for-byte canonical: compound containers only stand in for
- * their children during rank calculation, never in the returned topology.
- */
-export function layoutWorkflowGraph(
-  graph: WorkflowGraph,
-  options: WorkflowLayoutOptions = {},
-): WorkflowGraph {
-  const next = structuredClone(graph);
-  const subgraphIds = new Set(next.subgraphs.map((subgraph) => subgraph.id));
-  const childPositions = new Map<string, GraphPosition>();
-  const sizedSubgraphs = new Map<string, GraphSubgraph>();
+const nodeDimensions = (): Dimensions => ({
+  width: CONTRACT_NODE_WIDTH,
+  height: CONTRACT_NODE_HEIGHT,
+});
 
-  for (const subgraph of next.subgraphs) {
-    const children = next.nodes.filter((node) => node.parentId === subgraph.id);
-    const containsDeclaredTemplateAnatomy = next.edges.some((edge) => (
-      edge.mode === 'send'
-      && Boolean(edge.send.templateAnatomy)
-      && children.some((node) => node.id === edge.target)
-    ));
-    const geometry = geometryForSubgraph(
-      subgraph,
-      children,
-      next.edges,
-      (options.authoredSubgraphIds?.has(subgraph.id) ?? false) || containsDeclaredTemplateAnatomy,
-    );
-    sizedSubgraphs.set(subgraph.id, geometry.subgraph);
-    for (const [nodeId, position] of geometry.positions) childPositions.set(nodeId, position);
+function buildWorkflowLayoutInput(
+  graph: WorkflowGraph,
+  options: WorkflowLayoutOptions,
+): WorkflowLayoutInput {
+  const subgraphById = new Map(graph.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
+  const childrenBySubgraphId = new Map<string, GraphNode[]>();
+  for (const node of graph.nodes) {
+    if (!node.parentId || !subgraphById.has(node.parentId)) continue;
+    childrenBySubgraphId.set(node.parentId, [...(childrenBySubgraphId.get(node.parentId) ?? []), node]);
   }
 
-  const outerUnits: LayoutUnit[] = [
-    ...next.nodes.filter((node) => !node.parentId || !subgraphIds.has(node.parentId)).map(nodeUnit),
-    ...next.subgraphs.map((subgraph) => {
-      const sized = sizedSubgraphs.get(subgraph.id)!;
-      return { id: sized.id, position: sized.position, dimensions: sized.dimensions };
-    }),
-  ];
-  const unitForNode = (nodeId: string) => {
-    const node = next.nodes.find((candidate) => candidate.id === nodeId);
-    return node?.parentId && subgraphIds.has(node.parentId) ? node.parentId : node?.id;
+  const authoredGeometry = new Map<string, AuthoredSubgraphGeometry>();
+  const authoredIds = new Set<string>();
+  for (const subgraph of graph.subgraphs) {
+    const children = childrenBySubgraphId.get(subgraph.id) ?? [];
+    if (
+      options.authoredSubgraphIds?.has(subgraph.id)
+      || containsDeclaredTemplateAnatomy(children, graph.edges)
+    ) {
+      authoredIds.add(subgraph.id);
+      authoredGeometry.set(subgraph.id, authoredSubgraphGeometry(subgraph, children, graph.edges));
+    }
+  }
+
+  const normalSubgraph = (subgraph: GraphSubgraph): WorkflowTree => {
+    if (subgraph.collapsed) {
+      // The canonical dimensions remember the expanded boundary. ELK only
+      // needs the compact visible footprint while this container is closed.
+      return {
+        id: subgraph.id,
+        value: subgraph,
+        dimensions: nodeDimensions(),
+      };
+    }
+    const authored = authoredGeometry.get(subgraph.id);
+    if (authored) {
+      // Deliberately present an authored compound as one transient ELK unit.
+      // Its internal canonical nodes/edges are preserved by the local opt-out.
+      return { id: subgraph.id, value: subgraph, dimensions: authored.dimensions };
+    }
+    return {
+      id: subgraph.id,
+      value: subgraph,
+      dimensions: {
+        width: MIN_SUBGRAPH_WIDTH,
+        height: MIN_SUBGRAPH_HEIGHT,
+      },
+      children: (childrenBySubgraphId.get(subgraph.id) ?? []).map((node) => ({
+        id: node.id,
+        value: node,
+        dimensions: nodeDimensions(),
+      })),
+    };
   };
-  const outerEdges: LayoutEdge[] = next.edges.flatMap((edge) => {
+
+  const rootChildren: WorkflowTree[] = [
+    ...graph.nodes
+      .filter((node) => !node.parentId || !subgraphById.has(node.parentId))
+      .map((node) => ({ id: node.id, value: node, dimensions: nodeDimensions() })),
+    ...graph.subgraphs.map(normalSubgraph),
+  ];
+
+  const unitForNode = (nodeId: string) => {
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node) return undefined;
+    const parent = node.parentId ? subgraphById.get(node.parentId) : undefined;
+    return parent && (parent.collapsed || authoredIds.has(parent.id)) ? parent.id : node.id;
+  };
+
+  const edges = graph.edges.flatMap((edge) => {
     const source = unitForNode(edge.source);
     const target = unitForNode(edge.target);
-    return source && target && source !== target ? [{ ...edge, source, target }] : [];
+    return source && target && source !== target ? [{ id: edge.id, source, target }] : [];
   });
-  const outerGeometry = layoutScope(outerUnits, outerEdges, ORIGIN);
 
   return {
-    ...next,
-    nodes: next.nodes.map((node) => ({
-      ...node,
-      position: childPositions.get(node.id) ?? outerGeometry.positions.get(node.id) ?? node.position,
-    })),
-    subgraphs: next.subgraphs.map((subgraph) => {
-      const sized = sizedSubgraphs.get(subgraph.id)!;
+    root: { id: ROOT_ID, dimensions: { width: 0, height: 0 }, children: rootChildren },
+    edges,
+    authoredGeometry,
+  };
+}
+
+const workflowStructuralSignature = (
+  graph: WorkflowGraph,
+  options: WorkflowLayoutOptions,
+) => JSON.stringify({
+  nodes: graph.nodes.map((node) => ({ id: node.id, parentId: node.parentId, kind: node.kind })),
+  subgraphs: graph.subgraphs.map((subgraph) => ({
+    id: subgraph.id,
+    collapsed: subgraph.collapsed,
+  })),
+  edges: graph.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+  authoredSubgraphIds: [...(options.authoredSubgraphIds ?? [])].sort(),
+});
+
+const positionAtRoot = (geometry: CompoundLayoutGeometry) => (
+  geometry.parentId
+    ? geometry.position
+    : { x: geometry.position.x + ORIGIN.x, y: geometry.position.y + ORIGIN.y }
+);
+
+function applyWorkflowGeometry(
+  graph: WorkflowGraph,
+  geometry: Map<string, CompoundLayoutGeometry>,
+  authoredGeometry: ReadonlyMap<string, AuthoredSubgraphGeometry>,
+): WorkflowGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      const authoredParent = node.parentId ? authoredGeometry.get(node.parentId) : undefined;
+      const laidOut = geometry.get(node.id);
       return {
-        ...sized,
-        position: outerGeometry.positions.get(subgraph.id) ?? sized.position,
+        ...node,
+        position: authoredParent?.positions.get(node.id) ?? (laidOut ? positionAtRoot(laidOut) : node.position),
+      };
+    }),
+    subgraphs: graph.subgraphs.map((subgraph) => {
+      const authored = authoredGeometry.get(subgraph.id);
+      const laidOut = geometry.get(subgraph.id);
+      return {
+        ...subgraph,
+        position: laidOut ? positionAtRoot(laidOut) : subgraph.position,
+        // Closing a container changes only its projected footprint. Retain
+        // canonical expanded dimensions so reopening cannot destroy geometry.
+        dimensions: subgraph.collapsed
+          ? subgraph.dimensions
+          : authored?.dimensions ?? laidOut?.dimensions ?? subgraph.dimensions,
       };
     }),
   };
+}
+
+/**
+ * Produces only canonical node/subgraph geometry. The asynchronous ELK request
+ * is cached by topology, while the result mapper always applies that geometry
+ * to the caller's current graph so edge and semantic fields stay byte-for-byte.
+ */
+export async function layoutWorkflowGraph(
+  graph: WorkflowGraph,
+  options: WorkflowLayoutOptions = {},
+): Promise<WorkflowGraph> {
+  if (options.preserveGraphGeometry) return structuredClone(graph);
+
+  const input = buildWorkflowLayoutInput(graph, options);
+  const hasAuthoredGeometry = input.authoredGeometry.size > 0;
+  const key = workflowStructuralSignature(graph, options);
+  let geometryPromise = hasAuthoredGeometry ? undefined : layoutGeometryCache.get(key);
+  if (!geometryPromise) {
+    geometryPromise = layoutCompoundGeometry(input.root, input.edges);
+    if (!hasAuthoredGeometry) {
+      layoutGeometryCache.set(key, geometryPromise);
+      if (layoutGeometryCache.size > LAYOUT_CACHE_LIMIT) {
+        const oldestKey = layoutGeometryCache.keys().next().value;
+        if (oldestKey) layoutGeometryCache.delete(oldestKey);
+      }
+      void geometryPromise.catch(() => layoutGeometryCache.delete(key));
+    }
+  }
+  const geometry = await geometryPromise;
+  return applyWorkflowGeometry(graph, geometry, input.authoredGeometry);
 }
