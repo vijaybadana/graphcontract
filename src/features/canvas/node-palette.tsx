@@ -204,7 +204,6 @@ function NodePaletteContents({
                   tabIndex={0}
                   aria-label={reference.label}
                   aria-describedby={`connection-reference-${reference.id}-description`}
-                  title={reference.explanation}
                 >
                   <span className={`node-palette__item-icon node-palette__reference-icon node-palette__reference-icon--${reference.id}`} aria-hidden="true">
                     {reference.id === 'send'
@@ -212,7 +211,7 @@ function NodePaletteContents({
                       : <span className={`node-palette__connection-cue node-palette__connection-cue--${reference.id}`} aria-hidden="true" />}
                   </span>
                   <span className="node-palette__item-label">{reference.label}</span>
-                  <span id={`connection-reference-${reference.id}-description`} className="node-palette__reference-explanation">{reference.explanation}</span>
+                  <span id={`connection-reference-${reference.id}-description`} role="tooltip" className="node-palette__reference-explanation">{reference.explanation}</span>
                 </li>
               ))}
             </ul>

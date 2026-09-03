@@ -11,8 +11,9 @@ test('connection taxonomy stays a focusable reference instead of a graph mutatio
   }
 
   const edge = references.filter({ hasText: /^Edge/ });
+  await expect(edge).not.toHaveAttribute('title');
   await edge.hover();
-  await expect(edge.getByText('A standard directed connection between two nodes.')).toBeVisible();
+  await expect(edge.getByRole('tooltip')).toBeVisible({ timeout: 500 });
 
   const send = references.filter({ hasText: /^Send ×N/ });
   await send.focus();

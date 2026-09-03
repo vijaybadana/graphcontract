@@ -62,9 +62,9 @@ describe('NodePalette inventory', () => {
     const send = screen.getByText('Send ×N');
     const sendReference = send.closest('li')!;
     expect(sendReference.getAttribute('tabindex')).toBe('0');
-    expect(sendReference.getAttribute('title')).toBe('Dynamically fans work out to one template and rejoins at Merge.');
+    expect(sendReference.getAttribute('title')).toBeNull();
     fireEvent.focus(sendReference);
-    expect(screen.getByText('Dynamically fans work out to one template and rejoins at Merge.')).toBeTruthy();
+    expect(screen.getByRole('tooltip').textContent).toBe('Dynamically fans work out to one template and rejoins at Merge.');
     expect(screen.getByText('0 components and 1 reference shown')).toBeTruthy();
   });
 
