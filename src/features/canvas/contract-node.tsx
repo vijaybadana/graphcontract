@@ -21,6 +21,10 @@ import {
 } from './canvas-review-focus';
 import { graphNodeVisualKind, NodeVisualIcon, nodeVisualLabels } from './node-visual-taxonomy';
 import './contract-node.css';
+import {
+  CANVAS_INPUT_PORT_ID,
+  CANVAS_OUTPUT_PORT_ID,
+} from '@/src/application/layout-workflow';
 import './node-boundary.css';
 
 export type StepModifierInspectorSection =
@@ -415,7 +419,7 @@ export function ContractNodeCard({
         </button>
       )}
       {rendersTargetHandle && (
-        <Handle type="target" position={Position.Left} className="contract-node-handle" />
+        <Handle id={CANVAS_INPUT_PORT_ID} type="target" position={Position.Left} className="contract-node-handle" />
       )}
       <div className="contract-node-heading">
         <span className="contract-node-icon-slot" data-node-visual={visualKind}>
@@ -469,7 +473,7 @@ export function ContractNodeCard({
         </div>
       </div>
       {rendersSourceHandle && (
-        <Handle type="source" position={Position.Right} className="contract-node-handle" />
+        <Handle id={CANVAS_OUTPUT_PORT_ID} type="source" position={Position.Right} className="contract-node-handle" />
       )}
     </div>
   );

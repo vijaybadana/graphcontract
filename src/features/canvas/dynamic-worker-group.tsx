@@ -4,6 +4,10 @@ import type { CSSProperties } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 
 import type { GraphNode, SendTemplateAnatomy, SendTemplateAnatomyNode } from '@/src/domain';
+import {
+  CANVAS_INPUT_PORT_ID,
+  CANVAS_OUTPUT_PORT_ID,
+} from '@/src/application/layout-workflow';
 
 import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 import { ContractNodeCard } from './contract-node';
@@ -52,8 +56,8 @@ export function DynamicWorkerGroup({ data }: NodeProps<DynamicWorkerGroupFlowNod
       data-template-node-id={data.templateNodeId}
       data-member-count={data.memberNodeIds.length}
     >
-      <Handle type="target" position={Position.Left} className="dynamic-worker-group-port dynamic-worker-group-port--input" />
-      <Handle type="source" position={Position.Right} className="dynamic-worker-group-port dynamic-worker-group-port--output" />
+      <Handle id={CANVAS_INPUT_PORT_ID} type="target" position={Position.Left} className="dynamic-worker-group-port dynamic-worker-group-port--input" />
+      <Handle id={CANVAS_OUTPUT_PORT_ID} type="source" position={Position.Right} className="dynamic-worker-group-port dynamic-worker-group-port--output" />
       <span className="dynamic-worker-group-copy dynamic-worker-group-copy--back" aria-hidden="true" />
       <span className="dynamic-worker-group-copy dynamic-worker-group-copy--middle" aria-hidden="true" />
       {anatomy && (

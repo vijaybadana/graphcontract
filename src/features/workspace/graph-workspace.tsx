@@ -39,16 +39,9 @@ import { validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
-import {
-  ContractNode,
-  type StepModifierPresentation,
-} from '@/src/features/canvas/contract-node';
-import { MergeNode } from '@/src/features/canvas/merge-node';
-import { RuntimeInstanceNode, type RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
-import { RoutingEdge } from '@/src/features/canvas/routing-edge';
-import { ExternalSystemTile } from '@/src/features/canvas/external-system-tile';
-import { DynamicWorkerGroup } from '@/src/features/canvas/dynamic-worker-group';
-import { SystemRelationshipEdge } from '@/src/features/canvas/system-relationship-edge';
+import { type StepModifierPresentation } from '@/src/features/canvas/contract-node';
+import type { RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
+import { canvasEdgeTypes, canvasNodeTypes } from '@/src/features/canvas/canvas-render-registry';
 import {
   NodePalette,
   PaletteKind,
@@ -56,7 +49,6 @@ import {
   normalizePalettePreset,
   readDroppedPaletteKind,
 } from '@/src/features/canvas/node-palette';
-import { SubgraphNode } from '@/src/features/canvas/subgraph-node';
 import { useCoalescedFitView } from '@/src/features/canvas/use-coalesced-fit-view';
 import {
   ContextInspector,
@@ -107,15 +99,6 @@ import './graph-workspace.css';
 import '@/src/features/proposals/proposal-canvas-focus.css';
 import { CanvasReviewFocusProvider } from '@/src/features/canvas/canvas-review-focus';
 
-const nodeTypes = {
-  contractNode: ContractNode,
-  mergeJunction: MergeNode,
-  runtimeInstance: RuntimeInstanceNode,
-  subgraph: SubgraphNode,
-  externalSystemTile: ExternalSystemTile,
-  dynamicWorkerGroup: DynamicWorkerGroup,
-};
-const edgeTypes = { routing: RoutingEdge, systemRelationship: SystemRelationshipEdge };
 const snapGrid: [number, number] = [12, 12];
 const panOnDrag = [1];
 const defaultEdgeOptions: DefaultEdgeOptions = {
@@ -1169,8 +1152,8 @@ export function GraphWorkspace() {
             data-proposal-focus-key={proposalCanvasFocus?.key}
             nodes={activeViewMode === 'proposal' ? canvas.nodes : canvasInteractions.nodes}
             edges={activeViewMode === 'proposal' ? canvas.edges : canvasInteractions.edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
+            nodeTypes={canvasNodeTypes}
+            edgeTypes={canvasEdgeTypes}
             onNodesChange={canvasInteractions.onNodesChange}
             onEdgesChange={canvasInteractions.onEdgesChange}
             onConnect={onConnect}

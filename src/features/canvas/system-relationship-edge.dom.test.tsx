@@ -33,6 +33,7 @@ describe('SystemRelationshipEdge', () => {
           data: {
             projection: 'system-relationship',
             proposalState: 'updated',
+            scenarioState: 'active',
             relationship: {
               id: 'runner',
               kind: 'external-orchestration',
@@ -51,6 +52,7 @@ describe('SystemRelationshipEdge', () => {
       name: /External orchestration: Notify runner\. Proposed updated\. Not a native control edge/i,
     });
     expect(relationship.getAttribute('data-proposal-state')).toBe('updated');
+    expect(relationship.closest('.system-relationship-edge__label')?.classList.contains('scenario-state--active')).toBe(true);
     expect(screen.getByText('Proposed updated')).toBeTruthy();
     fireEvent.click(relationship);
     expect(onRelationshipActivate).toHaveBeenCalledWith('runner');

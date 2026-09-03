@@ -4,6 +4,10 @@ import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import type { KeyboardEvent, PointerEvent } from 'react';
 
 import { EffectiveGraphCapabilities, GraphSubgraph } from '@/src/domain';
+import {
+  CANVAS_INPUT_PORT_ID,
+  CANVAS_OUTPUT_PORT_ID,
+} from '@/src/application/layout-workflow';
 import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 import './subgraph-node.css';
 import './node-boundary.css';
@@ -77,6 +81,7 @@ export function SubgraphNode({ data, id, selected }: NodeProps<SubgraphFlowNode>
       {!removed && (
         <Handle
           type="target"
+          id={CANVAS_INPUT_PORT_ID}
           position={Position.Left}
           className="subgraph-node-handle"
         />
@@ -121,6 +126,7 @@ export function SubgraphNode({ data, id, selected }: NodeProps<SubgraphFlowNode>
       {!removed && (
         <Handle
           type="source"
+          id={CANVAS_OUTPUT_PORT_ID}
           position={Position.Right}
           className="subgraph-node-handle"
         />

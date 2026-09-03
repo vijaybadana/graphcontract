@@ -6,6 +6,10 @@ import { ArrowsInIcon, ClockCountdownIcon, WarningCircleIcon } from '@phosphor-i
 import './merge-node.css';
 import './node-boundary.css';
 import type { Provenance } from '@/src/domain';
+import {
+  CANVAS_INPUT_PORT_ID,
+  CANVAS_OUTPUT_PORT_ID,
+} from '@/src/application/layout-workflow';
 import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 
 /**
@@ -55,7 +59,7 @@ export function MergeNode({ data, id, selected }: NodeProps<MergeFlowNode>) {
       data-invalid={data.invalid || undefined}
       data-proposal-state={data.proposalState}
     >
-      <Handle type="target" position={Position.Left} className="merge-node-handle" />
+      <Handle id={CANVAS_INPUT_PORT_ID} type="target" position={Position.Left} className="merge-node-handle" />
       <header className="merge-node-heading">
         <span className="merge-node-icon" aria-hidden="true">
           <ArrowsInIcon size={20} weight="bold" />
@@ -89,7 +93,7 @@ export function MergeNode({ data, id, selected }: NodeProps<MergeFlowNode>) {
         <span>Waits for dynamic inputs</span>
         {data.invalid && <WarningCircleIcon size={14} weight="fill" aria-label="Invalid Merge" />}
       </footer>
-      <Handle type="source" position={Position.Right} className="merge-node-handle" />
+      <Handle id={CANVAS_OUTPUT_PORT_ID} type="source" position={Position.Right} className="merge-node-handle" />
     </div>
   );
 }

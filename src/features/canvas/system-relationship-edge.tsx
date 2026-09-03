@@ -70,7 +70,9 @@ export function SystemRelationshipEdge({
         <div
           className={`system-relationship-edge__label ${external ? 'is-external' : 'is-spawned'} ${
             proposal ? `is-proposed-${proposal}` : ''
-          } ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
+          } ${data.scenarioState ? `scenario-state--${data.scenarioState}` : ''} ${
+            reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''
+          }`}
           data-review-focus={reviewFocusState}
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)` }}
         >

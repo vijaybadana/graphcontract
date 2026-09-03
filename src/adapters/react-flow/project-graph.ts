@@ -16,11 +16,16 @@ import type {
   ProposalComparisonEntry,
   ProposalReview,
 } from '@/src/application/proposal-comparison';
-import {
-  CONTRACT_NODE_HEIGHT,
-  CONTRACT_NODE_WIDTH,
-} from '@/src/application/canvas-geometry';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
+import {
+  CANVAS_INPUT_PORT_ID,
+  CANVAS_OUTPUT_PORT_ID,
+  canvasNodeRenderer,
+} from '@/src/features/canvas/canvas-render-registry';
+import {
+  resolveRoutingEdgeLabel,
+  resolveRoutingEdgePresentation,
+} from '@/src/features/canvas/routing-edge-presentation';
 import {
   runtimeProjectionAvailability,
 } from '@/src/features/workspace/runtime-projection';
@@ -33,11 +38,11 @@ import {
 
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
-const RUNTIME_INSTANCE_WIDTH = 188;
-const RUNTIME_INSTANCE_HEIGHT = 58;
+const RUNTIME_INSTANCE_WIDTH = canvasNodeRenderer('runtimeInstance').dimensions.width;
+const RUNTIME_INSTANCE_HEIGHT = canvasNodeRenderer('runtimeInstance').dimensions.height;
 const RUNTIME_INSTANCE_VERTICAL_GAP = 20;
-const DYNAMIC_WORKER_GROUP_MIN_WIDTH = 288;
-const DYNAMIC_WORKER_GROUP_MIN_HEIGHT = 232;
+const DYNAMIC_WORKER_GROUP_MIN_WIDTH = canvasNodeRenderer('dynamicWorkerGroup').dimensions.width;
+const DYNAMIC_WORKER_GROUP_MIN_HEIGHT = canvasNodeRenderer('dynamicWorkerGroup').dimensions.height;
 const DYNAMIC_WORKER_GROUP_INSET_X = 34;
 const DYNAMIC_WORKER_GROUP_INSET_Y = 76;
 
@@ -430,25 +435,7 @@ function projectEdge(
     byDomainEdgeId: {},
   },
 ): CanvasNativeEdge {
-  const color = presentation.invalid
-      ? '#e0353d'
-      : presentation.loop
-        ? '#ea6a18'
-        : presentation.mode === 'conditional'
-          ? '#7136cc'
-          : presentation.mode === 'send'
-            ? '#5969c8'
-          : presentation.mode === 'fallback'
-            ? '#8b55d8'
-          : presentation.mode === 'command'
-            ? '#3346c8'
-            : presentation.proposalState === 'added'
-              ? '#159160'
-              : presentation.proposalState === 'removed'
-                ? '#db4b55'
-                : presentation.proposalState === 'updated'
-                  ? '#c47b24'
-                  : '#303a35';
+  const rendered = resolveRoutingEdgePresentation(presentation);
   return {
     id:
       projection === 'subgraph-proxy'
@@ -463,25 +450,19 @@ function projectEdge(
     ].filter(Boolean).join(' '),
     source,
     target,
-    label: presentation.runtimeInstance
-      ? undefined
-      : edge.label ||
-        (presentation.mode === 'send' ? 'Send ×N' : presentation.mode === 'fallback' ? 'fallback' : undefined),
-    markerEnd: { type: MarkerType.ArrowClosed, color },
-    animated: presentation.proposalState === 'added',
+    sourceHandle: CANVAS_OUTPUT_PORT_ID,
+    targetHandle: CANVAS_INPUT_PORT_ID,
+    label: resolveRoutingEdgeLabel(edge, presentation),
+    markerEnd: { type: MarkerType.ArrowClosed, color: rendered.color },
+    animated: rendered.animated,
     reconnectable: projection === 'domain' && reconnectable && !presentation.frozen,
     interactionWidth: 28,
     pathOptions: { borderRadius: 16, offset: 28 },
     style: {
-      stroke: color,
-      strokeWidth: presentation.proposalState ? 2.5 : 1.8,
-      strokeDasharray:
-        presentation.runtimeInstance || presentation.mode === 'send'
-          ? '7 5'
-          : presentation.proposalState === 'removed'
-            ? '6 5'
-            : undefined,
-      opacity: presentation.proposalState === 'removed' ? 0.65 : 1,
+      stroke: rendered.color,
+      strokeWidth: rendered.strokeWidth,
+      strokeDasharray: rendered.dasharray,
+      opacity: rendered.opacity,
     },
     labelStyle: { fill: '#303a35', fontSize: 11, fontWeight: 720 },
     labelBgStyle: { fill: '#ffffff', fillOpacity: 1 },
@@ -498,8 +479,9 @@ function subgraphFlowNode(
   scenarioState?: ScenarioElementState,
   descendantReviewState?: CanvasReviewAggregate,
 ): CanvasFlowNode {
-  const width = subgraph.collapsed ? CONTRACT_NODE_WIDTH : subgraph.dimensions.width;
-  const height = subgraph.collapsed ? CONTRACT_NODE_HEIGHT : subgraph.dimensions.height;
+  const dimensions = canvasNodeRenderer('subgraph').dimensions;
+  const width = subgraph.collapsed ? dimensions.width : subgraph.dimensions.width;
+  const height = subgraph.collapsed ? dimensions.height : subgraph.dimensions.height;
   const removed = proposalState === 'removed';
   return {
     id: subgraph.id,
@@ -540,8 +522,8 @@ function isUnparentedNodeInsideExpandedSubgraph(
 ): boolean {
   if (node.parentId) return false;
   const centre = {
-    x: node.position.x + CONTRACT_NODE_WIDTH / 2,
-    y: node.position.y + CONTRACT_NODE_HEIGHT / 2,
+    x: node.position.x + canvasNodeRenderer('contractNode').dimensions.width / 2,
+    y: node.position.y + canvasNodeRenderer('contractNode').dimensions.height / 2,
   };
   return subgraphs.some(
     (subgraph) =>
@@ -743,13 +725,14 @@ function projectDomainNode(
   const hidden = Boolean(parent?.collapsed) || runtimeHiddenNodeIds.has(node.id);
 
   if (node.kind === 'merge') {
+    const dimensions = canvasNodeRenderer('mergeJunction').dimensions;
     return {
       id: node.id,
       type: 'mergeJunction',
       className: scenarioPresentationClassName(scenarioState),
       position: node.position,
-      initialWidth: CONTRACT_NODE_WIDTH,
-      initialHeight: CONTRACT_NODE_HEIGHT,
+      initialWidth: dimensions.width,
+      initialHeight: dimensions.height,
       hidden,
       selectable: proposalState !== 'removed',
       draggable: proposalState !== 'removed',
@@ -763,13 +746,14 @@ function projectDomainNode(
   }
 
   const template = sendTemplateData(node, preview.edges);
+  const dimensions = canvasNodeRenderer('contractNode').dimensions;
   return {
     id: node.id,
     type: 'contractNode',
     className: scenarioPresentationClassName(scenarioState),
     position: node.position,
-    initialWidth: CONTRACT_NODE_WIDTH,
-    initialHeight: CONTRACT_NODE_HEIGHT,
+    initialWidth: dimensions.width,
+    initialHeight: dimensions.height,
     hidden,
     selectable: proposalState !== 'removed',
     draggable: proposalState !== 'removed',
@@ -1152,8 +1136,8 @@ export function projectGraphToCanvas(
   // only in this canvas projection and are deterministically positioned from
   // their node endpoint.
   const externalTileIds = new Set<string>();
-  const externalTileWidth = 192;
-  const externalTileHeight = 72;
+  const externalTileWidth = canvasNodeRenderer('externalSystemTile').dimensions.width;
+  const externalTileHeight = canvasNodeRenderer('externalSystemTile').dimensions.height;
   const externalTileGap = 168;
   const relationshipEndpointId = (endpoint: NonNativeRelationship['source']) =>
     endpoint.kind === 'node'
@@ -1210,8 +1194,8 @@ export function projectGraphToCanvas(
         position: {
           x: externalIsSource
             ? Math.max(12, anchorPosition.x - externalTileWidth - externalTileGap)
-            : anchorPosition.x + CONTRACT_NODE_WIDTH + externalTileGap,
-          y: Math.max(12, anchorPosition.y + (CONTRACT_NODE_HEIGHT - externalTileHeight) / 2),
+            : anchorPosition.x + canvasNodeRenderer('contractNode').dimensions.width + externalTileGap,
+          y: Math.max(12, anchorPosition.y + (canvasNodeRenderer('contractNode').dimensions.height - externalTileHeight) / 2),
         },
         width: externalTileWidth,
         height: externalTileHeight,
@@ -1250,6 +1234,8 @@ export function projectGraphToCanvas(
       )),
       source,
       target,
+      sourceHandle: CANVAS_OUTPUT_PORT_ID,
+      targetHandle: CANVAS_INPUT_PORT_ID,
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color: relationship.kind === 'external-orchestration' ? '#6b7280' : '#6d28d9',

@@ -192,7 +192,29 @@ describe('RoutingEdge in React Flow', () => {
     expect(routingEdgeTokens({
       mode: 'conditional', loop: false, invalid: false, frozen: true, scenarioState: 'active',
     })).toMatchObject({
-      color: 'var(--gc-route-fallback)',
+      color: 'var(--gc-route-conditional)',
+    });
+    expect(routingEdgeTokens({ mode: 'send', loop: false, invalid: false, frozen: false })).toMatchObject({
+      color: 'var(--gc-route-send)',
+      dasharray: '7 5',
+    });
+    const frozenLoop = routingEdgeTokens({
+      mode: 'normal',
+      loop: true,
+      invalid: false,
+      frozen: true,
+      provenance: 'derived-semantic',
+    });
+    expect(frozenLoop.color).toBe('var(--gc-route-loop)');
+    expect(frozenLoop.dasharray).toBeUndefined();
+    expect(routingEdgeTokens({
+      mode: 'command', loop: false, invalid: false, frozen: false, proposalState: 'added',
+    })).toMatchObject({
+      // Proposal state leaves canonical command semantics intact.
+      color: 'var(--gc-route-command)',
+      dasharray: '7 5',
+      strokeWidth: 2.5,
+      animated: true,
     });
   });
 });

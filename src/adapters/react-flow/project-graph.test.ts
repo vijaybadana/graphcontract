@@ -5,6 +5,7 @@ import {
   canReconnectCanvasEdge,
   domainEdgeIdsForCanvasEdge,
   evidenceMarkersForGraph,
+  isCanvasNativeEdge,
   isCanvasSystemRelationshipEdge,
   isCanvasEdgeSelected,
   isSubgraphProxyEdge,
@@ -12,6 +13,13 @@ import {
   proposalReviewToCanvasProjection,
   topologyDerivedLoopEdgeIds,
 } from '@/src/adapters/react-flow/project-graph';
+import {
+  CANVAS_INPUT_PORT_ID,
+  CANVAS_OUTPUT_PORT_ID,
+  canvasEdgeTypes,
+  canvasNodeRenderers,
+  canvasNodeTypes,
+} from '@/src/features/canvas/canvas-render-registry';
 import { deriveProposalComparison } from '@/src/application/proposal-comparison';
 import type { ScenarioPresentation } from '@/src/features/scenarios/scenario-presentation';
 import {
@@ -95,6 +103,30 @@ function graphWithTwoSubgraphs(): WorkflowGraph {
 }
 
 describe('projectGraphToCanvas', () => {
+  it('uses the canonical render registry dimensions, components, and stable handles', () => {
+    expect(canvasNodeRenderers.contractNode.dimensions).toEqual({ width: 220, height: 134 });
+    expect(canvasNodeRenderers.runtimeInstance.dimensions).toEqual({ width: 188, height: 58 });
+    expect(canvasNodeRenderers.contractNode.ports).toEqual({
+      input: CANVAS_INPUT_PORT_ID,
+      output: CANVAS_OUTPUT_PORT_ID,
+    });
+    expect(Object.keys(canvasNodeTypes)).toEqual([
+      'contractNode',
+      'mergeJunction',
+      'subgraph',
+      'runtimeInstance',
+      'externalSystemTile',
+      'dynamicWorkerGroup',
+    ]);
+    expect(Object.keys(canvasEdgeTypes)).toEqual(['routing', 'systemRelationship']);
+
+    const canvas = projectGraphToCanvas(sampleGraph, null);
+    for (const edge of canvas.edges.filter(isCanvasNativeEdge)) {
+      expect(edge.sourceHandle).toBe(CANVAS_OUTPUT_PORT_ID);
+      expect(edge.targetHandle).toBe(CANVAS_INPUT_PORT_ID);
+    }
+  });
+
   it('projects distinct inherited and overridden durability scope cues onto subgraphs', () => {
     const graph = graphWithSubgraph();
     graph.capabilities = {

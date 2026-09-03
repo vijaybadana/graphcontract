@@ -20,56 +20,13 @@ import type {
   CanvasEdgePresentation,
   CanvasNativeEdge,
 } from '@/src/adapters/react-flow/project-graph';
+import { resolveRoutingEdgePresentation } from './routing-edge-presentation';
 import { useCanvasEdgeReviewFocus } from './canvas-review-focus';
 
 import './routing-edge.css';
 
-type RoutingEdgeTokens = {
-  color: string;
-  haloColor: string;
-  dasharray?: string;
-};
-
-/** Exported for focused component coverage and to keep state precedence explicit. */
-export function routingEdgeTokens(presentation: CanvasEdgePresentation): RoutingEdgeTokens {
-  if (presentation.runtimeInstance) {
-    return { color: 'var(--gc-route-send)', haloColor: 'color-mix(in srgb, var(--gc-route-send) 25%, transparent)', dasharray: '4 4' };
-  }
-  if (presentation.invalid) {
-    return { color: 'var(--gc-route-invalid)', haloColor: 'color-mix(in srgb, var(--gc-route-invalid) 30%, transparent)', dasharray: '4 3' };
-  }
-  if (presentation.provenance === 'runtime-generated') {
-    return { color: 'var(--gc-focus)', haloColor: 'color-mix(in srgb, var(--gc-focus) 28%, transparent)', dasharray: '2 5' };
-  }
-  if (presentation.provenance === 'derived-semantic') {
-    return { color: 'var(--gc-route-conditional)', haloColor: 'color-mix(in srgb, var(--gc-route-conditional) 28%, transparent)', dasharray: '11 4 2 4' };
-  }
-  if (presentation.provenance === 'external-orchestration') {
-    return { color: 'var(--gc-route-proxy)', haloColor: 'color-mix(in srgb, var(--gc-route-proxy) 28%, transparent)', dasharray: '7 5' };
-  }
-  if (presentation.loop) {
-    return { color: 'var(--gc-route-loop)', haloColor: 'color-mix(in srgb, var(--gc-route-loop) 28%, transparent)' };
-  }
-  if (presentation.mode === 'command') {
-    return { color: 'var(--gc-route-command)', haloColor: 'color-mix(in srgb, var(--gc-route-command) 28%, transparent)', dasharray: '7 5' };
-  }
-  if (presentation.mode === 'conditional') {
-    return { color: 'var(--gc-route-fallback)', haloColor: 'color-mix(in srgb, var(--gc-route-fallback) 28%, transparent)' };
-  }
-  if (presentation.mode === 'fallback') {
-    return { color: 'var(--gc-purple)', haloColor: 'color-mix(in srgb, var(--gc-purple) 28%, transparent)', dasharray: '6 5' };
-  }
-  if (presentation.proposalState === 'added') {
-    return { color: 'var(--gc-proposal-added)', haloColor: 'color-mix(in srgb, var(--gc-proposal-added) 28%, transparent)' };
-  }
-  if (presentation.proposalState === 'updated') {
-    return { color: 'var(--gc-proposal-updated)', haloColor: 'color-mix(in srgb, var(--gc-proposal-updated) 28%, transparent)' };
-  }
-  if (presentation.proposalState === 'removed') {
-    return { color: 'var(--gc-proposal-removed)', haloColor: 'color-mix(in srgb, var(--gc-proposal-removed) 28%, transparent)', dasharray: '6 5' };
-  }
-  return { color: 'var(--gc-route-default)', haloColor: 'color-mix(in srgb, var(--gc-focus) 30%, transparent)' };
-}
+/** @deprecated import resolveRoutingEdgePresentation from routing-edge-presentation. */
+export const routingEdgeTokens = resolveRoutingEdgePresentation;
 
 function cubicPoint(
   start: number,

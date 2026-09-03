@@ -100,17 +100,20 @@
 /* Scenario state is attached only to ephemeral React Flow projection objects. */
 .react-flow__node.scenario-state--dimmed,
 .react-flow__edge.scenario-state--dimmed,
-.routing-edge-label.scenario-state--dimmed {
+.routing-edge-label.scenario-state--dimmed,
+.system-relationship-edge__label.scenario-state--dimmed {
   opacity: .18;
 }
 
 .react-flow__node.scenario-state--active,
 .react-flow__edge.scenario-state--active,
-.routing-edge-label.scenario-state--active {
+.routing-edge-label.scenario-state--active,
+.system-relationship-edge__label.scenario-state--active {
   opacity: 1;
 }
 
-.routing-edge-label.scenario-state--dimmed { pointer-events: none; }
+.routing-edge-label.scenario-state--dimmed,
+.system-relationship-edge__label.scenario-state--dimmed { pointer-events: none; }
 
 .react-flow__node.scenario-state--active {
   filter: none;
