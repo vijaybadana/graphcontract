@@ -226,6 +226,30 @@ describe('projectGraphToCanvas', () => {
       source: 'researcher-agent',
       data: { edge: { source: 'researcher-agent', target: 'research-merge' } },
     });
+    expect(design.edges.find((edge) => edge.id === 'enter-research-cell')).toMatchObject({
+      source: 'write-brief',
+      target: 'research-cell',
+      data: {
+        edge: { target: 'research-cell-start' },
+        projection: 'subgraph-boundary',
+      },
+    });
+    expect(design.edges.find((edge) => edge.id === 'frame-researcher')).toMatchObject({
+      source: 'frame-question',
+      target: 'researcher-workflow',
+      data: {
+        edge: { target: 'researcher-start' },
+        projection: 'subgraph-boundary',
+      },
+    });
+    expect(design.edges.find((edge) => edge.id === 'researcher-supervisor-loop')).toMatchObject({
+      source: 'researcher-workflow',
+      target: 'frame-question',
+      data: {
+        edge: { source: 'researcher-end' },
+        projection: 'subgraph-boundary',
+      },
+    });
 
     const researcherCollapsed = structuredClone(graph);
     researcherCollapsed.subgraphs.find((subgraph) => subgraph.id === 'researcher-workflow')!.collapsed = true;
@@ -984,21 +1008,32 @@ describe('projectGraphToCanvas', () => {
     });
   });
 
-  it('keeps canonical edges visible with original ids and endpoints while expanded', () => {
+  it('keeps canonical edge ids while projecting expanded cross-boundary endpoints to the frame', () => {
     const graph = graphWithSubgraph();
     const canvas = projectGraphToCanvas(graph, null);
 
     expect(canvas.nodes.filter((node) => node.hidden)).toHaveLength(0);
     expect(canvas.edges.map((edge) => [edge.id, edge.source, edge.target])).toEqual([
-      ['enter-review', 'start', 'review'],
+      ['enter-review', 'start', 'review-group'],
       ['review-approve', 'review', 'approve'],
       ['review-approve-duplicate', 'review', 'approve'],
-      ['leave-approve', 'approve', 'end'],
+      ['leave-approve', 'review-group', 'end'],
     ]);
     expect(canvas.edges.every((edge) => !isSubgraphProxyEdge(edge))).toBe(true);
+    expect(canvas.edges.find((edge) => edge.id === 'enter-review')).toMatchObject({
+      reconnectable: false,
+      data: {
+        edge: { source: 'start', target: 'review' },
+        endpointAliases: { target: 'review-group' },
+        projection: 'subgraph-boundary',
+      },
+    });
+    expect(canvas.edges.find((edge) => edge.id === 'review-approve')).toMatchObject({
+      data: { projection: 'domain' },
+    });
   });
 
-  it('keeps Research Supervisor boundary endpoints canonical when expanded and proxied when collapsed', () => {
+  it('renders Research Supervisor entry and exit on its expanded frame without rewiring canonical endpoints', () => {
     const expanded = projectGraphToCanvas(researchSupervisorGraph, null);
 
     expect(expanded.nodes.find((node) => node.id === 'research-subgraph-start')).toMatchObject({
@@ -1010,12 +1045,19 @@ describe('projectGraphToCanvas', () => {
       hidden: false,
     });
     expect(expanded.edges.map((edge) => [edge.id, edge.source, edge.target])).toEqual([
-      ['research-enter-subgraph', 'research-outer-start', 'research-subgraph-start'],
+      ['research-enter-subgraph', 'research-outer-start', 'research-supervisor'],
       ['research-start-supervisor', 'research-subgraph-start', 'research-supervisor-agent'],
       ['research-supervisor-tools', 'research-supervisor-agent', 'research-supervisor-tools'],
       ['research-tools-end', 'research-supervisor-tools', 'research-subgraph-end'],
-      ['research-exit-subgraph', 'research-subgraph-end', 'research-outer-end'],
+      ['research-exit-subgraph', 'research-supervisor', 'research-outer-end'],
     ]);
+    expect(expanded.edges.find((edge) => edge.id === 'research-enter-subgraph')).toMatchObject({
+      data: {
+        edge: { source: 'research-outer-start', target: 'research-subgraph-start' },
+        endpointAliases: { target: 'research-supervisor' },
+        projection: 'subgraph-boundary',
+      },
+    });
 
     const collapsedGraph = structuredClone(researchSupervisorGraph);
     collapsedGraph.subgraphs[0].collapsed = true;

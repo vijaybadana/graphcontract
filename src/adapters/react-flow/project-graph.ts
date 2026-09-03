@@ -49,7 +49,14 @@ const DYNAMIC_WORKER_GROUP_INSET_Y = 76;
 export type CanvasEdgeData = {
   edge: GraphEdge;
   domainEdgeIds: string[];
-  projection: 'domain' | 'subgraph-proxy' | 'template-boundary' | 'runtime-instance';
+  projection:
+    | 'domain'
+    | 'subgraph-boundary'
+    | 'subgraph-proxy'
+    | 'template-boundary'
+    | 'runtime-instance';
+  /** Canvas-only aliases keep canonical child endpoints intact in `edge`. */
+  endpointAliases?: Partial<Record<'source' | 'target', string>>;
   /** Review metadata stays keyed by canonical edges even when endpoints collapse. */
   review?: CanvasEdgeReviewProjection;
   runtimeInstanceId?: string;
@@ -267,6 +274,8 @@ type ProjectedDomainEdge = {
   edge: GraphEdge;
   source: string;
   target: string;
+  sourceAlias?: 'node' | 'boundary' | 'collapsed';
+  targetAlias?: 'node' | 'boundary' | 'collapsed';
 };
 
 const proxyEdgeId = (source: string, target: string, semanticKey?: string) =>
@@ -450,6 +459,10 @@ function projectEdge(
   proxySemanticKey?: string,
 ): CanvasNativeEdge {
   const rendered = resolveRoutingEdgePresentation(presentation);
+  const endpointAliases = {
+    ...(source !== edge.source ? { source } : {}),
+    ...(target !== edge.target ? { target } : {}),
+  };
   return {
     id:
       projection === 'subgraph-proxy'
@@ -482,7 +495,14 @@ function projectEdge(
     labelBgStyle: { fill: '#ffffff', fillOpacity: 1 },
     labelBgPadding: [5, 3] as [number, number],
     labelBgBorderRadius: 6,
-    data: { edge, domainEdgeIds, projection, presentation, review },
+    data: {
+      edge,
+      domainEdgeIds,
+      projection,
+      presentation,
+      review,
+      ...(Object.keys(endpointAliases).length > 0 ? { endpointAliases } : {}),
+    },
   };
 }
 
@@ -614,6 +634,44 @@ function outermostCollapsedSubgraphId(
     currentId = current.parentId;
   }
   return collapsedId;
+}
+
+function subgraphChainFromRoot(
+  parentId: string | undefined,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+): string[] {
+  const chain: string[] = [];
+  const visited = new Set<string>();
+  let currentId = parentId;
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const current = subgraphsById.get(currentId);
+    if (!current) break;
+    chain.push(current.id);
+    currentId = current.parentId;
+  }
+  return chain.reverse();
+}
+
+/** Selects the first container boundary crossed from the shared scope toward
+ * one endpoint. The canonical edge continues to target the child Start/End;
+ * this alias only keeps the expanded canvas visually honest. */
+function expandedBoundarySubgraphId(
+  node: GraphNode | undefined,
+  other: GraphNode | undefined,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+): string | undefined {
+  const chain = subgraphChainFromRoot(node?.parentId, subgraphsById);
+  const otherChain = subgraphChainFromRoot(other?.parentId, subgraphsById);
+  let sharedDepth = 0;
+  while (
+    sharedDepth < chain.length &&
+    sharedDepth < otherChain.length &&
+    chain[sharedDepth] === otherChain[sharedDepth]
+  ) {
+    sharedDepth += 1;
+  }
+  return chain[sharedDepth];
 }
 
 function subgraphDepth(
@@ -1027,19 +1085,35 @@ export function projectGraphToCanvas(
         : [];
     }),
   );
-  const visibleNodeEndpoint = (nodeId: string) => {
-    const node = preview.nodes.find((candidate) => candidate.id === nodeId);
-    return outermostCollapsedSubgraphId(node?.parentId, subgraphsById) ?? nodeId;
+  const nodeById = new Map(preview.nodes.map((node) => [node.id, node]));
+  const projectedEndpoint = (nodeId: string, otherNodeId: string) => {
+    const node = nodeById.get(nodeId);
+    const collapsedSubgraphId = outermostCollapsedSubgraphId(node?.parentId, subgraphsById);
+    if (collapsedSubgraphId) {
+      return { id: collapsedSubgraphId, kind: 'collapsed' as const };
+    }
+    const boundarySubgraphId = expandedBoundarySubgraphId(
+      node,
+      nodeById.get(otherNodeId),
+      subgraphsById,
+    );
+    return boundarySubgraphId
+      ? { id: boundarySubgraphId, kind: 'boundary' as const }
+      : { id: nodeId, kind: 'node' as const };
   };
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
+    const sourceEndpoint = projectedEndpoint(edge.source, edge.target);
+    const targetEndpoint = projectedEndpoint(edge.target, edge.source);
     return {
       edge,
-      source: visibleNodeEndpoint(edge.source) !== edge.source
-        ? visibleNodeEndpoint(edge.source)
+      source: sourceEndpoint.id !== edge.source
+        ? sourceEndpoint.id
         : dynamicGroupByTemplateContinuationId.get(edge.id) ?? edge.source,
-      target: visibleNodeEndpoint(edge.target) !== edge.target
-        ? visibleNodeEndpoint(edge.target)
+      target: targetEndpoint.id !== edge.target
+        ? targetEndpoint.id
         : dynamicGroupBySendEdgeId.get(edge.id) ?? edge.target,
+      sourceAlias: sourceEndpoint.kind,
+      targetAlias: targetEndpoint.kind,
     };
   });
 
@@ -1067,8 +1141,14 @@ export function projectGraphToCanvas(
     ),
   });
   for (const domainEdge of domainEdges) {
+    const hasCollapsedAlias =
+      domainEdge.sourceAlias === 'collapsed' || domainEdge.targetAlias === 'collapsed';
+    const hasBoundaryAlias =
+      domainEdge.sourceAlias === 'boundary' || domainEdge.targetAlias === 'boundary';
     const collapsedInternal =
-      domainEdge.source === domainEdge.target && domainEdge.source !== domainEdge.edge.source;
+      hasCollapsedAlias &&
+      domainEdge.source === domainEdge.target &&
+      domainEdge.source !== domainEdge.edge.source;
     if (collapsedInternal) continue;
 
     const isTemplateBoundary =
@@ -1101,6 +1181,22 @@ export function projectGraphToCanvas(
           canvasEdgesReconnectable,
           [domainEdge.edge.id],
           'domain',
+          edgePresentation(domainEdge.edge, group, review),
+          review,
+        ),
+      );
+      continue;
+    }
+
+    if (!hasCollapsedAlias && hasBoundaryAlias) {
+      const group = [domainEdge.edge];
+      const review = reviewProjectionForEdges(group, edgeReviewStates);
+      edges.push(
+        projectEdge(
+          domainEdge,
+          false,
+          [domainEdge.edge.id],
+          'subgraph-boundary',
           edgePresentation(domainEdge.edge, group, review),
           review,
         ),
