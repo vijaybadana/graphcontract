@@ -62,8 +62,11 @@ describe('GraphLibrarySheet', () => {
   it('searches and filters entries, including a useful empty state', () => {
     render(<GraphLibrarySheet open entries={entries} onClose={() => {}} onRequestOpen={() => {}} />);
 
-    expect(screen.getByText('Showing 2 of 2 templates')).toBeTruthy();
-    expect(screen.getByText('Runtime worker pools are intentionally deferred.')).toBeTruthy();
+    expect(screen.getByText('Showing 2 of 2 templates').classList.contains('sr-only')).toBe(true);
+    expect(screen.queryByText('Workflow templates')).toBeNull();
+    expect(screen.queryByText('Graph library')).toBeNull();
+    expect(screen.queryByText('Open graph')).toBeNull();
+    expect(screen.queryByText('Runtime worker pools are intentionally deferred.')).toBeNull();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search graph library' }), { target: { value: 'incident' } });
     expect(screen.getByText('Showing 1 of 2 templates')).toBeTruthy();
     expect(screen.getByText('Human-Approved Incident Response')).toBeTruthy();
@@ -78,15 +81,24 @@ describe('GraphLibrarySheet', () => {
     const onRequestOpen = vi.fn();
     render(<GraphLibrarySheet open entries={entries} onClose={() => {}} onRequestOpen={onRequestOpen} />);
 
-    const sourceLink = screen.getByRole('link', { name: 'Open Inspired by langchain-ai/open_deep_research on GitHub' });
+    const sourceLink = screen.getByRole('link', { name: 'Open langchain-ai/open_deep_research on GitHub' });
     expect(sourceLink.getAttribute('href')).toBe('https://github.com/langchain-ai/open_deep_research');
     expect(sourceLink.getAttribute('target')).toBe('_blank');
     expect(sourceLink.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(sourceLink.textContent).toContain('GitHub');
+    const githubMark = sourceLink.querySelector('.graph-library-card__github-mark');
+    expect(githubMark).not.toBeNull();
+    expect(githubMark?.querySelector('.github-brand-mark__black')?.getAttribute('src')).toBe(
+      '/brand/github/GitHub_Invertocat_Black.svg',
+    );
+    expect(githubMark?.querySelector('.github-brand-mark__white')?.getAttribute('src')).toBe(
+      '/brand/github/GitHub_Invertocat_White.svg',
+    );
     fireEvent.click(sourceLink);
     expect(onRequestOpen).not.toHaveBeenCalled();
   });
 
-  it('supports accessible open, blocked explanation, close, and focus restoration', async () => {
+  it('confirms replacement inside the library and restores focus after cancellation', async () => {
     const onRequestOpen = vi.fn();
     function Harness() {
       const [open, setOpen] = useState(false);
@@ -104,7 +116,19 @@ describe('GraphLibrarySheet', () => {
     fireEvent.click(trigger);
     await waitFor(() => expect(screen.getByRole('searchbox', { name: 'Search graph library' })).toBe(document.activeElement));
     expect(screen.getByText('Loaded')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Open Hierarchical Deep Research' }));
+    const openEntry = screen.getByRole('button', { name: 'Open Hierarchical Deep Research' });
+    fireEvent.click(openEntry);
+    const confirmation = screen.getByRole('alertdialog', { name: 'Open “Hierarchical Deep Research”?' });
+    expect(confirmation).toBeTruthy();
+    expect(confirmation.closest('.graph-library-sheet__panel')).toBeNull();
+    expect(confirmation.closest('.graph-library-confirmation')?.parentElement?.classList.contains('graph-library-sheet')).toBe(true);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBe(document.activeElement));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(document.activeElement).toBe(openEntry));
+    expect(onRequestOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(openEntry);
+    fireEvent.click(screen.getByRole('button', { name: 'Replace canvas' }));
     expect(onRequestOpen).toHaveBeenCalledWith(entries[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Close graph library' }));
     await waitFor(() => expect(document.activeElement).toBe(trigger));
@@ -124,5 +148,29 @@ describe('GraphLibrarySheet', () => {
     expect(blockedAction.disabled).toBe(true);
     fireEvent.click(blockedAction);
     expect(onRequestOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports Escape cancellation and direct opening when the canvas is empty', async () => {
+    const onRequestOpen = vi.fn();
+    const { rerender } = render(<GraphLibrarySheet open entries={entries} onClose={() => {}} onRequestOpen={onRequestOpen} />);
+    const openEntry = screen.getByRole('button', { name: 'Open Hierarchical Deep Research' });
+    fireEvent.click(openEntry);
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(openEntry));
+    expect(onRequestOpen).not.toHaveBeenCalled();
+
+    rerender(
+      <GraphLibrarySheet
+        open
+        entries={entries}
+        confirmationRequired={false}
+        onClose={() => {}}
+        onRequestOpen={onRequestOpen}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open Hierarchical Deep Research' }));
+    expect(onRequestOpen).toHaveBeenCalledWith(entries[0]);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 });

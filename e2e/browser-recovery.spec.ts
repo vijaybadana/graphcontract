@@ -183,8 +183,9 @@ test('R01 corrupt storage recovers to a truthful, usable default workspace', asy
 
   await expect(app.locator('.workspace-contract-state')).toHaveText('Valid draft');
   await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
-  await expect(app.getByLabel('Graph status')).toContainText('8 branches');
-  await expect(app.getByLabel('Graph status')).toContainText('Contract valid');
+  await expect(app.getByLabel('Graph status')).toContainText('8 edges');
+  await expect(app.getByLabel('Graph status')).toContainText('0 scenarios');
+  await expect(app.getByLabel('Graph status')).toContainText('Ready to freeze');
   await expect(app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' })).toBeEnabled();
   await expect(app.getByTestId('rf__node-classifier')).toBeVisible();
 
@@ -321,7 +322,7 @@ test('R04 interrupted pending proposal reloads locked, rejects cleanly, and rest
     rationale: 'Interrupted proposal recovery review.',
   });
   await expect(app.getByText('Interrupted proposal recovery review.', { exact: true })).toBeVisible();
-  const comparison = app.getByRole('region', { name: 'Before / Proposed' });
+  const comparison = app.getByRole('region', { name: 'Graph overview' });
   await expect(comparison).toBeVisible();
   await expect(comparison.getByLabel('Changed values for classifier', { exact: true })).toContainText(
     'Interrupted candidate classifier',
@@ -330,7 +331,7 @@ test('R04 interrupted pending proposal reloads locked, rejects cleanly, and rest
     'Interrupted candidate classifier',
   );
   await expect(app.getByTestId('rf__node-classifier').getByText('Classifier Agent', { exact: true })).toBeVisible();
-  await expect(app.getByRole('button', { name: 'Step', exact: true })).toBeDisabled();
+  await expect(app.getByRole('button', { name: 'Task', exact: true })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeDisabled();
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
 
@@ -338,7 +339,7 @@ test('R04 interrupted pending proposal reloads locked, rejects cleanly, and rest
   const rejected = await readGraph(app);
   expect(rejected.graph).toEqual(accepted.graph);
   expect(rejected.pendingProposal).toBeUndefined();
-  await expect(app.getByRole('button', { name: 'Step', exact: true })).toBeEnabled();
+  await expect(app.getByRole('button', { name: 'Task', exact: true })).toBeEnabled();
   await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeEnabled();
   await expect(app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' })).toBeEnabled();
 

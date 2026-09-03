@@ -6,16 +6,15 @@ export type WorkspacePanelVisibility = {
 };
 
 /**
- * A pending proposal is the only forced visibility state. Normal canvas
- * selection and generated scenarios open the inspector from their user
- * handlers, allowing a later explicit collapse to remain collapsed.
+ * Panel visibility is entirely request-driven. Proposal arrival opens the
+ * inspector through the workspace transition handler; keeping that policy out
+ * of this resolver lets a later explicit collapse remain collapsed.
  */
 export function resolveWorkspacePanelVisibility({
   compact,
   paletteRequested,
   inspectorRequested,
   compactPreference,
-  proposalPending,
 }: {
   compact: boolean;
   paletteRequested: boolean;
@@ -23,10 +22,9 @@ export function resolveWorkspacePanelVisibility({
   compactPreference: CompactPanelPreference;
   proposalPending: boolean;
 }): WorkspacePanelVisibility {
-  const forcedInspector = proposalPending;
   const paletteWinsCompactOverlay =
-    compact && paletteRequested && compactPreference === 'palette' && !forcedInspector;
-  const inspectorVisible = !paletteWinsCompactOverlay && (inspectorRequested || forcedInspector);
+    compact && paletteRequested && compactPreference === 'palette';
+  const inspectorVisible = !paletteWinsCompactOverlay && inspectorRequested;
   return {
     inspectorVisible,
     paletteVisible: paletteRequested && (!compact || !inspectorVisible),

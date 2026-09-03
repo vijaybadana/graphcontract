@@ -399,12 +399,16 @@ export function StepDurabilitySettings({
   editable,
   storeAccessRef,
   retryRef,
+  showStoreAccess = true,
+  showRetry = true,
 }: {
   graph: WorkflowGraph;
   node: StepGraphNode;
   editable: boolean;
   storeAccessRef?: RefCallback<HTMLElement>;
   retryRef?: RefCallback<HTMLElement>;
+  showStoreAccess?: boolean;
+  showRetry?: boolean;
 }) {
   const updateStepStoreAccess = useGraphStore((state) => state.updateStepStoreAccess);
   const updateStepRetry = useGraphStore((state) => state.updateStepRetry);
@@ -431,7 +435,7 @@ export function StepDurabilitySettings({
 
   return (
     <>
-      <section ref={storeAccessRef} id="inspector-step-store-access" data-inspector-section="storeAccess" tabIndex={-1} className="context-inspector__group context-inspector__group--tinted" aria-labelledby="step-store-access-heading">
+      {showStoreAccess && <section ref={storeAccessRef} id="inspector-step-store-access" data-inspector-section="storeAccess" tabIndex={-1} className="context-inspector__group context-inspector__group--tinted" aria-labelledby="step-store-access-heading">
         <div className="context-inspector__toggle-row">
           <h3 id="step-store-access-heading">Store access</h3>
           <span className={`context-inspector__scope-status ${storeAvailable ? 'is-available' : 'is-unavailable'}`}>
@@ -474,8 +478,8 @@ export function StepDurabilitySettings({
             </div>
           )}
         </div>
-      </section>
-      <section ref={retryRef} id="inspector-step-retry" data-inspector-section="retry" tabIndex={-1} className="context-inspector__group context-inspector__group--tinted" aria-labelledby="step-retry-heading">
+      </section>}
+      {showRetry && <section ref={retryRef} id="inspector-step-retry" data-inspector-section="retry" tabIndex={-1} className="context-inspector__group context-inspector__group--tinted" aria-labelledby="step-retry-heading">
         <div className="context-inspector__toggle-row">
           <h3 id="step-retry-heading">Retry policy</h3>
           <label className="context-inspector__toggle-label">
@@ -554,7 +558,7 @@ export function StepDurabilitySettings({
             </div>
           </div>
         )}
-      </section>
+      </section>}
     </>
   );
 }

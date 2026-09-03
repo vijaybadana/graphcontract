@@ -6,6 +6,8 @@ import { createPortal } from 'react-dom';
 
 import type { RequestChangesResult } from '@/src/application/workspace';
 
+import './proposal-panel.css';
+
 type RequestChangesDialogProps = {
   restoreFocusTo: RefObject<HTMLElement | null>;
   onClose: () => void;
@@ -74,7 +76,7 @@ export function RequestChangesDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/25 p-4"
+      className="proposal-review-dialog__backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -86,17 +88,17 @@ export function RequestChangesDialog({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         onKeyDown={trapFocus}
-        className="w-full max-w-lg rounded-2xl border border-black/10 bg-white p-5 shadow-2xl"
+        className="proposal-review-dialog"
       >
         <header className="flex items-start justify-between gap-4">
           <div>
             <p className="eyebrow">Human review</p>
             <h2 id={titleId} className="mt-1 text-lg font-semibold">Request proposal changes</h2>
-            <p id={descriptionId} className="mt-2 text-xs leading-5 text-black/60">
+            <p id={descriptionId} className="proposal-review-dialog__description">
               The accepted graph will remain unchanged. This feedback is returned to the agent as untrusted human-authored review content.
             </p>
           </div>
-          <button type="button" aria-label="Close request changes" onClick={onClose} className="rounded-lg p-2 hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-offset-2">
+          <button type="button" aria-label="Close request changes" onClick={onClose} className="proposal-review-dialog__close">
             <X aria-hidden="true" size={18} weight="bold" />
           </button>
         </header>
@@ -113,12 +115,12 @@ export function RequestChangesDialog({
             aria-describedby={`${feedbackHelpId}${error ? ' proposal-review-feedback-error' : ''}`}
             rows={5}
             placeholder="Explain what the next proposal should change"
-            className="mt-2 w-full resize-y rounded-xl border border-black/15 bg-white px-3 py-2 text-sm leading-5 outline-none focus:border-black/40 focus:ring-2 focus:ring-black/10"
+            className="proposal-review-dialog__textarea"
           />
-          <p id={feedbackHelpId} className="mt-1.5 text-[11px] leading-4 text-black/55">
+          <p id={feedbackHelpId} className="proposal-review-dialog__help">
             Enter at least 3 non-space characters. Feedback is stored as plain text.
           </p>
-          {error && <p id="proposal-review-feedback-error" role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
+          {error && <p id="proposal-review-feedback-error" role="alert" className="proposal-review-dialog__error">{error}</p>}
           <div className="mt-5 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="secondary-button">Cancel</button>
             <button type="submit" disabled={normalizedFeedback.length < 3} className="primary-button">Submit request</button>

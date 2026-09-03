@@ -5,6 +5,7 @@ import {
   BackgroundVariant,
   Connection,
   ConnectionLineType,
+  ControlButton,
   Controls,
   DefaultEdgeOptions,
   NodeMouseHandler,
@@ -15,7 +16,8 @@ import {
   EdgeMouseHandler,
   useReactFlow,
 } from '@xyflow/react';
-import { CSSProperties, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FrameCorners } from '@phosphor-icons/react';
+import { CSSProperties, DragEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   canConnectCanvasEndpoints,
@@ -45,6 +47,7 @@ import { MergeNode } from '@/src/features/canvas/merge-node';
 import { RuntimeInstanceNode, type RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
 import { RoutingEdge } from '@/src/features/canvas/routing-edge';
 import { ExternalSystemTile } from '@/src/features/canvas/external-system-tile';
+import { DynamicWorkerGroup } from '@/src/features/canvas/dynamic-worker-group';
 import { SystemRelationshipEdge } from '@/src/features/canvas/system-relationship-edge';
 import {
   NodePalette,
@@ -61,27 +64,35 @@ import {
   type InspectorFocusRequest,
 } from '@/src/features/inspector/context-inspector';
 import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
+import {
+  proposalReviewEntries,
+} from '@/src/features/proposals/proposal-overview';
+import { proposalCanvasFocusFor } from '@/src/features/proposals/proposal-canvas-focus';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
 import { scenarioPresentationFor } from '@/src/features/scenarios/scenario-presentation';
 import { GraphLibrarySheet } from '@/src/features/library/graph-library-sheet';
 import {
   PanelExpandButton,
-  PanelCollapseButton,
 } from '@/src/features/workspace/panel-collapse-control';
 import { PanelResizer } from '@/src/features/workspace/panel-resizer';
 import { workspaceSelectionFromCanvas } from '@/src/features/workspace/canvas-selection';
 import { useStableEvent } from '@/src/features/workspace/use-stable-event';
-import { CanvasInstructionStrip, CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
-import { GraphCapabilityStrip } from '@/src/features/workspace/graph-capability-strip';
+import { CanvasStatusStrip } from '@/src/features/workspace/canvas-chrome';
 import { GraphOverview } from '@/src/features/workspace/graph-overview';
-import { activeInspectorTabId, InspectorTabs } from '@/src/features/workspace/inspector-tabs';
 import {
   resolveWorkspacePanelVisibility,
 } from '@/src/features/workspace/panel-visibility';
 import type { CompactPanelPreference } from '@/src/features/workspace/panel-visibility';
 import { WebMcpStatus, WorkspaceHeader } from '@/src/features/workspace/workspace-header';
+import { RuntimeModePanel } from '@/src/features/workspace/runtime-mode-panel';
 import { useMediaQuery } from '@/src/features/workspace/use-media-query';
 import { runtimeProjectionAvailability } from '@/src/features/workspace/runtime-projection';
+import {
+  currentWorkspaceTheme,
+  setWorkspaceTheme,
+  subscribeWorkspaceTheme,
+  type WorkspaceTheme,
+} from '@/src/features/workspace/workspace-theme';
 import {
   presentationModeAvailable,
   resolveWorkspacePresentationMode,
@@ -93,6 +104,8 @@ import {
 } from '@/src/state/workspace-store';
 
 import './graph-workspace.css';
+import '@/src/features/proposals/proposal-canvas-focus.css';
+import { CanvasReviewFocusProvider } from '@/src/features/canvas/canvas-review-focus';
 
 const nodeTypes = {
   contractNode: ContractNode,
@@ -100,6 +113,7 @@ const nodeTypes = {
   runtimeInstance: RuntimeInstanceNode,
   subgraph: SubgraphNode,
   externalSystemTile: ExternalSystemTile,
+  dynamicWorkerGroup: DynamicWorkerGroup,
 };
 const edgeTypes = { routing: RoutingEdge, systemRelationship: SystemRelationshipEdge };
 const snapGrid: [number, number] = [12, 12];
@@ -107,6 +121,10 @@ const panOnDrag = [1];
 const defaultEdgeOptions: DefaultEdgeOptions = {
   type: 'smoothstep',
   pathOptions: { borderRadius: 16, offset: 28 },
+};
+type ProjectionFitRequest = {
+  key: string;
+  mode: 'design' | 'proposal';
 };
 /**
  * Local canvas selections are not canonical workspace state. Keep only
@@ -167,10 +185,6 @@ export function GraphWorkspace() {
   const unfreezeGraph = useGraphStore((state) => state.unfreezeGraph);
   const resetGraph = useGraphStore((state) => state.resetGraph);
   const loadGraphLibraryEntry = useGraphStore((state) => state.loadGraphLibraryEntry);
-  const loadResearchSupervisorDemo = useGraphStore((state) => state.loadResearchSupervisorDemo);
-  const loadResearchIntakeRoutingDemo = useGraphStore((state) => state.loadResearchIntakeRoutingDemo);
-  const loadHumanControlHitlDemo = useGraphStore((state) => state.loadHumanControlHitlDemo);
-  const loadDynamicParallelismDemo = useGraphStore((state) => state.loadDynamicParallelismDemo);
   const clearNotice = useGraphStore((state) => state.clearNotice);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [webMcpStatus, setWebMcpStatus] = useState<WebMcpStatus>('unavailable');
@@ -179,7 +193,6 @@ export function GraphWorkspace() {
   const [compactPanelPreference, setCompactPanelPreference] = useState<CompactPanelPreference>(null);
   const [paletteWidth, setPaletteWidth] = useState(232);
   const [inspectorWidth, setInspectorWidth] = useState(344);
-  const [rightTab, setRightTab] = useState<'review' | 'scenarios'>('review');
   const [requestedPresentationMode, setRequestedPresentationMode] =
     useState<WorkspacePresentationMode>('design');
   const [runtimeSelection, setRuntimeSelection] = useState<RuntimeInstanceNodeData | null>(null);
@@ -189,23 +202,43 @@ export function GraphWorkspace() {
     graphUpdatedAt: string;
   } | null>(null);
   // These are projection selections, deliberately absent from workspace history/persistence.
-  const [evidenceOverlayVisible, setEvidenceOverlayVisible] = useState(false);
+  const [evidenceOverlayVisible] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceMarker | null>(null);
   const [selectedRelationshipId, setSelectedRelationshipId] = useState<string | null>(null);
+  const [proposalFocusEntryKey, setProposalFocusEntryKey] = useState<string | null>(null);
+  const [projectionFitRequest, setProjectionFitRequest] = useState<ProjectionFitRequest | null>(null);
   const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
   const [graphSettingsRequest, setGraphSettingsRequest] = useState<GraphSettingsRequest | null>(null);
+  const [renderedSelectionRequest, setRenderedSelectionRequest] = useState<{
+    nodeIds: string[];
+    edgeIds: string[];
+    requestId: number;
+  } | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const theme = useSyncExternalStore<WorkspaceTheme>(
+    subscribeWorkspaceTheme,
+    currentWorkspaceTheme,
+    () => 'classic',
+  );
   const clearProjectionSelection = useCallback(() => {
     setRuntimeSelection(null);
     setSelectedEvidence(null);
     setSelectedRelationshipId(null);
     setScenarioSelection(null);
+    setProposalFocusEntryKey(null);
   }, []);
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
   const reconnectingEdgeIdRef = useRef<string | null>(null);
-  const graphSettingsRequestIdRef = useRef(0);
-  const { screenToFlowPosition } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
+  const completedProjectionFitKeyRef = useRef<string | null>(null);
+  const {
+    fitView,
+    screenToFlowPosition,
+  } = useReactFlow<CanvasFlowNode, CanvasFlowEdge>();
+
+  const changeTheme = useCallback((nextTheme: WorkspaceTheme) => {
+    setWorkspaceTheme(nextTheme);
+  }, []);
 
   const editable = graph.status === 'draft' && !proposal;
   const runtimeAvailability = useMemo(
@@ -246,6 +279,28 @@ export function GraphWorkspace() {
   const proposalReview = useMemo(
     () => proposal ? deriveProposalComparison(graph, proposal) : null,
     [graph, proposal],
+  );
+  const proposalEntries = useMemo(
+    () => proposalReview?.kind === 'comparable'
+      ? proposalReviewEntries(proposalReview, false)
+      : [],
+    [proposalReview],
+  );
+  const proposalEntryByKey = useMemo(
+    () => new Map(proposalEntries.map((entry) => [entry.key, entry])),
+    [proposalEntries],
+  );
+  const proposalFocusEntry = proposalFocusEntryKey
+    ? proposalEntryByKey.get(proposalFocusEntryKey) ?? null
+    : null;
+  const proposalCanvasFocus = useMemo(
+    () => proposalCanvasFocusFor(
+      proposalFocusEntry,
+      proposalReview?.kind === 'comparable'
+        ? [proposalReview.base, proposalReview.candidate]
+        : [graph],
+    ),
+    [graph, proposalFocusEntry, proposalReview],
   );
   const reviewProjection = useMemo(
     () => proposalReviewToCanvasProjection(proposalReview),
@@ -322,7 +377,6 @@ export function GraphWorkspace() {
     });
   }, [evidenceMarkers, relationshipOverlayGraph.relationships, selectedEvidence, selectedRelationshipId]);
   const openInspectorForSelection = useCallback(() => {
-    setRightTab('review');
     setShowInspector(true);
     if (isCompactWorkspace) {
       setShowPalette(false);
@@ -347,6 +401,13 @@ export function GraphWorkspace() {
     openInspectorForSelection();
   }, [clearSelection, evidenceMarkerByTarget, openInspectorForSelection, setSelection]);
   const selectSystemRelationship = useCallback((relationshipId: string) => {
+    if (activeViewMode === 'proposal') {
+      const proposalEntry = proposalEntryByKey.get(`relationships:${relationshipId}`);
+      if (proposalEntry?.entry.state !== 'unchanged') {
+        setProposalFocusEntryKey(proposalEntry.key);
+      }
+      return;
+    }
     const relationship = relationshipPreviewGraph.relationships.find((candidate) => candidate.id === relationshipId) ??
       graph.relationships.find((candidate) => candidate.id === relationshipId);
     if (!relationship) return;
@@ -359,15 +420,7 @@ export function GraphWorkspace() {
     );
     clearSelection();
     openInspectorForSelection();
-  }, [clearSelection, evidenceMarkerByTarget, evidenceOverlayVisible, graph.relationships, openInspectorForSelection, relationshipPreviewGraph.relationships]);
-  const openGraphSettings = useCallback((tab: GraphSettingsRequest['tab'] = 'state') => {
-    setRuntimeSelection(null);
-    clearSelection();
-    openInspectorForSelection();
-    setInspectorFocusRequest(null);
-    graphSettingsRequestIdRef.current += 1;
-    setGraphSettingsRequest({ tab, requestId: graphSettingsRequestIdRef.current });
-  }, [clearSelection, openInspectorForSelection]);
+  }, [activeViewMode, clearSelection, evidenceMarkerByTarget, evidenceOverlayVisible, graph.relationships, openInspectorForSelection, proposalEntryByKey, relationshipPreviewGraph.relationships]);
   const activateStepModifier = useCallback(
     (nodeId: string, modifier: StepModifierPresentation) => {
       // Projection owns the chip; workspace owns the accepted selection and
@@ -388,6 +441,24 @@ export function GraphWorkspace() {
     },
     [graph.nodes, openInspectorForSelection, setSelection],
   );
+  const activateDynamicWorkerTemplate = useCallback(
+    (nodeId: string) => {
+      if (!graph.nodes.some((node) => node.id === nodeId && node.kind === 'step')) return;
+      setSelection({
+        nodeIds: [nodeId],
+        subgraphIds: [],
+        edgeIds: [],
+        primary: { type: 'node', id: nodeId },
+      });
+      setRenderedSelectionRequest({
+        nodeIds: [nodeId],
+        edgeIds: [],
+        requestId: Date.now(),
+      });
+      openInspectorForSelection();
+    },
+    [graph.nodes, openInspectorForSelection, setSelection],
+  );
   const { inspectorVisible, paletteVisible } = resolveWorkspacePanelVisibility({
     compact: isCompactWorkspace,
     paletteRequested: showPalette,
@@ -395,11 +466,6 @@ export function GraphWorkspace() {
     compactPreference: compactPanelPreference,
     proposalPending: Boolean(proposal),
   });
-  const inspectorTab = activeViewMode === 'scenario'
-    ? 'scenarios'
-    : proposal || selection.primary || selectedRelationship
-      ? 'review'
-      : rightTab;
   const inspectorSelectionKey = `${graph.status}:${proposal?.id ?? ''}:${activeViewMode}:${selection.primary?.type ?? ''}:${selection.primary?.id ?? ''}:${runtimeSelection?.runtimeId ?? ''}:${selectedRelationship?.id ?? ''}:${selectedEvidence?.number ?? ''}`;
   const toggleSubgraphCollapse = useCallback(
     (subgraphId: string, collapsed: boolean) => {
@@ -417,9 +483,22 @@ export function GraphWorkspace() {
     return {
       ...projected,
       nodes: projected.nodes.map((node) => {
+        if (node.type === 'dynamicWorkerGroup') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              onActivate: activateDynamicWorkerTemplate,
+            },
+          };
+        }
+        const reviewFocusState = proposalCanvasFocus
+          ? proposalCanvasFocus.nodeIds.includes(node.id) ? 'active' : 'dimmed'
+          : null;
         if (node.type === 'subgraph') {
           return {
             ...node,
+            selected: reviewFocusState === 'active',
             data: {
               ...node.data,
               collapseEditable: canvasEditable,
@@ -429,6 +508,7 @@ export function GraphWorkspace() {
         }
         return {
           ...node,
+          selected: reviewFocusState === 'active',
           data: {
             ...node.data,
             onModifierActivate: activateStepModifier,
@@ -446,9 +526,17 @@ export function GraphWorkspace() {
           ? `relationship:${edge.data.relationship.id}`
           : `edge:${edge.id}`;
         const marker = evidenceOverlayVisible ? evidenceMarkerByTarget.get(target) : undefined;
+        const reviewFocusState = proposalCanvasFocus
+          ? isCanvasSystemRelationshipEdge(edge)
+            ? edge.data.relationship.id === proposalCanvasFocus.relationshipId ? 'active' : 'dimmed'
+            : domainEdgeIdsForCanvasEdge(edge).some((id) => proposalCanvasFocus.edgeIds.includes(id))
+              ? 'active'
+              : 'dimmed'
+          : null;
         if (isCanvasSystemRelationshipEdge(edge)) {
           return {
             ...edge,
+            selected: reviewFocusState === 'active',
             data: {
               ...edge.data,
               onRelationshipActivate: selectSystemRelationship,
@@ -461,18 +549,21 @@ export function GraphWorkspace() {
             },
           };
         }
-        if (!marker) return edge;
         return {
           ...edge,
+          selected: reviewFocusState === 'active',
           data: {
             ...edge.data,
-            evidenceMarker: marker.number,
-            onEvidenceActivate: (edgeId: string) => activateEvidence('edge', edgeId),
+            ...(marker ? {
+              evidenceMarker: marker.number,
+              onEvidenceActivate: (edgeId: string) => activateEvidence('edge', edgeId),
+            } : {}),
           },
         };
       }),
     };
   }, [
+    activateDynamicWorkerTemplate,
     activateStepModifier,
     canvasEditable,
     graph,
@@ -484,15 +575,19 @@ export function GraphWorkspace() {
     activateEvidence,
     evidenceMarkerByTarget,
     evidenceOverlayVisible,
+    proposalCanvasFocus,
     selectSystemRelationship,
   ]);
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
     projectedEdges: canvas.edges,
-    selectedNodeIds: [...selection.nodeIds, ...selection.subgraphIds],
-    selectedEdgeIds: selection.edgeIds,
+    selectedNodeIds: proposalCanvasFocus
+      ? proposalCanvasFocus.nodeIds
+      : [...selection.nodeIds, ...selection.subgraphIds],
+    selectedEdgeIds: proposalCanvasFocus ? proposalCanvasFocus.edgeIds : selection.edgeIds,
     editable: canvasEditable,
     onCommitPositions: moveCanvasElements,
+    renderedSelectionRequest,
   });
   const { clearRenderedSelection } = canvasInteractions;
   const resetPresentation = useCallback(
@@ -501,7 +596,6 @@ export function GraphWorkspace() {
       clearSelection();
       clearRenderedSelection();
       setRequestedPresentationMode(mode);
-      setRightTab(mode === 'scenario' ? 'scenarios' : 'review');
       setInspectorFocusRequest(null);
       setGraphSettingsRequest(null);
     },
@@ -512,6 +606,7 @@ export function GraphWorkspace() {
     queueMicrotask(() => {
       resetPresentation('proposal');
       setShowInspector(true);
+      setProjectionFitRequest({ key: `proposal:${proposalId}`, mode: 'proposal' });
       if (isCompactWorkspace) {
         setShowPalette(false);
         setCompactPanelPreference('inspector');
@@ -523,22 +618,29 @@ export function GraphWorkspace() {
     if (result.ok) resetPresentation();
   }, [approveProposal, resetPresentation]);
   const handleRejectProposal = useCallback(() => {
+    const reviewedProposalId = proposal?.id;
     rejectProposal();
     resetPresentation();
-  }, [rejectProposal, resetPresentation]);
+    if (reviewedProposalId) {
+      setProjectionFitRequest({ key: `accepted-after-reject:${reviewedProposalId}`, mode: 'design' });
+    }
+  }, [proposal?.id, rejectProposal, resetPresentation]);
   const handleRequestProposalChanges = useCallback((feedback: string) => {
     const result = requestProposalChanges(feedback);
-    if (result.ok) resetPresentation();
+    if (result.ok) {
+      setRequestedPresentationMode('proposal');
+      setShowInspector(true);
+      if (isCompactWorkspace) {
+        setShowPalette(false);
+        setCompactPanelPreference('inspector');
+      }
+    }
     return result;
-  }, [requestProposalChanges, resetPresentation]);
+  }, [isCompactWorkspace, requestProposalChanges]);
   const handleUnfreeze = useCallback(() => {
     unfreezeGraph();
     resetPresentation();
   }, [resetPresentation, unfreezeGraph]);
-  const replaceWithDemo = useCallback((loadDemo: () => void) => {
-    loadDemo();
-    resetPresentation();
-  }, [resetPresentation]);
   const handleReset = useCallback(() => {
     resetGraph();
     resetPresentation();
@@ -555,20 +657,11 @@ export function GraphWorkspace() {
   const handleOpenLibraryEntry = useCallback(
     (entry: GraphLibraryEntry) => {
       if (libraryBlockedReason) return;
-      const nonEmptyGraph = graph.nodes.length > 0 || graph.edges.length > 0 || graph.subgraphs.length > 0;
-      if (
-        nonEmptyGraph &&
-        !window.confirm(
-          `Replace the current canvas with “${entry.title}”? This opens an editable normalized template; one Undo restores your current workflow.`,
-        )
-      ) {
-        return;
-      }
       if (!loadGraphLibraryEntry(entry)) return;
       resetPresentation();
       setLibraryOpen(false);
     },
-    [graph.edges.length, graph.nodes.length, graph.subgraphs.length, libraryBlockedReason, loadGraphLibraryEntry, resetPresentation],
+    [libraryBlockedReason, loadGraphLibraryEntry, resetPresentation],
   );
   const fitPadding = useMemo(
     () => ({
@@ -579,11 +672,46 @@ export function GraphWorkspace() {
     }),
     [inspectorVisible, inspectorWidth, isCompactWorkspace, paletteVisible, paletteWidth],
   );
-  const { fitGraph } = useCoalescedFitView<CanvasFlowNode, CanvasFlowEdge>({
+  // React Flow's fit calculation cannot enclose the whole graph when a
+  // readability floor is larger than the zoom available between overlay
+  // rails. Let manual/projection fits reach the canvas minimum whenever a
+  // desktop rail is open; asymmetric padding still positions the graph in the
+  // genuinely usable center. A rail-free canvas keeps the established floor.
+  const fitMinZoom = !isCompactWorkspace && (paletteVisible || inspectorVisible)
+    ? 0.18
+    : isCompactWorkspace
+      ? 0.28
+      : 0.48;
+  const { fitFocus, fitGraph, fitNodes, fitProjection } = useCoalescedFitView<CanvasFlowNode, CanvasFlowEdge>({
     enabled: hasHydrated,
     revision: fitViewRevision,
     padding: fitPadding,
+    minZoom: fitMinZoom,
   });
+
+  useEffect(() => {
+    const focus = activeViewMode === 'proposal' ? proposalCanvasFocus : null;
+    if (!focus) return;
+    const existingNodeIds = new Set(canvas.nodes.map((node) => node.id));
+    const fitNodeIds = focus.fitNodeIds.filter((id) => existingNodeIds.has(id));
+    fitFocus(fitNodeIds, focus.cameraMode === 'detail');
+  }, [activeViewMode, canvas.nodes, fitFocus, proposalCanvasFocus]);
+
+  useEffect(() => {
+    if (!projectionFitRequest || projectionFitRequest.mode !== activeViewMode) return;
+    if (completedProjectionFitKeyRef.current === projectionFitRequest.key) return;
+    if (projectionFitRequest.mode === 'proposal' && (!proposalId || !inspectorVisible)) return;
+    if (projectionFitRequest.mode === 'design' && proposalId) return;
+    if (!fitProjection(canvas.nodes)) return;
+    completedProjectionFitKeyRef.current = projectionFitRequest.key;
+  }, [
+    activeViewMode,
+    canvas.nodes,
+    fitProjection,
+    inspectorVisible,
+    projectionFitRequest,
+    proposalId,
+  ]);
 
   useEffect(() => {
     void Promise.resolve(useGraphStore.persist.rehydrate()).then(() => setHasHydrated(true));
@@ -657,22 +785,6 @@ export function GraphWorkspace() {
     setShowInspector(false);
     setCompactPanelPreference(null);
   };
-
-  const handleInspectorTabChange = useCallback(
-    (tab: 'review' | 'scenarios') => {
-      setRightTab(tab);
-      if (tab === 'scenarios') {
-        setRuntimeSelection(null);
-        clearSelection();
-        clearRenderedSelection();
-        if (scenarios.length > 0 && !proposal) setRequestedPresentationMode('scenario');
-      } else if (activeViewMode === 'scenario') {
-        setScenarioSelection(null);
-        setRequestedPresentationMode('design');
-      }
-    },
-    [activeViewMode, clearRenderedSelection, clearSelection, proposal, scenarios.length],
-  );
 
   useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
@@ -753,6 +865,9 @@ export function GraphWorkspace() {
 
   const handleSelectionChange = useStableEvent(
     ({ nodes, edges }: OnSelectionChangeParams<CanvasFlowNode, CanvasFlowEdge>) => {
+      // Proposal selection is a local review projection. It must never be
+      // mirrored into the accepted graph's persisted selection.
+      if (activeViewMode === 'proposal') return;
       const selectedSystemRelationship = edges.find(isCanvasSystemRelationshipEdge);
       if (selectedSystemRelationship) {
         selectSystemRelationship(selectedSystemRelationship.data.relationship.id);
@@ -799,6 +914,14 @@ export function GraphWorkspace() {
 
   const handleNodeClick = useCallback<NodeMouseHandler<CanvasFlowNode>>(
     (_, node) => {
+      if (activeViewMode === 'proposal') {
+        const section = node.type === 'subgraph' ? 'subgraphs' : 'nodes';
+        const proposalEntry = proposalEntryByKey.get(`${section}:${node.id}`);
+        if (proposalEntry?.entry.state !== 'unchanged') {
+          setProposalFocusEntryKey(proposalEntry.key);
+        }
+        return;
+      }
       if (node.type === 'runtimeInstance') {
         setRuntimeSelection(node.data);
         openInspectorForSelection();
@@ -808,7 +931,7 @@ export function GraphWorkspace() {
       setSelectedRelationshipId(null);
       makePrimary({ type: node.type === 'subgraph' ? 'subgraph' : 'node', id: node.id });
     },
-    [makePrimary, openInspectorForSelection],
+    [activeViewMode, makePrimary, openInspectorForSelection, proposalEntryByKey],
   );
 
   const handleEdgeClick = useCallback<EdgeMouseHandler<CanvasFlowEdge>>(
@@ -818,9 +941,18 @@ export function GraphWorkspace() {
         return;
       }
       const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
+      if (activeViewMode === 'proposal') {
+        const proposalEntry = domainEdgeId
+          ? proposalEntryByKey.get(`native-edges:${domainEdgeId}`)
+          : undefined;
+        if (proposalEntry?.entry.state !== 'unchanged') {
+          setProposalFocusEntryKey(proposalEntry.key);
+        }
+        return;
+      }
       if (domainEdgeId) makePrimary({ type: 'edge', id: domainEdgeId });
     },
-    [makePrimary, selectSystemRelationship],
+    [activeViewMode, makePrimary, proposalEntryByKey, selectSystemRelationship],
   );
 
   const addPalettePayload = useCallback(
@@ -881,19 +1013,30 @@ export function GraphWorkspace() {
     }
   };
 
+  const handleScenarioSelect = (scenarioId: string | null) => {
+    setScenarioSelection(scenarioId ? { id: scenarioId, graphId: graph.id, graphUpdatedAt: graph.updatedAt } : null);
+    const scenario = scenarios.find((candidate) => candidate.id === scenarioId);
+    if (scenario) {
+      fitNodes(scenario.orderedPath);
+    }
+  };
+
+  const selectRuntimeInstance = (instance: RuntimeInstanceNodeData) => {
+    setRuntimeSelection(instance);
+    void fitView({ nodes: [{ id: `runtime:${instance.runtimeId}` }], duration: 180, padding: 1.4 });
+  };
+
   if (!hasHydrated) {
     return (
-      <main className="grid h-dvh place-items-center bg-[#f7f8f6] text-[#171918]">
+      <main className="workspace-loading grid h-dvh place-items-center">
         <div className="text-center">
-          <div className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-[#18211d] text-sm font-bold text-white">GC</div>
+          <div className="workspace-loading__mark mx-auto grid h-11 w-11 place-items-center rounded-xl text-sm font-bold">GC</div>
           <p className="mt-3 text-xs font-semibold text-black/50">Opening your workflow workspace…</p>
         </div>
       </main>
     );
   }
 
-  const selectionCount =
-    selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length + (runtimeSelection ? 1 : 0) + (selectedRelationship ? 1 : 0);
   const hasDeletableSelection =
     selection.nodeIds.length > 0 ||
     selection.subgraphIds.length > 0 ||
@@ -934,6 +1077,7 @@ export function GraphWorkspace() {
           viewMode={activeViewMode}
           runtimeAvailable={runtimeAvailable}
           runtimeUnavailableReason={runtimeUnavailableReason}
+          theme={theme}
           onTogglePalette={togglePalette}
           onToggleInspector={toggleInspector}
           onOpenLibrary={() => setLibraryOpen(true)}
@@ -954,14 +1098,15 @@ export function GraphWorkspace() {
             clearSelection();
             clearRenderedSelection();
             setRequestedPresentationMode(mode);
-            if (mode === 'scenario') {
-              setRightTab('scenarios');
+            if (mode === 'scenario' || mode === 'proposal' || mode === 'runtime') {
               setShowInspector(true);
-            } else if (mode === 'proposal') {
-              setRightTab('review');
-              setShowInspector(true);
+              if (isCompactWorkspace) {
+                setShowPalette(false);
+                setCompactPanelPreference('inspector');
+              }
             }
           }}
+          onThemeChange={changeTheme}
         />
 
         {notice && <div className="workspace-notice">{notice}</div>}
@@ -1007,16 +1152,6 @@ export function GraphWorkspace() {
               onExpand={toggleInspector}
             />
           )}
-          <GraphCapabilityStrip
-            graph={relationshipPreviewGraph}
-            onOpenSettings={openGraphSettings}
-            evidenceOverlayVisible={evidenceOverlayVisible}
-            onToggleEvidenceOverlay={() => {
-              if (!relationshipPreviewGraph.capabilities.provenance.evidenceOverlayAvailable) return;
-              setEvidenceOverlayVisible((visible) => !visible);
-              setSelectedEvidence(null);
-            }}
-          />
           {evidenceOverlayVisible && (
             <aside className="workspace-evidence-legend" aria-label="Evidence overlay legend">
               <strong>Evidence overlay</strong>
@@ -1029,9 +1164,11 @@ export function GraphWorkspace() {
               </ul>
             </aside>
           )}
+          <CanvasReviewFocusProvider focus={activeViewMode === 'proposal' ? proposalCanvasFocus : null}>
           <ReactFlow<CanvasFlowNode, CanvasFlowEdge>
-            nodes={canvasInteractions.nodes}
-            edges={canvasInteractions.edges}
+            data-proposal-focus-key={proposalCanvasFocus?.key}
+            nodes={activeViewMode === 'proposal' ? canvas.nodes : canvasInteractions.nodes}
+            edges={activeViewMode === 'proposal' ? canvas.edges : canvasInteractions.edges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onNodesChange={canvasInteractions.onNodesChange}
@@ -1042,6 +1179,8 @@ export function GraphWorkspace() {
             onReconnectStart={onReconnectStart}
             onReconnectEnd={onReconnectEnd}
             onSelectionChange={handleSelectionChange}
+            onSelectionStart={canvasInteractions.onSelectionStart}
+            onSelectionEnd={canvasInteractions.onSelectionEnd}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
             onPaneClick={() => {
@@ -1082,49 +1221,79 @@ export function GraphWorkspace() {
             deleteKeyCode={null}
           >
             <AlignmentGuides guides={canvasInteractions.guides} />
-            <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="#e2e6e1" />
+            <Background variant={BackgroundVariant.Lines} gap={24} size={1} color="var(--gc-grid-line)" />
             <GraphOverview />
             <Controls
               showInteractive={false}
+              showFitView={false}
               position="bottom-right"
               className="canvas-flow-controls"
-            />
+            >
+              <ControlButton
+                aria-label="Fit View"
+                title="Fit view"
+                onClick={fitGraph}
+              >
+                <FrameCorners size={14} weight="bold" aria-hidden="true" />
+              </ControlButton>
+            </Controls>
           </ReactFlow>
+          </CanvasReviewFocusProvider>
 
-          <CanvasInstructionStrip editable={canvasEditable} runtimeMode={activeViewMode === 'runtime'} />
           <CanvasStatusStrip
             graph={graph}
             issueCount={validationIssues.length}
-            selectionCount={selectionCount}
             proposalPending={Boolean(proposal)}
             scenarioCount={scenarios.length}
           />
 
           {proposal && <div className="workspace-proposal-banner">Proposal preview · accepted graph locked and unchanged</div>}
-          {graph.status === 'frozen' && <div className="workspace-frozen-banner">Frozen contract · {scenarios.length} paths</div>}
+          {graph.status === 'frozen' && <div className="workspace-frozen-banner">Frozen contract · {scenarios.length} scenarios</div>}
         </section>
 
         {inspectorVisible && (
           <aside className="workspace-panel workspace-inspector-panel">
-            <div className="flex items-center gap-2">
-              <InspectorTabs
-                active={inspectorTab}
-                scenarioCount={scenarios.length}
-                onChange={handleInspectorTabChange}
-              />
-              <PanelCollapseButton
-                side="right"
-                onCollapse={closeInspector}
-                label="Collapse inspector"
-              />
-            </div>
-            <div
-              id="graph-inspector-tabpanel"
-              role="tabpanel"
-              aria-labelledby={activeInspectorTabId(inspectorTab)}
-              className="workspace-inspector-content"
-            >
-              {inspectorTab === 'review' ? <div className="space-y-3"><ContextInspector key={inspectorSelectionKey} focusRequest={inspectorFocusRequest} graphSettingsRequest={graphSettingsRequest} runtimeInstance={activeViewMode === 'runtime' ? runtimeSelection : null} relationship={selectedRelationship} evidence={selectedEvidence} reviewProjection={reviewProjection} readOnly={activeViewMode !== 'design'} /><ProposalPanel proposal={proposal} review={proposalReview} reviewRequest={reviewRequest} onApprove={handleApproveProposal} onRequestChanges={handleRequestProposalChanges} onReject={handleRejectProposal} /></div> : <ScenarioPanel graph={graph} scenarios={scenarios} selectedScenarioId={selectedScenarioId} onScenarioSelect={(scenarioId) => setScenarioSelection(scenarioId ? { id: scenarioId, graphId: graph.id, graphUpdatedAt: graph.updatedAt } : null)} />}
+            <div className="workspace-inspector-content">
+              {activeViewMode === 'proposal' ? (
+                <ProposalPanel
+                  proposal={proposal}
+                  review={proposalReview}
+                  reviewRequest={reviewRequest}
+                  activeEntryKey={proposalFocusEntryKey}
+                  onEntrySelect={(entry) => setProposalFocusEntryKey(entry?.key ?? null)}
+                  onApprove={handleApproveProposal}
+                  onRequestChanges={handleRequestProposalChanges}
+                  onReject={handleRejectProposal}
+                  onCollapse={closeInspector}
+                />
+              ) : activeViewMode === 'scenario' ? (
+                <ScenarioPanel
+                  graph={graph}
+                  scenarios={scenarios}
+                  selectedScenarioId={selectedScenarioId}
+                  onScenarioSelect={handleScenarioSelect}
+                  onCollapse={closeInspector}
+                />
+              ) : activeViewMode === 'runtime' ? (
+                <RuntimeModePanel
+                  graph={graph}
+                  fixture={runtimeAvailability.available ? runtimeAvailability.fixture : null}
+                  selectedInstance={runtimeSelection}
+                  onSelect={selectRuntimeInstance}
+                  onFocus={selectRuntimeInstance}
+                  onCollapse={closeInspector}
+                />
+              ) : (
+                <ContextInspector
+                  key={inspectorSelectionKey}
+                  focusRequest={inspectorFocusRequest}
+                  graphSettingsRequest={graphSettingsRequest}
+                  relationship={selectedRelationship}
+                  evidence={selectedEvidence}
+                  reviewProjection={reviewProjection}
+                  onCollapse={closeInspector}
+                />
+              )}
             </div>
             <PanelResizer
               side="right"
@@ -1143,6 +1312,7 @@ export function GraphWorkspace() {
         open={libraryOpen}
         entries={graphLibraryEntries}
         currentLoadedId={currentLibraryEntryId}
+        confirmationRequired={graph.nodes.length > 0 || graph.edges.length > 0 || graph.subgraphs.length > 0}
         replacementBlockedReason={libraryBlockedReason}
         onRequestOpen={handleOpenLibraryEntry}
         onClose={() => setLibraryOpen(false)}

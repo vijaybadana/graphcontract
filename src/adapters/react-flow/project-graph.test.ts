@@ -29,6 +29,7 @@ import {
   dynamicParallelismDemoGraph,
   runtimeFixtureForLoadedDynamicParallelismDemo,
 } from '@/src/application/package-three-demo';
+import { graphLibraryEntries } from '@/src/application/graph-library';
 
 function proposalProjection(graph: WorkflowGraph, proposal: GraphProposal) {
   return proposalReviewToCanvasProjection(deriveProposalComparison(graph, proposal));
@@ -152,6 +153,62 @@ describe('projectGraphToCanvas', () => {
     expect(projectGraphToCanvas(revised, null, { mode: 'runtime', runtimeFixture: fixture }).nodes.some(
       (node) => node.type === 'runtimeInstance',
     )).toBe(false);
+  });
+
+  it('derives one contained dynamic worker-group wrapper without changing canonical subgraphs', () => {
+    const graph = graphLibraryEntries.find((entry) => entry.id === 'hierarchical-deep-research')!.graph;
+    const design = projectGraphToCanvas(graph, null);
+    const wrapper = design.nodes.find((node) => node.id === 'dynamic-worker-group:supervisor-send');
+    const template = design.nodes.find((node) => node.id === 'researcher-template');
+
+    expect(graph.subgraphs).toHaveLength(1);
+    expect(graph.subgraphs[0]).toMatchObject({ id: 'research-cell', label: 'Research Supervisor' });
+    expect(wrapper).toMatchObject({
+      type: 'dynamicWorkerGroup',
+      parentId: 'research-cell',
+      draggable: false,
+      selectable: false,
+      style: { pointerEvents: 'none' },
+      data: {
+        templateNodeId: 'researcher-template',
+        sendEdgeId: 'supervisor-send',
+        mergeNodeId: 'research-merge',
+        payloadLabel: 'research task',
+        memberNodeIds: [
+          'researcher-start',
+          'researcher-agent',
+          'research-tools',
+          'compress-findings',
+          'researcher-end',
+        ],
+        memberEdgeIds: [
+          'researcher-start-agent',
+          'researcher-agent-tools',
+          'researcher-tools-compress',
+          'researcher-compress-end',
+        ],
+      },
+    });
+    expect(wrapper?.initialWidth).toBe(1360);
+    expect(wrapper?.initialHeight).toBe(430);
+    expect(wrapper?.position.y).toBe(420);
+    expect(template).toMatchObject({ parentId: 'research-cell', type: 'contractNode' });
+    expect(design.edges.find((edge) => edge.id === 'supervisor-send')).toMatchObject({
+      target: 'dynamic-worker-group:supervisor-send',
+      data: { edge: { target: 'researcher-template' } },
+    });
+    expect(design.edges.find((edge) => edge.id === 'researcher-merge')).toMatchObject({
+      source: 'dynamic-worker-group:supervisor-send',
+      data: { edge: { source: 'researcher-template', target: 'research-merge' } },
+    });
+
+    const collapsed = structuredClone(graph);
+    collapsed.subgraphs[0]!.collapsed = true;
+    expect(
+      projectGraphToCanvas(collapsed, null).nodes.find(
+        (node) => node.id === 'dynamic-worker-group:supervisor-send',
+      )?.hidden,
+    ).toBe(true);
   });
 
   it('projects evidence and system relationships without turning them into native or collapsed-proxy edges', () => {
@@ -862,7 +919,7 @@ describe('projectGraphToCanvas', () => {
       draggable: true,
       focusable: true,
       zIndex: 0,
-      dragHandle: '.subgraph-node-drag-surface, .subgraph-node-boundary-drag-surface',
+      dragHandle: '.subgraph-node-drag-surface',
     });
     expect(child).toMatchObject({
       type: 'contractNode',

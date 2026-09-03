@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import type { CanvasFlowEdge } from '@/src/adapters/react-flow/project-graph';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import {
   positionsForCanvasCommit,
+  reconcileProjectedEdges,
   reconcileProjectedNodes,
 } from './use-canvas-node-interactions';
 
@@ -98,5 +100,28 @@ describe('reconcileProjectedNodes', () => {
       { id: 'group', selected: true },
       { id: 'child', selected: false },
     ]);
+  });
+});
+
+describe('reconcileProjectedEdges', () => {
+  it('preserves React Flow selection while a rectangle-selection update is in flight', () => {
+    const current = [{
+      id: 'edge-a',
+      source: 'start',
+      target: 'step',
+      selected: true,
+      type: 'routingEdge',
+      data: { domainEdgeIds: ['edge-a'], projection: 'domain' },
+    }] as CanvasFlowEdge[];
+    const projected = [{
+      ...current[0],
+      selected: undefined,
+      label: 'updated presentation',
+    }] as CanvasFlowEdge[];
+
+    const reconciled = reconcileProjectedEdges(current, projected, []);
+
+    expect(reconciled[0].selected).toBe(true);
+    expect(reconciled[0].label).toBe('updated presentation');
   });
 });

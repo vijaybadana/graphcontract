@@ -1,3 +1,5 @@
+import type { Page } from '@playwright/test';
+
 import {
   callWebMcpTool,
   expect,
@@ -15,11 +17,19 @@ type GraphRead = {
     name: string;
     status: 'draft' | 'frozen';
     updatedAt: string;
-    nodes: Array<{ id: string; label: string }>;
+    nodes: Array<{ id: string; label: string; position: { x: number; y: number } }>;
     edges: Array<{ id: string; mode: string }>;
   };
   validation: { validForFreeze: boolean; issues: unknown[] };
-  pendingProposal?: { id: string; status: string; rationale: string };
+  pendingProposal?: { id: string; status: string; rationale: string; operations?: unknown[] };
+  reviewedProposal?: {
+    id: string;
+    status: string;
+    reviewStatus: 'changes_requested';
+    rationale: string;
+    operations: unknown[];
+    diff: Record<string, unknown>;
+  };
   reviewRequest?: {
     status: 'changes_requested';
     feedback: string;
@@ -57,6 +67,51 @@ const updateClassifier = (label: string, expectedGraphUpdatedAt: string) => ({
 
 const classifierLabel = (read: GraphRead) =>
   read.graph.nodes.find((node) => node.id === 'classifier')?.label;
+
+async function expectNodesInsideUsableCanvas(page: Page, nodeIds: string[]) {
+  await expect.poll(() => page.evaluate((ids) => {
+    const canvas = document.querySelector<HTMLElement>('.react-flow');
+    if (!canvas) return false;
+    const canvasRect = canvas.getBoundingClientRect();
+    const visibleRect = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element || getComputedStyle(element).display === 'none') return null;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 ? rect : null;
+    };
+    const paletteRect = visibleRect('.workspace-palette-slot');
+    const inspectorRect = visibleRect('.workspace-inspector-panel');
+    const bounds = {
+      left: paletteRect ? paletteRect.right + 12 : canvasRect.left + 12,
+      right: inspectorRect ? inspectorRect.left - 12 : canvasRect.right - 12,
+      top: canvasRect.top + 112,
+      bottom: canvasRect.bottom - 78,
+    };
+    return ids.every((id) => {
+      const element = document.querySelector<HTMLElement>(`[data-testid="rf__node-${id}"]`);
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      return rect.width >= 72 && center.x >= bounds.left && center.x <= bounds.right &&
+        center.y >= bounds.top && center.y <= bounds.bottom;
+    });
+  }, nodeIds)).toBe(true);
+}
+
+const translatedProposal = (accepted: GraphRead, offsetX: number, rationale: string) => ({
+  expectedGraphUpdatedAt: accepted.graph.updatedAt,
+  operations: accepted.graph.nodes.map((node) => ({
+    type: 'update_node',
+    nodeId: node.id,
+    patch: {
+      position: {
+        x: node.position.x + offsetX,
+        y: node.position.y,
+      },
+    },
+  })),
+  rationale,
+});
 
 test('registered WebMCP tools publish constrained schemas and truthful annotations', async ({ app }) => {
   expect(await webMcpToolNames(app)).toEqual([
@@ -113,7 +168,7 @@ test('pending proposal locks palette authoring and freeze without changing accep
     updateClassifier('Locked Preview', accepted.graph.updatedAt),
   );
 
-  for (const name of ['Step', 'Agent', 'Action', 'Tool', 'Human review', 'Subgraph']) {
+  for (const name of ['Task', 'Agent', 'Tool', 'Human', 'Subgraph']) {
     await expect(app.getByRole('button', { name, exact: true })).toBeDisabled();
   }
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
@@ -165,6 +220,7 @@ test('human review feedback survives reload and is consumed only by a valid revi
     updateClassifier('Needs clearer routing', accepted.graph.updatedAt),
   );
   expect(proposal).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  const reviewedProposalId = (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).pendingProposal!.id;
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(accepted.graph);
 
   const requestChanges = app.getByRole('button', { name: 'Request changes' });
@@ -183,10 +239,15 @@ test('human review feedback survives reload and is consumed only by a valid revi
   await dialog.getByLabel('Requested changes').fill(requestedText);
   await dialog.getByRole('button', { name: 'Submit request' }).click();
   await expect(dialog).toBeHidden();
-  await expect(app.getByText('Changes requested', { exact: true })).toBeVisible();
+  await expect(app.locator('.proposal-panel__notice-title', { hasText: 'Changes requested' })).toBeVisible();
   let reviewed = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(reviewed.graph).toEqual(accepted.graph);
   expect(reviewed.pendingProposal).toBeUndefined();
+  expect(reviewed.reviewedProposal).toMatchObject({
+    id: reviewedProposalId,
+    reviewStatus: 'changes_requested',
+    operations: updateClassifier('Needs clearer routing', accepted.graph.updatedAt).operations,
+  });
   expect(reviewed.reviewRequest).toMatchObject({
     status: 'changes_requested',
     feedback: requestedText,
@@ -194,6 +255,14 @@ test('human review feedback survives reload and is consumed only by a valid revi
     reviewedGraphUpdatedAt: accepted.graph.updatedAt,
     contentTrust: 'untrusted-human-authored',
   });
+  await app.getByRole('button', { name: 'Review updated classifier' }).click();
+  await expect(app.getByTestId('rf__node-classifier').locator('.contract-node-shell'))
+    .toHaveClass(/proposal-focus-active/);
+  await expect.poll(() => app.locator('.react-flow__viewport').evaluate((element) => {
+    const transform = new DOMMatrixReadOnly(getComputedStyle(element).transform);
+    return transform.a;
+  })).toBeGreaterThanOrEqual(0.61);
+  await app.getByRole('button', { name: 'Back to proposal' }).click();
 
   await app.reload();
   await expect.poll(() => webMcpToolNames(app)).toEqual([
@@ -203,21 +272,32 @@ test('human review feedback survives reload and is consumed only by a valid revi
   ]);
   reviewed = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(reviewed.reviewRequest?.feedback).toBe(requestedText);
+  expect(reviewed.reviewedProposal?.id).toBe(reviewedProposalId);
+  await expect(app.getByRole('radio', { name: 'Proposal', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await expect(app.getByRole('button', { name: 'Approve' })).toBeDisabled();
+  await expect(app.getByRole('button', { name: 'Request changes' })).toBeDisabled();
+  await expect(app.getByRole('button', { name: 'Reject' })).toBeDisabled();
 
   const stale = await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
     ...updateClassifier('Stale revision', '2000-01-01T00:00:00.000Z'),
   });
   expect(stale).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
-  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).reviewRequest?.feedback).toBe(requestedText);
+  let preserved = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(preserved.reviewRequest?.feedback).toBe(requestedText);
+  expect(preserved.reviewedProposal?.id).toBe(reviewedProposalId);
 
   const invalid = await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
     expectedGraphUpdatedAt: accepted.graph.updatedAt,
     operations: [{ type: 'remove_node', nodeId: 'end' }],
     rationale: 'Invalid revision must not consume the human review request.',
   });
-  expect(invalid).toMatchObject({ ok: true, proposal: { status: 'invalid' } });
-  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).reviewRequest?.feedback).toBe(requestedText);
-  await app.getByRole('button', { name: 'Reject' }).click();
+  expect(invalid).toMatchObject({ ok: false, error: { code: 'PROPOSAL_INVALID' } });
+  preserved = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(preserved.reviewRequest?.feedback).toBe(requestedText);
+  expect(preserved.reviewedProposal?.id).toBe(reviewedProposalId);
 
   const revised = await callWebMcpTool<ProposalResult>(
     app,
@@ -227,12 +307,66 @@ test('human review feedback survives reload and is consumed only by a valid revi
   expect(revised).toMatchObject({ ok: true, proposal: { status: 'pending' } });
   const pendingRevision = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(pendingRevision.reviewRequest).toBeUndefined();
+  expect(pendingRevision.reviewedProposal).toBeUndefined();
+  expect(pendingRevision.pendingProposal?.id).not.toBe(reviewedProposalId);
   expect(pendingRevision.graph).toEqual(accepted.graph);
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
   await app.getByRole('button', { name: 'Approve' }).click();
   const approved = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(classifierLabel(approved)).toBe('Technical Routing Classifier');
   expect(approved.reviewRequest).toBeUndefined();
+});
+
+test('proposal projection transitions fit each candidate and restore the accepted graph without camera drift', async ({ app }) => {
+  const accepted = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  const endpointIds = [accepted.graph.nodes[0].id, accepted.graph.nodes.at(-1)!.id];
+
+  const first = await callWebMcpTool<ProposalResult>(
+    app,
+    'propose_graph_changes',
+    translatedProposal(accepted, 5_000, 'Move the candidate far right for review.'),
+  );
+  expect(first).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  await expect(app.getByRole('radio', { name: 'Proposal', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await expectNodesInsideUsableCanvas(app, endpointIds);
+
+  await app.getByRole('button', { name: 'Request changes' }).click();
+  const requestDialog = app.getByRole('dialog', { name: 'Request proposal changes' });
+  await requestDialog.getByLabel('Requested changes').fill('Keep the accepted positions and revise the candidate.');
+  await requestDialog.getByRole('button', { name: 'Submit request' }).click();
+  await expect(app.getByRole('radio', { name: 'Proposal', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await expectNodesInsideUsableCanvas(app, endpointIds);
+  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(accepted.graph);
+  await expect(app.getByRole('button', { name: 'Approve' })).toBeDisabled();
+  await expect(app.getByRole('button', { name: 'Request changes' })).toBeDisabled();
+  await expect(app.getByRole('button', { name: 'Reject' })).toBeDisabled();
+
+  const replacement = await callWebMcpTool<ProposalResult>(
+    app,
+    'propose_graph_changes',
+    translatedProposal(accepted, 8_000, 'Replacement candidate after requested changes.'),
+  );
+  expect(replacement).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  await expect(app.getByRole('button', { name: 'Collapse proposal panel' })).toBeVisible();
+  await expectNodesInsideUsableCanvas(app, endpointIds);
+
+  await app.getByRole('button', { name: 'Collapse proposal panel' }).click();
+  await expect(app.getByRole('button', { name: 'Open Inspector' })).toBeVisible();
+  await expectNodesInsideUsableCanvas(app, endpointIds);
+  await app.getByRole('button', { name: 'Open Inspector' }).click();
+  await app.getByRole('button', { name: 'Reject' }).click();
+  await expect(app.getByRole('radio', { name: 'Design', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await expectNodesInsideUsableCanvas(app, endpointIds);
+  expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(accepted.graph);
 });
 
 test('approval applies a multi-operation proposal atomically and persists after reload', async ({ app }) => {
@@ -249,13 +383,12 @@ test('approval applies a multi-operation proposal atomically and persists after 
   const pending = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   expect(pending.graph).toEqual(accepted.graph);
 
-  const comparison = app.getByRole('region', { name: 'Before / Proposed' });
-  await expect(comparison.getByRole('heading', { name: 'Before', exact: true })).toBeVisible();
-  await expect(comparison.getByRole('heading', { name: 'Proposed', exact: true })).toBeVisible();
+  const comparison = app.getByRole('region', { name: 'Graph overview' });
+  await expect(comparison.getByRole('heading', { name: 'Graph overview' })).toBeVisible();
   const summary = comparison.getByLabel('Proposal diff summary');
   await expect(summary).toContainText('updated classifier (label)');
   await expect(summary).toContainText('updated billing (label)');
-  await expect(comparison.locator('.proposal-overview-canvas')).toHaveCount(2);
+  await expect(comparison.locator('.proposal-overview-canvas')).toHaveCount(1);
   expect(await comparison.locator('.proposal-overview-canvas').evaluateAll(
     (canvases) => canvases.every((canvas) => canvas.getAttribute('aria-hidden') === 'true' && (canvas as HTMLElement & { inert: boolean }).inert),
   )).toBe(true);
@@ -304,7 +437,7 @@ test('approval detects a proposal made stale by a changed accepted timestamp', a
   await expect(app.getByRole('status').filter({ hasText: 'No candidate was replayed against the current graph' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Approve' })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Reject' })).toBeEnabled();
-  await expect(app.getByRole('heading', { name: 'Before / Proposed' })).toHaveCount(0);
+  await expect(app.getByRole('heading', { name: 'Graph overview' })).toHaveCount(0);
   await expect(app.getByText('Stale Preview', { exact: true })).toHaveCount(0);
   await expect(app.getByTestId('rf__node-classifier').getByText('Classifier Agent', { exact: true })).toBeVisible();
   expect(classifierLabel(await callWebMcpTool<GraphRead>(app, 'get_graph', {}))).toBe(
@@ -349,8 +482,9 @@ test('branch scenarios are unavailable before human freeze', async ({ app }) => 
     error: { code: 'GRAPH_NOT_FROZEN', message: 'The human has not frozen the graph.' },
   });
   await app.getByRole('button', { name: 'Show inspector' }).click();
-  await app.getByRole('tab', { name: 'Scenarios' }).click();
-  await expect(app.getByText('Freeze a valid contract', { exact: true })).toBeVisible();
+  await expect(app.getByRole('radio', {
+    name: 'Scenario unavailable: Freeze a valid contract to generate scenarios.',
+  })).toBeDisabled();
 });
 
 test('scenario IDs, names, paths and order are deterministic across reads', async ({ app }) => {
@@ -376,7 +510,10 @@ test('scenario IDs, names, paths and order are deterministic across reads', asyn
 
 test('download anchors own ready Blob URLs before the user gesture', async ({ app }) => {
   await freezeResearchIntake(app);
-  await app.getByRole('tab', { name: 'Scenarios (5)' }).click();
+  await expect(app.getByRole('radio', { name: 'Scenario', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
 
   for (const filename of [
     'graph-contract.json',

@@ -1,6 +1,7 @@
 import {
   callWebMcpTool,
   expect,
+  loadGraphLibraryEntry,
   test,
   webMcpToolMetadata,
   webMcpToolNames,
@@ -32,15 +33,7 @@ type ProposalResult = {
 };
 
 async function loadHumanControlDemo(app: Parameters<typeof callWebMcpTool>[0]) {
-  app.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with the Human Control & HITL demo?');
-    await dialog.accept();
-  });
-  await app.getByRole('button', { name: 'Load Human Control & HITL demo' }).click();
-  await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph.id).toBe(
-    'human-control-hitl-demo',
-  );
+  await loadGraphLibraryEntry(app, 'Human Control & HITL', 'human-control-hitl-demo');
   await expect(app.getByTestId('rf__node-deploy-change')).toBeVisible();
 }
 
@@ -84,7 +77,7 @@ test('gate timing remains visibly and accessibly distinct while executor ownersh
     'Human-in-the-loop gate, after execution. Focus human input in the inspector.',
   );
 
-  await app.getByRole('button', { name: 'Human review', exact: true }).click();
+  await app.getByRole('button', { name: 'Human', exact: true }).click();
   const graph = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
   const human = graph.graph.nodes.find((node) => node.executor === 'human');
   expect(human).toMatchObject({ kind: 'step', executor: 'human' });

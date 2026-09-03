@@ -458,7 +458,7 @@ describe('workspace persistence reload', () => {
     expect(useGraphStore.getState().graph).toEqual(canonicalGraph);
   });
 
-  it('persists compact human revision feedback and consumes it only for a valid pending replacement', async () => {
+  it('persists the reviewed candidate with human feedback and consumes both only for a valid pending replacement', async () => {
     const accepted = structuredClone(useGraphStore.getState().graph);
     expect(useGraphStore.getState().submitProposal({
       rationale: 'Rename the billing specialist.',
@@ -472,6 +472,7 @@ describe('workspace persistence reload', () => {
       'Keep the label and document the escalation route.',
     ).ok).toBe(true);
     const requested = structuredClone(useGraphStore.getState().reviewRequest);
+    const reviewedCandidate = structuredClone(useGraphStore.getState().proposal);
 
     expect(useGraphStore.getState().graph).toEqual(accepted);
     expect(requested).toMatchObject({
@@ -482,12 +483,13 @@ describe('workspace persistence reload', () => {
     const serialized = JSON.parse(persisted.get('graphcontract-workspace-v1')!);
     expect(serialized.state).toEqual({
       graph: accepted,
-      proposal: null,
+      proposal: reviewedCandidate,
       reviewRequest: requested,
     });
 
     await useGraphStore.persist.rehydrate();
     expect(useGraphStore.getState().reviewRequest).toEqual(requested);
+    expect(useGraphStore.getState().proposal).toEqual(reviewedCandidate);
     expect(useGraphStore.getState().graph).toEqual(accepted);
 
     const stale = useGraphStore.getState().submitProposal({
@@ -498,6 +500,16 @@ describe('workspace persistence reload', () => {
       ],
     });
     expect(stale).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+    expect(useGraphStore.getState().proposal).toEqual(reviewedCandidate);
+    expect(useGraphStore.getState().reviewRequest).toEqual(requested);
+
+    const invalid = useGraphStore.getState().submitProposal({
+      rationale: 'Reference a missing node.',
+      expectedGraphUpdatedAt: accepted.updatedAt,
+      operations: [{ type: 'update_node', nodeId: 'missing', patch: { label: 'Missing' } }],
+    });
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'PROPOSAL_INVALID' } });
+    expect(useGraphStore.getState().proposal).toEqual(reviewedCandidate);
     expect(useGraphStore.getState().reviewRequest).toEqual(requested);
 
     const revised = useGraphStore.getState().submitProposal({
@@ -508,6 +520,7 @@ describe('workspace persistence reload', () => {
       ],
     });
     expect(revised).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+    expect(useGraphStore.getState().proposal?.id).not.toBe(reviewedCandidate?.id);
     expect(useGraphStore.getState().reviewRequest).toBeNull();
     expect(useGraphStore.getState().graph).toEqual(accepted);
     useGraphStore.getState().rejectProposal();

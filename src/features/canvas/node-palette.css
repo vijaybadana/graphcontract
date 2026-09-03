@@ -1,6 +1,6 @@
 .node-palette {
-  background: color-mix(in srgb, var(--gc-surface) 96%, transparent);
-  border-color: color-mix(in srgb, var(--gc-ink-strong) 12%, transparent);
+  background: var(--gc-panel-surface);
+  border-color: var(--gc-panel-border);
   box-shadow: none;
   scrollbar-color: color-mix(in srgb, var(--gc-ink-muted) 20%, transparent) transparent;
   scrollbar-width: thin;

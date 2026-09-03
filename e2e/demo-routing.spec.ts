@@ -2,12 +2,11 @@ import { expect, loadResearchIntake, test } from './fixtures';
 import { readGraph } from './helpers/graph';
 
 test('demo replacement is confirmation-protected and exposes the routing inventory', async ({ app }) => {
-  app.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with Research Intake Routing?');
-    await dialog.dismiss();
-  });
-  await app.getByRole('button', { name: 'Load Research Intake Routing' }).click();
+  await app.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
+  await app.getByRole('button', { name: 'Open Research Intake Routing' }).click();
+  const confirmation = app.getByRole('alertdialog', { name: 'Open “Research Intake Routing”?' });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'Cancel' }).click();
   await expect.poll(async () => (await readGraph(app)).id).toBe('customer-support-contract');
   await expect(app.getByTestId('rf__node-classifier')).toBeVisible();
 

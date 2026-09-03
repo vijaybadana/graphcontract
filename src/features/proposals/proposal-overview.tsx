@@ -35,18 +35,19 @@ const edgeTypes = {
   systemRelationship: SystemRelationshipEdge,
 };
 
-type ComparisonCollection = ProposalComparison['nodes'];
-
 type DiffSection = {
   id: string;
   label: string;
   entries: ProposalComparisonEntry<unknown>[];
 };
 
-const changedEntries = (
-  collection: ComparisonCollection | ProposalComparison['capabilities'],
-) => Object.values(collection)
-  .filter((entry) => entry.state !== 'unchanged') as ProposalComparisonEntry<unknown>[];
+export type ProposalReviewEntry = {
+  key: string;
+  section: string;
+  sectionLabel: string;
+  entry: ProposalComparisonEntry<unknown>;
+  changeIndex: number | null;
+};
 
 function readOnlyProjection(
   graph: WorkflowGraph,
@@ -87,11 +88,9 @@ function readOnlyProjection(
 }
 
 function ProposalGraphOverview({
-  label,
   graph,
   reviewProjection,
 }: {
-  label: string;
   graph: WorkflowGraph;
   reviewProjection: CanvasReviewProjection | null;
 }) {
@@ -102,7 +101,6 @@ function ProposalGraphOverview({
 
   return (
     <article className="proposal-overview-graph">
-      <h4>{label}</h4>
       <div className="proposal-overview-canvas" aria-hidden="true" inert>
         <ReactFlowProvider>
           <ReactFlow
@@ -139,7 +137,7 @@ function entrySummary(entry: ProposalComparisonEntry<unknown>) {
   return `${entry.state} ${entry.id}${fields}`;
 }
 
-function valueAtChangedPath(value: unknown, path: string): unknown {
+export function valueAtChangedPath(value: unknown, path: string): unknown {
   if (path === '*') return value;
   const normalizedPath = path
     .replace(/^\*/, '')
@@ -168,7 +166,7 @@ function stableSerializableValue(value: unknown): unknown {
   return value;
 }
 
-function accessibleComparisonValue(value: unknown): string {
+export function accessibleComparisonValue(value: unknown): string {
   if (value === undefined) return 'Not present';
   if (value === null) return 'None';
   if (typeof value === 'string') return value.length > 0 ? value : 'Empty text';
@@ -176,8 +174,23 @@ function accessibleComparisonValue(value: unknown): string {
   return JSON.stringify(stableSerializableValue(value));
 }
 
-function changedValueRows(entry: ProposalComparisonEntry<unknown>) {
-  const paths = entry.changedFields.length > 0 ? entry.changedFields : ['*'];
+export function changedValueRows(entry: ProposalComparisonEntry<unknown>) {
+  const flattenedPaths = (value: unknown, prefix = ''): string[] => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return prefix ? [prefix] : ['*'];
+    }
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return prefix ? [prefix] : ['*'];
+    return entries.flatMap(([key, nested]) =>
+      flattenedPaths(nested, prefix ? `${prefix}.${key}` : key));
+  };
+  const configuredPaths = entry.changedFields.length > 0 ? entry.changedFields : ['*'];
+  const paths = configuredPaths.length === 1 && configuredPaths[0] === '*'
+    ? [...new Set([
+        ...flattenedPaths(entry.before),
+        ...flattenedPaths(entry.after),
+      ])].filter((path) => path !== '*' || !entry.before && !entry.after).sort()
+    : configuredPaths;
   return paths.map((path) => ({
     path,
     before: accessibleComparisonValue(valueAtChangedPath(entry.before, path)),
@@ -185,72 +198,89 @@ function changedValueRows(entry: ProposalComparisonEntry<unknown>) {
   }));
 }
 
+export function proposalReviewEntries(
+  comparison: ProposalComparison,
+  changedOnly = true,
+): ProposalReviewEntry[] {
+  const sections: DiffSection[] = [
+    { id: 'nodes', label: 'Nodes', entries: Object.values(comparison.nodes) as ProposalComparisonEntry<unknown>[] },
+    { id: 'subgraphs', label: 'Subgraphs', entries: Object.values(comparison.subgraphs) as ProposalComparisonEntry<unknown>[] },
+    { id: 'native-edges', label: 'Native edges', entries: Object.values(comparison.nativeEdges) as ProposalComparisonEntry<unknown>[] },
+    { id: 'relationships', label: 'Non-native relationships', entries: Object.values(comparison.relationships) as ProposalComparisonEntry<unknown>[] },
+    { id: 'capabilities', label: 'Capabilities', entries: Object.values(comparison.capabilities) as ProposalComparisonEntry<unknown>[] },
+  ];
+  const entries = sections.flatMap((section) => section.entries
+    .filter((entry) => !changedOnly || entry.state !== 'unchanged')
+    .map((entry) => ({
+      key: `${section.id}:${entry.id}`,
+      section: section.id,
+      sectionLabel: section.label,
+      entry,
+      changeIndex: null,
+    })));
+  const changedKeys = new Map(entries
+    .filter(({ entry }) => entry.state !== 'unchanged')
+    .map(({ key }, index) => [key, index]));
+
+  return entries.map((entry) => ({
+    ...entry,
+    changeIndex: changedKeys.get(entry.key) ?? null,
+  }));
+}
+
 export function ProposalOverview({
   comparison,
+  onChangeSelect,
+  changeButtonRef,
 }: {
   comparison: ProposalComparison;
+  onChangeSelect?: (entry: ProposalReviewEntry, trigger: HTMLButtonElement) => void;
+  changeButtonRef?: (entry: ProposalReviewEntry, element: HTMLButtonElement | null) => void;
 }) {
-  const sections: DiffSection[] = [
-    { id: 'nodes', label: 'Nodes', entries: changedEntries(comparison.nodes) },
-    { id: 'subgraphs', label: 'Subgraphs', entries: changedEntries(comparison.subgraphs) },
-    { id: 'native-edges', label: 'Native edges', entries: changedEntries(comparison.nativeEdges) },
-    { id: 'relationships', label: 'Non-native relationships', entries: changedEntries(comparison.relationships) },
-    { id: 'capabilities', label: 'Capabilities', entries: changedEntries(comparison.capabilities) },
-  ].filter((section) => section.entries.length > 0);
-  const total = sections.reduce((count, section) => count + section.entries.length, 0);
+  const allEntries = proposalReviewEntries(comparison);
+  const total = allEntries.length;
+  const added = allEntries.filter(({ entry }) => entry.state === 'added').length;
+  const updated = allEntries.filter(({ entry }) => entry.state === 'updated').length;
+  const removed = allEntries.filter(({ entry }) => entry.state === 'removed').length;
   const reviewProjection = proposalReviewToCanvasProjection(comparison);
 
   return (
     <section className="proposal-overview" aria-labelledby="proposal-overview-title">
       <div className="proposal-overview-heading">
-        <div>
-          <p className="eyebrow">Read-only comparison</p>
-          <h3 id="proposal-overview-title">Before / Proposed</h3>
-        </div>
+        <h3 id="proposal-overview-title">Graph overview</h3>
         <span className="proposal-overview-count">{total} changed</span>
       </div>
 
-      <div className="proposal-overview-graphs">
-        <ProposalGraphOverview label="Before" graph={comparison.base} reviewProjection={null} />
-        <ProposalGraphOverview label="Proposed" graph={comparison.base} reviewProjection={reviewProjection} />
+      <ProposalGraphOverview graph={comparison.base} reviewProjection={reviewProjection} />
+
+      <div className="proposal-overview-totals" aria-label="Proposal change counts">
+        <span data-diff-state="added"><strong>+{added}</strong> Added</span>
+        <span data-diff-state="updated"><strong>~{updated}</strong> Updated</span>
+        <span data-diff-state="removed"><strong>−{removed}</strong> Removed</span>
       </div>
 
       <div className="proposal-overview-summary" aria-label="Proposal diff summary">
-        <strong>{total === 0 ? 'No effective graph changes' : `${total} effective graph changes`}</strong>
-        {sections.length > 0 && (
-          <ul>
-            {sections.map((section) => (
-              <li key={section.id}>
-                <div className="proposal-overview-summary__section-heading">
-                  <span>{section.label}</span>
-                  <span>{section.entries.map(entrySummary).join('; ')}</span>
-                </div>
-                <div className="proposal-overview-summary__values">
-                  {section.entries.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="proposal-overview-summary__entry"
-                      aria-label={`Changed values for ${entry.id}`}
-                    >
-                      <strong>{entry.id}</strong>
-                      <dl>
-                        {changedValueRows(entry).map((row) => (
-                          <div key={row.path}>
-                            <dt>{row.path === '*' ? 'Value' : row.path}</dt>
-                            <dd>
-                              <span>Before: {row.before}</span>
-                              <span>Proposed: {row.after}</span>
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <h3>Changes</h3>
+        {total === 0 && <p>No effective graph changes</p>}
+        <div className="proposal-overview-change-list">
+          {allEntries.map((reviewEntry) => {
+            const { sectionLabel: section, entry } = reviewEntry;
+            return (
+            <button
+              key={`${section}-${entry.id}`}
+              type="button"
+              className="proposal-overview-change"
+              data-diff-state={entry.state}
+              aria-label={`Review ${entry.state} ${entry.id}`}
+              ref={(element) => changeButtonRef?.(reviewEntry, element)}
+              onClick={(event) => onChangeSelect?.(reviewEntry, event.currentTarget)}
+            >
+                <span className="proposal-overview-change__mark">{entry.state === 'added' ? '+' : entry.state === 'removed' ? '−' : '~'}</span>
+                <span><strong>{entry.id}</strong><small>{section} · {entrySummary(entry)}</small></span>
+            </button>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

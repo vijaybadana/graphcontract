@@ -15,6 +15,10 @@ import {
 import { type Ref, useId, useRef, useState } from 'react';
 
 import { GraphNode } from '@/src/domain';
+import {
+  type CanvasReviewFocusState,
+  useCanvasNodeReviewFocus,
+} from './canvas-review-focus';
 import { graphNodeVisualKind, NodeVisualIcon, nodeVisualLabels } from './node-visual-taxonomy';
 import './contract-node.css';
 import './node-boundary.css';
@@ -354,16 +358,25 @@ function StepModifierRail({ data }: { data: Extract<ContractNodeData, { kind: 's
   );
 }
 
-export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
+export function ContractNodeCard({
+  data,
+  selected = false,
+  reviewFocusState = null,
+  renderHandles = true,
+}: {
+  data: ContractNodeData;
+  selected?: boolean;
+  reviewFocusState?: CanvasReviewFocusState;
+  renderHandles?: boolean;
+}) {
   const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
   const invalid = Boolean(data.invalid);
-  const frozen = Boolean(data.frozen);
   // Outer Start/End nodes remain terminal at the canvas boundary. Their
   // parented counterparts are subgraph ingress/egress endpoints, so React
   // Flow needs the otherwise-suppressed handle for their canonical boundary
   // edges to attach.
-  const rendersTargetHandle = data.kind !== 'start' || Boolean(data.parentId);
-  const rendersSourceHandle = data.kind !== 'end' || Boolean(data.parentId);
+  const rendersTargetHandle = renderHandles && (data.kind !== 'start' || Boolean(data.parentId));
+  const rendersSourceHandle = renderHandles && (data.kind !== 'end' || Boolean(data.parentId));
   const modifierData = data.kind === 'step' ? data : null;
   const visualKind = graphNodeVisualKind(data);
   const sendTemplate = modifierData ? data.sendTemplate : undefined;
@@ -382,11 +395,10 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
       data-display-kind={visualKind}
       data-executor={modifierData?.executor}
       data-invalid={invalid || undefined}
-      data-frozen={frozen || undefined}
       data-send-template={sendTemplate ? 'true' : undefined}
       data-provenance={provenance}
       data-readiness={readiness !== 'ready' ? readiness : undefined}
-      className={`contract-node-shell ${selected ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${frozen ? 'is-frozen' : ''} ${proposalClass} ${sendTemplate ? 'is-send-template' : ''} provenance--${provenance}`}
+      className={`contract-node-shell ${selected || reviewFocusState === 'active' ? 'is-selected' : ''} ${invalid ? 'is-invalid' : ''} ${proposalClass} ${sendTemplate ? 'is-send-template' : ''} ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''} provenance--${provenance}`}
     >
       {modifierData && <HitlTimingMarker data={modifierData} />}
       {data.evidenceMarker && (
@@ -445,16 +457,10 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
               Invalid
             </span>
           )}
-          {frozen && (
-            <span className="contract-node-status contract-node-status--frozen">
-              <LockSimpleIcon aria-hidden="true" size={11} weight="bold" />
-              Frozen
-            </span>
-          )}
           {data.proposalState && (
             <span className="contract-node-proposal-status">Proposed {data.proposalState}</span>
           )}
-          {!invalid && !frozen && !data.proposalState && readiness === 'ready' && (
+          {!invalid && !data.proposalState && readiness === 'ready' && (
             <span className="contract-node-status contract-node-status--ready">Ready</span>
           )}
           {data.outsideSubgraph && (
@@ -466,5 +472,16 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
         <Handle type="source" position={Position.Right} className="contract-node-handle" />
       )}
     </div>
+  );
+}
+
+export function ContractNode({ data, id, selected }: NodeProps<ContractFlowNode>) {
+  const reviewFocusState = useCanvasNodeReviewFocus(id);
+  return (
+    <ContractNodeCard
+      data={data}
+      selected={selected}
+      reviewFocusState={reviewFocusState}
+    />
   );
 }

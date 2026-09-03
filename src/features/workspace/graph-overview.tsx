@@ -15,10 +15,10 @@ import type { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import './graph-overview.css';
 
 const stepColors = {
-  ai: '#c8752d',
-  deterministic: '#64748b',
-  human: '#e11d48',
-  tool: '#0284c7',
+  ai: 'var(--gc-node-ai-accent)',
+  deterministic: 'var(--gc-node-end-accent)',
+  human: 'var(--gc-node-human-accent)',
+  tool: 'var(--gc-node-tool-accent)',
 } as const;
 const overviewWidth = 154;
 const overviewHeight = 88;
@@ -36,14 +36,14 @@ function unionRects(first: Rect, second: Rect): Rect {
 
 function overviewNodeColor(node: CanvasFlowNode) {
   if (node.type === 'contractNode') {
-    if (node.data.kind === 'start') return '#059669';
-    if (node.data.kind === 'end') return '#475569';
+    if (node.data.kind === 'start') return 'var(--gc-node-start-accent)';
+    if (node.data.kind === 'end') return 'var(--gc-node-end-accent)';
     if (node.data.kind === 'merge') return '#526477';
     return stepColors[node.data.executor];
   }
   if (node.type === 'mergeJunction') return '#526477';
   if (node.type === 'runtimeInstance') return '#5969c8';
-  if (node.type === 'externalSystemTile') return '#64748b';
+  if (node.type === 'externalSystemTile') return 'var(--gc-node-end-accent)';
   return '#5c8f7d';
 }
 
@@ -74,8 +74,8 @@ export function GraphOverviewNode({
       height={markHeight}
       rx={8}
       ry={8}
-      fill={color ?? '#64748b'}
-      stroke="#ffffff"
+      fill={color ?? 'var(--gc-node-end-accent)'}
+      stroke="var(--gc-surface)"
       strokeWidth={2}
       vectorEffect="non-scaling-stroke"
     />
@@ -152,9 +152,6 @@ export function GraphOverview() {
 
   return (
     <>
-      <div className="canvas-minimap-title" aria-hidden="true">
-        Graph overview
-      </div>
       <MiniMap<CanvasFlowNode>
         ariaLabel="Graph overview navigator. Drag or click to pan; scroll to zoom."
         pannable
@@ -163,8 +160,8 @@ export function GraphOverview() {
         position="bottom-left"
         nodeColor={overviewNodeColor}
         nodeComponent={GraphOverviewNode}
-        bgColor="#f8faf9"
-        maskColor="rgb(15 23 42 / 10%)"
+        bgColor="var(--gc-surface-subtle)"
+        maskColor="color-mix(in srgb, var(--gc-ink-strong) 10%, transparent)"
         maskStrokeColor="transparent"
         maskStrokeWidth={0}
         offsetScale={overviewOffsetScale}

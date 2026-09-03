@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import type { CanvasEdgePresentation } from '@/src/adapters/react-flow/project-graph';
 import { projectGraphToCanvas } from '@/src/adapters/react-flow/project-graph';
 import { researchIntakeRoutingGraph } from '@/src/domain';
-import { RoutingEdge, routingEdgeTokens } from './routing-edge';
+import { loopPath, RoutingEdge, routingEdgeTokens } from './routing-edge';
 
 afterEach(() => cleanup());
 
@@ -58,6 +58,12 @@ function MountedRoutingPreview({ children }: { children: ReactNode }) {
 }
 
 describe('RoutingEdge in React Flow', () => {
+  it('places the loop label on the rendered cubic path', () => {
+    const [, labelX, labelY] = loopPath(40, 80, 340, 80);
+    expect(labelX).toBeCloseTo(352);
+    expect(labelY).toBeCloseTo(59.75);
+  });
+
   it('renders semantic labels, icons, loop geometry, and the selected non-color cue', async () => {
     render(
       <MountedRoutingPreview>
@@ -101,11 +107,28 @@ describe('RoutingEdge in React Flow', () => {
     expect(fallback.textContent).toContain('fallback');
     expect(loop.getAttribute('data-loop')).toBe('true');
     expect(loop.textContent).toContain('Loop');
-    expect(document.querySelector('.routing-edge__selection-halo')).not.toBeNull();
+    expect(document.querySelectorAll('.routing-edge__hover-halo')).toHaveLength(4);
+    expect(
+      (document.querySelector('.routing-edge--command') as SVGPathElement).style.getPropertyValue('--routing-edge-color'),
+    ).toBe('var(--gc-route-command)');
+    expect(
+      (document.querySelector('.routing-edge--command') as SVGPathElement).style.getPropertyValue('--routing-edge-width'),
+    ).toBe('1.8px');
+    const hoverHalo = document.querySelectorAll('.routing-edge__hover-halo')[0] as SVGPathElement;
+    const selectionHalo = document.querySelector('.routing-edge__selection-halo') as SVGPathElement;
+    expect(hoverHalo.style.strokeDasharray).toBe('7 5');
+    expect(selectionHalo.style.strokeDasharray).toBe('7 5');
+    expect(hoverHalo.style.strokeWidth).toBe('2.9');
+    expect(selectionHalo.style.strokeWidth).toBe('3.3');
+    expect(hoverHalo.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    expect(selectionHalo.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    expect(selectionHalo.style.stroke).toContain('var(--gc-focus)');
+    expect(hoverHalo.classList.contains('react-flow__edge-path')).toBe(false);
+    expect(selectionHalo.classList.contains('react-flow__edge-path')).toBe(false);
     expect(document.querySelector('.routing-edge__branch-dot')).not.toBeNull();
   });
 
-  it('keeps invalid and frozen states readable apart from color', async () => {
+  it('keeps invalid state explicit while frozen edges retain native semantics', async () => {
     const { rerender } = render(
       <MountedRoutingPreview>
         <RoutingEdgePreview
@@ -129,10 +152,9 @@ describe('RoutingEdge in React Flow', () => {
         />
       </MountedRoutingPreview>,
     );
-    await waitFor(() => {
-      expect(document.querySelector('[data-edge-id="clarify-write-brief"]')?.getAttribute('data-frozen')).toBe('true');
-    });
-    expect(document.querySelector('[data-edge-id="clarify-write-brief"]')?.textContent).toContain('Frozen');
+    const frozenEdge = document.querySelector('[data-edge-id="clarify-write-brief"]');
+    expect(frozenEdge?.getAttribute('data-frozen')).toBeNull();
+    expect(frozenEdge?.textContent).toBe('ready');
   });
 
   it('mounts a source-scoped validation failure as an actionable invalid route', async () => {
@@ -160,12 +182,17 @@ describe('RoutingEdge in React Flow', () => {
     expect(label.getAttribute('aria-label')).toContain('invalid');
   });
 
-  it('uses stroke pattern and lock precedence for hoverable routing states', () => {
+  it('uses native route stroke patterns even when contract editing is frozen', () => {
     expect(routingEdgeTokens({ mode: 'command', loop: false, invalid: false, frozen: false }).dasharray).toBe('7 5');
     expect(routingEdgeTokens({ mode: 'fallback', loop: false, invalid: false, frozen: false }).dasharray).toBe('6 5');
     expect(routingEdgeTokens({ mode: 'normal', loop: false, invalid: true, frozen: true })).toMatchObject({
-      color: '#9ca3af',
-      dasharray: '5 5',
+      color: 'var(--gc-route-invalid)',
+      dasharray: '4 3',
+    });
+    expect(routingEdgeTokens({
+      mode: 'conditional', loop: false, invalid: false, frozen: true, scenarioState: 'active',
+    })).toMatchObject({
+      color: 'var(--gc-route-fallback)',
     });
   });
 });

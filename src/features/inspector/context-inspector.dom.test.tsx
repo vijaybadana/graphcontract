@@ -43,12 +43,28 @@ function selectNode(nodeId: string) {
   });
 }
 
+function selectSubgraph(subgraphId: string) {
+  useGraphStore.setState({
+    selection: {
+      nodeIds: [],
+      subgraphIds: [subgraphId],
+      edgeIds: [],
+      primary: { type: 'subgraph', id: subgraphId },
+    },
+  });
+}
+
 function renderInspector(reviewProjection?: CanvasReviewProjection | null) {
   render(
     <ReactFlowProvider>
       <ContextInspector reviewProjection={reviewProjection} />
     </ReactFlowProvider>,
   );
+}
+
+function revealModifier(name: string) {
+  fireEvent.click(screen.getByText('Add modifier'));
+  fireEvent.click(screen.getByRole('menuitem', { name }));
 }
 
 beforeEach(() => {
@@ -66,6 +82,85 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ContextInspector routing details', () => {
+  it('uses one semantic flat shell across graph, node, Merge, End, and Subgraph selections', () => {
+    const cases = [
+      { graph: structuredClone(sampleGraph), select: () => selectNode('start'), title: 'Start', tone: 'start' },
+      { graph: structuredClone(sampleGraph), select: () => selectNode('diagnostic'), title: 'Diagnostic Action', tone: 'task' },
+      { graph: structuredClone(sampleGraph), select: () => selectNode('classifier'), title: 'Classifier Agent', tone: 'agent' },
+      { graph: structuredClone(sampleGraph), select: () => selectNode('refund'), title: 'Refund Tool', tone: 'tool' },
+      { graph: structuredClone(sampleGraph), select: () => selectNode('human'), title: 'Human Input', tone: 'human' },
+      { graph: structuredClone(dynamicParallelismDemoGraph), select: () => selectNode('merge-evidence'), title: 'Merge evidence', tone: 'merge' },
+      { graph: structuredClone(sampleGraph), select: () => selectNode('end'), title: 'End', tone: 'end' },
+      { graph: structuredClone(researchSupervisorGraph), select: () => selectSubgraph('research-supervisor'), title: 'Research Supervisor', tone: 'subgraph' },
+    ] as const;
+
+    for (const entry of cases) {
+      cleanup();
+      useGraphStore.setState({ graph: entry.graph, selection: emptySelection() });
+      entry.select();
+      renderInspector();
+
+      expect(screen.getByRole('heading', { name: entry.title })).toBeTruthy();
+      expect(document.querySelector(`[data-inspector-tone="${entry.tone}"]`)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Focus' })).toBeTruthy();
+      expect(screen.queryByText('Node details')).toBeNull();
+      expect(screen.queryByText('Subgraph details')).toBeNull();
+      expect(screen.queryByText('No proposal waiting')).toBeNull();
+    }
+
+    cleanup();
+    useGraphStore.setState({ graph: structuredClone(sampleGraph), selection: emptySelection() });
+    renderInspector();
+    expect(screen.getByRole('heading', { name: sampleGraph.name })).toBeTruthy();
+    expect(document.querySelector('[data-inspector-tone="graph"]')).toBeTruthy();
+    expect(screen.getByText('Graph settings')).toBeTruthy();
+  });
+
+  it('uses semantic source-to-target headers for every routing mode and derived loops', () => {
+    const cases = [
+      { graph: researchIntakeRoutingGraph, edgeId: 'research-intake-start-clarify', title: 'Start → Clarify Request', tone: 'normal' },
+      { graph: researchIntakeRoutingGraph, edgeId: 'supervisor-final-report', title: 'Research Supervisor → Final Report', tone: 'conditional' },
+      { graph: researchIntakeRoutingGraph, edgeId: 'clarify-write-brief', title: 'Clarify Request → Write Research Brief', tone: 'command' },
+      { graph: researchIntakeRoutingGraph, edgeId: 'supervisor-human-review', title: 'Research Supervisor → Human Review', tone: 'fallback' },
+      { graph: researchIntakeRoutingGraph, edgeId: 'researcher-continue', title: 'Researcher → Research Supervisor', tone: 'loop' },
+      { graph: dynamicParallelismDemoGraph, edgeId: 'parallel-send-search', title: 'Generate queries → Search evidence', tone: 'send' },
+    ] as const;
+
+    for (const entry of cases) {
+      cleanup();
+      useGraphStore.setState({ graph: structuredClone(entry.graph), selection: emptySelection() });
+      selectEdge(entry.edgeId);
+      renderInspector();
+
+      expect(screen.getByRole('heading', { name: entry.title })).toBeTruthy();
+      expect(document.querySelector(`[data-inspector-tone="${entry.tone}"]`)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Focus' })).toBeTruthy();
+      expect(screen.getByText('Routing')).toBeTruthy();
+      expect(screen.getByText('Source')).toBeTruthy();
+      expect(screen.getByText('Target')).toBeTruthy();
+      expect(screen.queryByText('Edge details')).toBeNull();
+    }
+  });
+
+  it('shows only valid bulk actions for a multi-selection', () => {
+    useGraphStore.setState({
+      graph: structuredClone(sampleGraph),
+      selection: {
+        nodeIds: ['classifier', 'billing'],
+        subgraphIds: [],
+        edgeIds: [],
+        primary: { type: 'node', id: 'classifier' },
+      },
+    });
+    renderInspector();
+
+    expect(screen.getByRole('heading', { name: '2 elements selected' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Duplicate selection' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Remove selection' })).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Basics' })).toBeNull();
+  });
+
   it('edits graph capabilities without drawing topology', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     renderInspector();
@@ -87,7 +182,9 @@ describe('ContextInspector routing details', () => {
     useGraphStore.setState({ graph: structuredClone(sampleGraph) });
     selectNode('billing');
     renderInspector();
+    revealModifier('Store access');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Direct Store read' }));
+    revealModifier('Retry / fallback policy');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Retry policy enabled' }));
 
     expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'billing')).toMatchObject({
@@ -215,6 +312,8 @@ describe('ContextInspector routing details', () => {
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeTruthy();
     expect(document.querySelector('img')).toBeNull();
     expect(screen.getByText('External orchestration')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Notify runner' })).toBeTruthy();
+    expect(document.querySelector('[data-inspector-tone="relationship"]')).toBeTruthy();
     expect(screen.getByText(/Not a native control edge/)).toBeTruthy();
     expect(screen.getByText('Opaque / prebuilt Step')).toBeTruthy();
     expect(screen.getByText('Unimplemented')).toBeTruthy();
@@ -227,6 +326,7 @@ describe('ContextInspector routing details', () => {
     selectNode('classifier');
     renderInspector();
 
+    revealModifier('Guardrail, readiness, or opaque boundary');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Opaque or prebuilt' }));
     let classifier = useGraphStore.getState().graph.nodes.find((node) => node.id === 'classifier');
     expect(classifier).toMatchObject({
@@ -288,6 +388,7 @@ describe('ContextInspector routing details', () => {
     selectNode('classifier');
     renderInspector();
 
+    revealModifier('Human input gate');
     fireEvent.click(screen.getByRole('checkbox', { name: 'HITL enabled' }));
     fireEvent.click(screen.getByRole('button', { name: 'HITL timing' }));
     fireEvent.click(screen.getByRole('option', { name: 'Inside' }));
@@ -299,6 +400,7 @@ describe('ContextInspector routing details', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Outcome 1 label' }), {
       target: { value: 'Route approved support work' },
     });
+    revealModifier('Sensitive effect');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Sensitive effect policy enabled' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Sensitive mutation target' }), {
       target: { value: 'Customer billing record' },
@@ -498,11 +600,27 @@ describe('ContextInspector routing details', () => {
     selectNode('start');
     renderInspector();
 
-    expect(screen.getByText('Node details')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Start' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Basics' })).toBeTruthy();
+    expect(screen.queryByText('Node details')).toBeNull();
+    expect(screen.queryByText('Inspector')).toBeNull();
     expect(screen.queryByText('Executor')).toBeNull();
     expect(screen.queryByText('Participation')).toBeNull();
     expect(screen.queryByText('Human input')).toBeNull();
     expect(screen.queryByText('Modifier summary')).toBeNull();
+
+    cleanup();
+    useGraphStore.setState({ graph: structuredClone(sampleGraph), selection: emptySelection() });
+    selectNode('end');
+    renderInspector();
+    fireEvent.click(screen.getByRole('button', { name: 'End outcome kind' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Partial result' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'End outcome detail' }), {
+      target: { value: 'Some requests could not be completed.' },
+    });
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === 'end')).toMatchObject({
+      outcome: { kind: 'partial-result', detail: 'Some requests could not be completed.' },
+    });
   });
 
   it('edits a command route label, condition, and destination through undoable store actions', () => {
@@ -629,6 +747,6 @@ describe('ContextInspector routing details', () => {
 
     expect(screen.getByText('Frozen: this route is read-only.')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Routing mode' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Remove edge' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('menuitem', { name: 'Remove edge' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

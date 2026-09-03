@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 
 import {
   callWebMcpTool,
+  confirmGraphLibraryReplacement,
   expect,
   loadResearchIntake,
   test,
@@ -85,14 +86,10 @@ async function readGraph(page: Page): Promise<LayoutGraph> {
 }
 
 async function openLibraryTemplate(page: Page, title: string) {
-  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain(`Replace the current canvas with “${title}”?`);
-    await dialog.accept();
-  });
   await page.getByRole('button', { name: `Open ${title}` }).click();
+  await confirmGraphLibraryReplacement(page, title);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect.poll(async () => (await readGraph(page)).name).toBe(title);
 }
@@ -162,6 +159,15 @@ async function fitAndWait(page: Page, graph?: LayoutGraph) {
   const fittedGraph = graph ?? await readGraph(page);
   await page.getByRole('button', { name: 'Fit graph' }).click();
   return waitForRenderedGeometry(page, visibleCanvasElementIds(fittedGraph));
+}
+
+async function readViewportScale(page: Page) {
+  return page.locator('.react-flow__viewport').evaluate((element) => {
+    const transform = getComputedStyle(element).transform;
+    if (transform === 'none') return 1;
+    const matrixValues = transform.match(/^matrix\((.+)\)$/)?.[1]?.split(',');
+    return Number(matrixValues?.[0] ?? 1);
+  });
 }
 
 function assertInside(
@@ -291,7 +297,7 @@ async function expectRouteVisible(
   const edge = page.getByTestId(`rf__edge-${edgeId}`);
   await expect(edge).toHaveCount(1);
   const route = await edge.evaluate((root) => {
-    const path = root.querySelector<SVGPathElement>('path.react-flow__edge-path');
+    const path = root.querySelector<SVGPathElement>('path.routing-edge__path');
     const canvas = root.closest<HTMLElement>('.react-flow') ??
       document.querySelector<HTMLElement>('.react-flow');
     if (!path || !canvas) return null;
@@ -415,6 +421,25 @@ async function dragBy(page: Page, target: Locator, delta: Position) {
   await page.mouse.up();
 }
 
+async function dragByAt(
+  page: Page,
+  target: Locator,
+  delta: Position,
+  point: (box: ScreenRect) => Position,
+) {
+  const box = await target.boundingBox();
+  expect(box, 'drag target has geometry').not.toBeNull();
+  const start = point(box!);
+  const hitNodeId = await page.evaluate(({ x, y }) =>
+    document.elementFromPoint(x, y)?.closest<HTMLElement>('.react-flow__node')?.dataset.id ?? null,
+  start);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + delta.x, start.y + delta.y, { steps: 8 });
+  await page.mouse.up();
+  return hitNodeId;
+}
+
 function graphGeometry(graph: LayoutGraph) {
   return {
     nodes: Object.fromEntries(
@@ -509,7 +534,9 @@ test('L03 routing labels and arrowheads remain legible after Fit', async ({ app 
 
   await test.step('conditional, Command, fallback, and loop routes', async () => {
     await loadResearchIntake(app);
-    await fitAndWait(app);
+    const fittedRects = await fitAndWait(app);
+    expect(await readViewportScale(app)).toBeGreaterThanOrEqual(0.47);
+    expect(Math.min(...fittedRects.map((rect) => rect.width))).toBeGreaterThanOrEqual(100);
     await expectRouteVisible(app, 'supervisor-final-report');
     await expectRouteVisible(app, 'clarify-write-brief');
     await expectRouteVisible(app, 'supervisor-human-review');
@@ -560,15 +587,26 @@ test('L04 manually placed nodes and subgraph survive panels, projections, and re
     (await readGraph(app)).nodes.find((node) => node.id === 'frame-question')?.position,
   ).not.toEqual(original.nodes.find((node) => node.id === 'frame-question')?.position);
 
-  await dragBy(
+  const beforeSubgraphDrag = await readGraph(app);
+  const subgraphDragHit = await dragByAt(
     app,
-    app.getByTestId('rf__node-research-cell').locator('.subgraph-node-header'),
+    app.getByTestId('rf__node-research-cell').locator('.subgraph-node-shell'),
     { x: 38, y: 32 },
+    // Use an empty lower-left section of the expanded frame. The right edge
+    // can sit beneath the contextual inspector at fitted-out zooms.
+    (box) => ({ x: box.x + 18, y: box.y + box.height - 18 }),
+  );
+  expect(subgraphDragHit, 'empty subgraph frame resolves to the parent interaction layer').toBe(
+    'research-cell',
   );
   await expect.poll(async () =>
     (await readGraph(app)).subgraphs.find((subgraph) => subgraph.id === 'research-cell')?.position,
   ).not.toEqual(original.subgraphs.find((subgraph) => subgraph.id === 'research-cell')?.position);
   const authoredGraph = await readGraph(app);
+  expect(
+    authoredGraph.nodes.find((node) => node.id === 'frame-question')?.position,
+    'moving a subgraph keeps child coordinates relative to the container',
+  ).toEqual(beforeSubgraphDrag.nodes.find((node) => node.id === 'frame-question')?.position);
   const authored = graphGeometry(authoredGraph);
   const authoredRendered = await fitAndWait(app, authoredGraph);
   expect(authoredRendered).not.toEqual(originalRendered);
@@ -737,13 +775,12 @@ test('L06 collapse and expand preserve a looped parallel subgraph geometry', asy
     updatedAt: '<ignored>',
   };
   await app.getByTestId('rf__node-reflect-on-answer').click();
-  await expect(app.getByLabel('Graph status')).toContainText('1 selected');
+  await expect(app.getByTestId('rf__node-reflect-on-answer')).toHaveClass(/selected/);
   await app.getByRole('button', { name: 'Collapse subgraph Parallel reflection cell' }).click();
   const collapsed = await readGraph(app);
   expect(collapsed.nodes.map(({ id, parentId }) => ({ id, parentId }))).toEqual(membership);
   const collapsedParent = app.getByTestId('rf__node-parallel-loop-cell');
   const hiddenChild = app.getByTestId('rf__node-reflect-on-answer');
-  await expect(app.getByLabel('Graph status').getByText('1 selected', { exact: true })).toBeVisible();
   await expect(collapsedParent.locator('.subgraph-node-shell')).toHaveClass(/is-selected/);
   await expect(app.getByRole('heading', { name: 'Subgraph details' })).toBeVisible();
   await expect(app.getByRole('heading', { name: 'Node details' })).toHaveCount(0);
@@ -781,5 +818,5 @@ test('L06 collapse and expand preserve a looped parallel subgraph geometry', asy
   await expectRouteVisible(app, 'questions-send');
   await expectRouteVisible(app, 'reflect-refine');
   await app.getByTestId('rf__node-reflect-on-answer').click();
-  await expect(app.getByLabel('Graph status')).toContainText('1 selected');
+  await expect(app.getByTestId('rf__node-reflect-on-answer')).toHaveClass(/selected/);
 });

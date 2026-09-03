@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GraphWorkspace, reconcileProjectionSelection } from './graph-workspace';
@@ -55,10 +55,10 @@ describe('GraphWorkspace subgraph creation', () => {
   it('presents one labelled graph overview with normalized semantic node marks', async () => {
     renderWorkspace(false);
 
-    expect(await screen.findByText('Graph overview')).toBeTruthy();
-    const overview = screen.getByRole('img', {
+    const overview = await screen.findByRole('img', {
       name: 'Graph overview navigator. Drag or click to pan; scroll to zoom.',
     });
+    expect(screen.queryByText('Graph overview')).toBeNull();
     expect(overview.querySelectorAll('.react-flow__minimap-mask')).toHaveLength(1);
     expect(document.querySelectorAll('.graph-overview-viewport')).toHaveLength(1);
     expect(overview.closest('.canvas-minimap')?.getAttribute('style')).toContain(
@@ -75,24 +75,13 @@ describe('GraphWorkspace subgraph creation', () => {
     });
   }, 30_000);
 
-  it('opens and refocuses the requested graph capability settings from the strip', async () => {
+  it('opens graph capability settings from the contextual inspector', async () => {
     renderWorkspace(false);
 
-    const storeCapability = await screen.findByRole('button', { name: /Store: Off, Cross-thread knowledge/i });
-    fireEvent.click(storeCapability);
-    const storeTab = await screen.findByRole('tab', { name: 'Store' });
-    expect(storeTab.getAttribute('aria-selected')).toBe('true');
-    expect(document.activeElement).toBe(storeTab);
-
-    fireEvent.click(screen.getByRole('tab', { name: 'State' }));
-    expect(screen.getByRole('tab', { name: 'State' }).getAttribute('aria-selected')).toBe('true');
-    fireEvent.click(storeCapability);
-
-    await waitFor(() => {
-      const requestedStoreTab = screen.getByRole('tab', { name: 'Store' });
-      expect(requestedStoreTab.getAttribute('aria-selected')).toBe('true');
-      expect(document.activeElement).toBe(requestedStoreTab);
-    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Show inspector' }));
+    expect((await screen.findByRole('tab', { name: 'State' })).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Store' }));
+    expect(screen.getByRole('tab', { name: 'Store' }).getAttribute('aria-selected')).toBe('true');
   }, 30_000);
 
   it('shows validated observed workers only in Runtime view without mutating the accepted graph', async () => {
@@ -104,27 +93,31 @@ describe('GraphWorkspace subgraph creation', () => {
     expect((runtime as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(runtime);
 
-    expect(await screen.findByText(/Runtime projection · observed instances are read-only/)).toBeTruthy();
-    const instance = await screen.findByText('Search evidence · query 1');
+    expect(await screen.findByRole('heading', { name: 'Runtime' })).toBeTruthy();
+    expect(screen.getByLabelText('Read-only runtime projection')).toBeTruthy();
+    expect(screen.queryByText(/observed instances are read-only and do not change the contract/)).toBeNull();
+    const instance = document.querySelector<HTMLButtonElement>('.runtime-mode__instance')!;
+    expect(instance).toBeTruthy();
     fireEvent.click(instance);
-    expect(await screen.findByText(/Observed trace projection — read-only/)).toBeTruthy();
+    expect(await screen.findByText(/projection only/i)).toBeTruthy();
     expect(useGraphStore.getState().graph).toEqual(acceptedBefore);
   }, 30_000);
 
-  it('opens Edit & review while keeping the desktop palette open after palette click creation', async () => {
+  it('opens the contextual Design inspector while keeping the desktop palette open after palette click creation', async () => {
     renderWorkspace(false);
 
     const subgraph = await screen.findByRole('button', { name: 'Subgraph' });
     fireEvent.click(subgraph);
 
-    expect((await screen.findByRole('tab', { name: 'Edit & review' })).getAttribute('aria-selected')).toBe('true');
+    expect(await screen.findByRole('button', { name: 'Collapse inspector' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Edit & review' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Collapse node palette' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse inspector' }));
     expect(screen.getByRole('button', { name: 'Open Inspector' })).toBeTruthy();
   }, 30_000);
 
-  it('opens Edit & review and replaces the compact palette after palette drop creation', async () => {
+  it('opens the contextual Design inspector and replaces the compact palette after palette drop creation', async () => {
     renderWorkspace(true);
 
     await screen.findByRole('button', { name: 'Subgraph' });
@@ -135,7 +128,7 @@ describe('GraphWorkspace subgraph creation', () => {
       dataTransfer: { getData: () => 'subgraph' },
     });
 
-    expect((await screen.findByRole('tab', { name: 'Edit & review' })).getAttribute('aria-selected')).toBe('true');
+    expect(await screen.findByRole('button', { name: 'Collapse inspector' })).toBeTruthy();
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Collapse node palette' })).toBeNull();
     });
@@ -279,13 +272,14 @@ describe('GraphWorkspace subgraph creation', () => {
     renderWorkspace(false);
     await screen.findByRole('application');
 
-    useGraphStore.getState().setSelection({
-      nodeIds: [],
-      subgraphIds: [],
-      edgeIds: ['clarify-write-brief'],
-      primary: { type: 'edge', id: 'clarify-write-brief' },
+    act(() => {
+      useGraphStore.getState().setSelection({
+        nodeIds: [],
+        subgraphIds: [],
+        edgeIds: ['clarify-write-brief'],
+        primary: { type: 'edge', id: 'clarify-write-brief' },
+      });
     });
-
     const routeLabel = await screen.findByRole('textbox', { name: 'Route label' });
     expect((routeLabel as HTMLInputElement).value).toBe('ready');
 
@@ -357,13 +351,27 @@ describe('GraphWorkspace subgraph creation', () => {
     await waitFor(() => {
       expect(screen.getByRole('radio', { name: 'Proposal' }).getAttribute('aria-checked')).toBe('true');
     });
-    expect(await screen.findByRole('heading', { name: 'Before / Proposed' })).toBeTruthy();
-    expect(screen.getByText('Before')).toBeTruthy();
-    expect(screen.getByText('Proposed')).toBeTruthy();
-    expect(screen.getByRole('button', {
-      name: /Store: Available, Direct Step R\/W available/i,
-    })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Proposal' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Graph overview' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Changes' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Edit & review' })).toBeNull();
+    expect(screen.getByRole('button', { name: /Review updated graph\.store/i })).toBeTruthy();
     expect(useGraphStore.getState().graph).toEqual(accepted);
+
+    fireEvent.click(screen.getByRole('button', { name: /Review updated classifier/i }));
+    await waitFor(() => {
+      expect(document.querySelector('[data-id="classifier"] .contract-node-shell')?.className).toContain('proposal-focus-active');
+      expect(document.querySelector('[data-id="classifier"] .contract-node-shell')?.className).toContain('is-selected');
+      expect(document.querySelector('[data-id="start"] .contract-node-shell')?.className).toContain('proposal-focus-context');
+      expect(document.querySelector('[data-id="refund"] .contract-node-shell')?.className).toContain('proposal-focus-dimmed');
+      expect(document.querySelectorAll('.routing-edge__path[class*="proposal-focus-"]')).toHaveLength(0);
+    });
+    expect(screen.getByRole('heading', { name: 'classifier' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to proposal' }));
+    await waitFor(() => {
+      expect(document.querySelector('.proposal-focus-active')).toBeNull();
+      expect(document.querySelector('.proposal-focus-dimmed')).toBeNull();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
     await waitFor(() => {

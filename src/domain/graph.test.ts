@@ -978,6 +978,47 @@ describe('routing edge semantics', () => {
     expect(enumerateScenarios(looping)).toHaveLength(3);
   });
 
+  it('validates and exports declared Send template anatomy without creating runtime workers', () => {
+    const graph = sendMergeGraph();
+    const send = graph.edges.find((edge) => edge.id === 'dispatch-worker');
+    if (!send || send.mode !== 'send') throw new Error('Expected Send fixture.');
+    send.send.templateAnatomy = {
+      id: 'worker-anatomy',
+      label: 'Researcher ×N',
+      dimensions: { width: 620, height: 220 },
+      canonicalTemplateNodeId: 'agent',
+      nodes: [
+        { id: 'start', kind: 'start', label: 'Start', position: { x: 20, y: 80 }, dimensions: { width: 80, height: 60 } },
+        { id: 'agent', kind: 'step', executor: 'ai', label: 'Researcher Agent', position: { x: 140, y: 50 }, dimensions: { width: 160, height: 120 } },
+        { id: 'tools', kind: 'step', executor: 'tool', label: 'Research Tools', position: { x: 340, y: 50 }, dimensions: { width: 160, height: 120 } },
+        { id: 'end', kind: 'end', label: 'End', position: { x: 540, y: 80 }, dimensions: { width: 60, height: 60 } },
+      ],
+      edges: [
+        { id: 'start-agent', source: 'start', target: 'agent' },
+        { id: 'agent-tools', source: 'agent', target: 'tools' },
+        { id: 'tools-end', source: 'tools', target: 'end' },
+      ],
+    };
+
+    expect(workflowGraphSchema.safeParse(graph).success).toBe(true);
+    expect(validateGraph(graph)).toEqual([]);
+    const scenario = enumerateScenarios(graph)[0]!;
+    expect(scenario.dynamicSends[0]?.templateAnatomy).toEqual(send.send.templateAnatomy);
+    expect(buildPythonTestsDownload(graph, [scenario]).content).toContain('"template_anatomy"');
+
+    const invalid = structuredClone(graph);
+    const invalidSend = invalid.edges.find((edge) => edge.id === 'dispatch-worker');
+    if (!invalidSend || invalidSend.mode !== 'send' || !invalidSend.send.templateAnatomy) {
+      throw new Error('Expected declared anatomy fixture.');
+    }
+    invalidSend.send.templateAnatomy.canonicalTemplateNodeId = 'missing';
+    invalidSend.send.templateAnatomy.nodes[0]!.position.x = 700;
+    expect(validateGraph(invalid)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SEND_TEMPLATE_ANATOMY_CANONICAL_STEP_REQUIRED' }),
+      expect.objectContaining({ code: 'SEND_TEMPLATE_ANATOMY_NODE_OUT_OF_BOUNDS' }),
+    ]));
+  });
+
   it('validates runtime projection fixtures without admitting them into the canonical graph', () => {
     const graph = sendMergeGraph();
     expect(

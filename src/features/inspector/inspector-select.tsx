@@ -121,7 +121,7 @@ export function InspectorSelect<Value extends string>({
           id={listboxId}
           role="listbox"
           aria-label="Choose an option"
-          className="absolute inset-x-0 top-[calc(100%+0.3rem)] z-50 overflow-hidden rounded-xl border border-black/10 bg-white p-1 shadow-xl"
+          className="inspector-select__listbox absolute inset-x-0 top-[calc(100%+0.3rem)] z-50 overflow-hidden rounded-xl border p-1 shadow-xl"
         >
           {options.map((option, optionIndex) => {
             const selected = option.value === value;
@@ -137,7 +137,7 @@ export function InspectorSelect<Value extends string>({
                 onClick={() => choose(option.value)}
                 onKeyDown={(event) => handleOptionKeyDown(event, optionIndex)}
                 className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition ${
-                  selected ? 'bg-[#18211d] font-semibold text-white' : 'hover:bg-black/5'
+                  selected ? 'inspector-select__option--selected font-semibold' : 'inspector-select__option--idle'
                 }`}
               >
                 {option.label}

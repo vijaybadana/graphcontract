@@ -36,17 +36,23 @@ const SUBGRAPH_HEADER_HEIGHT = 56;
 const RUNTIME_INSTANCE_WIDTH = 188;
 const RUNTIME_INSTANCE_HEIGHT = 58;
 const RUNTIME_INSTANCE_VERTICAL_GAP = 20;
+const DYNAMIC_WORKER_GROUP_MIN_WIDTH = 288;
+const DYNAMIC_WORKER_GROUP_MIN_HEIGHT = 232;
+const DYNAMIC_WORKER_GROUP_INSET_X = 34;
+const DYNAMIC_WORKER_GROUP_INSET_Y = 76;
 
 export type CanvasEdgeData = {
   edge: GraphEdge;
   domainEdgeIds: string[];
-  projection: 'domain' | 'subgraph-proxy' | 'runtime-instance';
+  projection: 'domain' | 'subgraph-proxy' | 'template-boundary' | 'runtime-instance';
   /** Review metadata stays keyed by canonical edges even when endpoints collapse. */
   review?: CanvasEdgeReviewProjection;
   runtimeInstanceId?: string;
   /** Evidence markers are an optional, workspace-only overlay. */
   evidenceMarker?: number;
   onEvidenceActivate?: (edgeId: string) => void;
+  /** Ephemeral proposal-detail focus; never serialized into the graph. */
+  reviewFocusState?: 'active' | 'dimmed';
   presentation: CanvasEdgePresentation;
   [key: string]: unknown;
 };
@@ -153,6 +159,8 @@ export type CanvasSystemRelationshipEdgeData = {
   evidenceMarker?: number;
   onEvidenceActivate?: (relationshipId: string) => void;
   onRelationshipActivate?: (relationshipId: string) => void;
+  /** Ephemeral proposal-detail focus; never serialized into the relationship. */
+  reviewFocusState?: 'active' | 'dimmed';
   /** Selected-scenario state is ephemeral and never part of the relationship. */
   scenarioState?: ScenarioElementState;
   [key: string]: unknown;
@@ -422,9 +430,7 @@ function projectEdge(
     byDomainEdgeId: {},
   },
 ): CanvasNativeEdge {
-  const color = presentation.frozen
-    ? '#9ca3af'
-    : presentation.invalid
+  const color = presentation.invalid
       ? '#e0353d'
       : presentation.loop
         ? '#ea6a18'
@@ -500,9 +506,9 @@ function subgraphFlowNode(
     type: 'subgraph',
     className: scenarioPresentationClassName(scenarioState),
     position: subgraph.position,
-    // Expanded containers sit directly below their member nodes. Restricting
-    // their drag handle to the rendered header/border keeps children fully
-    // interactive while preserving a reliable parent selection surface.
+    // Expanded containers sit directly below their member nodes. Their
+    // component supplies a transparent body drag surface below those member
+    // wrappers, plus the visible header. Controls opt out with `nodrag`.
     zIndex: removed ? -1 : subgraph.collapsed ? 10 : 0,
     width,
     height,
@@ -511,7 +517,7 @@ function subgraphFlowNode(
     style: { width, height },
     selectable: !removed,
     draggable: !removed,
-    dragHandle: '.subgraph-node-drag-surface, .subgraph-node-boundary-drag-surface',
+    dragHandle: '.subgraph-node-drag-surface',
     focusable: !removed,
     connectable: false,
     ariaLabel: `${subgraph.label} subgraph, ${proposalState ? `proposed ${proposalState}, ` : ''}${subgraph.collapsed ? 'collapsed' : 'expanded'}`,
@@ -626,6 +632,91 @@ function sendTemplateData(
   };
 }
 
+function dynamicWorkerGroupNodes(
+  graph: WorkflowGraph,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+  runtimeHiddenNodeIds: ReadonlySet<string>,
+  scenarioPresentation: ScenarioPresentation | null,
+): CanvasFlowNode[] {
+  return graph.edges.flatMap((edge) => {
+    if (edge.mode !== 'send' || !edge.send) return [];
+    const source = graph.nodes.find((node) => node.id === edge.source);
+    const template = graph.nodes.find((node) => node.id === edge.target);
+    const merge = graph.nodes.find((node) => node.id === edge.send!.mergeNodeId);
+    const parentId = template?.parentId;
+    const parent = parentId ? subgraphsById.get(parentId) : undefined;
+    if (
+      !source ||
+      !template ||
+      !merge ||
+      !parent ||
+      source.parentId !== parentId ||
+      merge.parentId !== parentId
+    ) {
+      return [];
+    }
+
+    const anatomy = edge.send.templateAnatomy;
+    const canonicalAnatomyNode = anatomy?.nodes.find(
+      (candidate) => candidate.id === anatomy.canonicalTemplateNodeId,
+    );
+    const memberNodeIds = anatomy?.nodes.map((candidate) => candidate.id) ?? [template.id];
+    const memberEdgeIds = anatomy?.edges.map((candidate) => candidate.id) ?? [];
+    const width = anatomy?.dimensions.width ?? DYNAMIC_WORKER_GROUP_MIN_WIDTH;
+    const height = anatomy?.dimensions.height ?? DYNAMIC_WORKER_GROUP_MIN_HEIGHT;
+    const position = canonicalAnatomyNode
+      ? {
+          x: template.position.x - canonicalAnatomyNode.position.x,
+          y: template.position.y - canonicalAnatomyNode.position.y,
+        }
+      : {
+          x: template.position.x - DYNAMIC_WORKER_GROUP_INSET_X,
+          y: template.position.y - DYNAMIC_WORKER_GROUP_INSET_Y,
+        };
+
+    return [{
+      id: `dynamic-worker-group:${edge.id}`,
+      type: 'dynamicWorkerGroup' as const,
+      parentId,
+      extent: 'parent' as const,
+      expandParent: false,
+      position,
+      width,
+      height,
+      initialWidth: width,
+      initialHeight: height,
+      // React Flow enables pointer events on every wrapper when the workspace
+      // supplies a shared onNodeClick handler. This derived, non-selectable
+      // frame must stay transparent so empty space belongs to its canonical
+      // parent subgraph; its explicit header opts back in from component CSS.
+      style: { width, height, pointerEvents: 'none' },
+      hidden: parent.collapsed || runtimeHiddenNodeIds.has(template.id),
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      focusable: true,
+      zIndex: 0,
+      className: scenarioPresentationClassName(
+        scenarioElementState(
+          scenarioPresentation,
+          Boolean(scenarioPresentation?.activeNodeIds.has(template.id)),
+        ),
+      ),
+      ariaLabel: `Researcher ×N, declared dynamic subgraph template with ${memberNodeIds.length} steps and ${memberEdgeIds.length} connections`,
+      data: {
+        label: 'Researcher ×N',
+        sendEdgeId: edge.id,
+        templateNodeId: template.id,
+        memberNodeIds,
+        memberEdgeIds,
+        mergeNodeId: merge.id,
+        payloadLabel: edge.send.payloadLabel,
+        templateAnatomy: anatomy,
+      },
+    }];
+  });
+}
+
 function projectDomainNode(
   node: GraphNode,
   preview: WorkflowGraph,
@@ -665,7 +756,7 @@ function projectDomainNode(
       focusable: proposalState !== 'removed',
       ariaLabel: `${node.label} Merge junction, reducer ${node.merge.reducer.name || 'unset'}, ${
         node.merge.waitingForDynamicInputs ? 'waiting for dynamic inputs' : 'invalid waiting policy'
-      }${invalid ? ', invalid' : ''}${frozen ? ', frozen' : ''}`,
+      }${invalid ? ', invalid' : ''}`,
       ...parentProperties,
       data: { ...node, proposalState, invalid, frozen, outsideSubgraph, scenarioState },
     };
@@ -685,7 +776,7 @@ function projectDomainNode(
     focusable: proposalState !== 'removed',
     ariaLabel: `${node.label} ${node.kind}${template ? ', dynamic worker template ×N' : ''}${
       invalid ? ', invalid' : ''
-    }${frozen ? ', frozen' : ''}`,
+    }`,
     ...parentProperties,
     data: {
       ...node,
@@ -789,6 +880,12 @@ export function projectGraphToCanvas(
 
   const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const validationIssues = validateGraph(preview);
+  const dynamicWorkerGroups = dynamicWorkerGroupNodes(
+    preview,
+    subgraphsById,
+    runtimeTemplateNodeIds,
+    scenarioPresentation,
+  );
   const nodes: CanvasFlowNode[] = [
     ...sourceSubgraphs.map((subgraph) => {
       const review = subgraphReviewProjection(subgraph);
@@ -800,6 +897,7 @@ export function projectGraphToCanvas(
         review.descendantReviewState,
       );
     }),
+    ...dynamicWorkerGroups,
     ...sourceNodes.map((node) =>
       projectDomainNode(
         node,
@@ -819,6 +917,26 @@ export function projectGraphToCanvas(
     ...accepted.edges.filter((edge) => !previewEdgeIds.has(edge.id)),
   ].filter((edge) => !runtimeReplacedEdgeIds.has(edge.id));
   const loopEdgeIds = topologyDerivedLoopEdgeIds({ ...preview, edges: sourceEdges });
+  const dynamicGroupBySendEdgeId = new Map(
+    preview.edges.flatMap((edge) => (
+      edge.mode === 'send' && edge.send.templateAnatomy
+        ? [[edge.id, `dynamic-worker-group:${edge.id}`] as const]
+        : []
+    )),
+  );
+  const dynamicGroupByTemplateContinuationId = new Map(
+    preview.edges.flatMap((sendEdge) => {
+      if (sendEdge.mode !== 'send' || !sendEdge.send.templateAnatomy) return [];
+      const continuation = preview.edges.find((candidate) => (
+        candidate.mode === 'normal'
+        && candidate.source === sendEdge.target
+        && candidate.target === sendEdge.send.mergeNodeId
+      ));
+      return continuation
+        ? [[continuation.id, `dynamic-worker-group:${sendEdge.id}`] as const]
+        : [];
+    }),
+  );
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
     const sourceParent = subgraphsById.get(
       preview.nodes.find((node) => node.id === edge.source)?.parentId ?? '',
@@ -828,8 +946,12 @@ export function projectGraphToCanvas(
     );
     return {
       edge,
-      source: sourceParent?.collapsed ? sourceParent.id : edge.source,
-      target: targetParent?.collapsed ? targetParent.id : edge.target,
+      source: sourceParent?.collapsed
+        ? sourceParent.id
+        : dynamicGroupByTemplateContinuationId.get(edge.id) ?? edge.source,
+      target: targetParent?.collapsed
+        ? targetParent.id
+        : dynamicGroupBySendEdgeId.get(edge.id) ?? edge.target,
     };
   });
 
@@ -856,6 +978,25 @@ export function projectGraphToCanvas(
     const collapsedInternal =
       domainEdge.source === domainEdge.target && domainEdge.source !== domainEdge.edge.source;
     if (collapsedInternal) continue;
+
+    const isTemplateBoundary =
+      domainEdge.source.startsWith('dynamic-worker-group:') ||
+      domainEdge.target.startsWith('dynamic-worker-group:');
+    if (isTemplateBoundary) {
+      const group = [domainEdge.edge];
+      const review = reviewProjectionForEdges(group, edgeReviewStates);
+      edges.push(
+        projectEdge(
+          domainEdge,
+          false,
+          [domainEdge.edge.id],
+          'template-boundary',
+          edgePresentation(domainEdge.edge, group, review),
+          review,
+        ),
+      );
+      continue;
+    }
 
     const isProxy =
       domainEdge.source !== domainEdge.edge.source || domainEdge.target !== domainEdge.edge.target;

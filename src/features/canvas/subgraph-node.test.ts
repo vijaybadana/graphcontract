@@ -1,23 +1,26 @@
-import { Children, isValidElement, ReactElement, ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+
+import { ReactFlowProvider } from '@xyflow/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createElement } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SubgraphNode } from './subgraph-node';
 
-function findButton(node: ReactNode): ReactElement<Record<string, unknown>> | undefined {
-  if (!isValidElement(node)) return undefined;
-  if (node.type === 'button') return node as ReactElement<Record<string, unknown>>;
-  for (const child of Children.toArray(node.props.children)) {
-    const button = findButton(child);
-    if (button) return button;
-  }
-  return undefined;
+afterEach(() => cleanup());
+
+function renderSubgraph(data: Parameters<typeof SubgraphNode>[0]['data']) {
+  render(createElement(
+    ReactFlowProvider,
+    null,
+    createElement(SubgraphNode, { data, id: data.id, selected: false } as never),
+  ));
 }
 
 describe('SubgraphNode', () => {
   it('renders a native accessible collapse control and invokes the projection callback', () => {
     const onToggleCollapse = vi.fn();
-    const element = SubgraphNode({
-      data: {
+    renderSubgraph({
         id: 'review-group',
         label: 'Review process',
         position: { x: 0, y: 0 },
@@ -25,46 +28,35 @@ describe('SubgraphNode', () => {
         collapsed: false,
         collapseEditable: true,
         onToggleCollapse,
-      },
-      selected: false,
-    } as never as Parameters<typeof SubgraphNode>[0]);
-    const button = findButton(element);
-    const stopPropagation = vi.fn();
+    });
+    const button = screen.getByRole('button', { name: 'Collapse subgraph Review process' });
 
-    expect(button).toBeDefined();
-    expect(button?.props.type).toBe('button');
-    expect(button?.props['aria-expanded']).toBe(true);
-    expect(button?.props['aria-label']).toBe('Collapse subgraph Review process');
-    expect(button?.props.className).toContain('nodrag');
-    expect(button?.props.disabled).toBe(false);
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.className).toContain('nodrag');
+    expect((button as HTMLButtonElement).disabled).toBe(false);
 
-    (button?.props.onClick as (event: { stopPropagation: () => void }) => void)({ stopPropagation });
+    fireEvent.click(button);
 
-    expect(stopPropagation).toHaveBeenCalledOnce();
     expect(onToggleCollapse).toHaveBeenCalledWith('review-group', true);
   });
 
   it('exposes expansion state and label for a collapsed card', () => {
-    const element = SubgraphNode({
-      data: {
+    renderSubgraph({
         id: 'review-group',
         label: 'Review process',
         position: { x: 0, y: 0 },
         dimensions: { width: 640, height: 360 },
         collapsed: true,
-      },
-      selected: false,
-    } as never as Parameters<typeof SubgraphNode>[0]);
-    const button = findButton(element);
+    });
+    const button = screen.getByRole('button', { name: 'Expand subgraph Review process' });
 
-    expect(button?.props['aria-expanded']).toBe(false);
-    expect(button?.props['aria-label']).toBe('Expand subgraph Review process');
-    expect(button?.props.disabled).toBe(true);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect((button as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('renders a removed proposal container as a non-interactive visual ghost', () => {
-    const element = SubgraphNode({
-      data: {
+    renderSubgraph({
         id: 'review-group',
         label: 'Review process',
         position: { x: 0, y: 0 },
@@ -72,13 +64,12 @@ describe('SubgraphNode', () => {
         collapsed: false,
         proposalState: 'removed',
         collapseEditable: true,
-      },
-      selected: false,
-    } as never as Parameters<typeof SubgraphNode>[0]);
-    const button = findButton(element);
+    });
+    const shell = document.querySelector('.subgraph-node-shell');
+    const button = screen.getByRole('button', { name: 'Collapse subgraph Review process' });
 
-    expect(element.props.className).toContain('is-proposed-removed');
-    expect(element.props['data-proposal-state']).toBe('removed');
-    expect(button?.props.disabled).toBe(true);
+    expect(shell?.className).toContain('is-proposed-removed');
+    expect(shell?.getAttribute('data-proposal-state')).toBe('removed');
+    expect((button as HTMLButtonElement).disabled).toBe(true);
   });
 });

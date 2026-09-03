@@ -4,7 +4,9 @@ import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import type { KeyboardEvent, PointerEvent } from 'react';
 
 import { EffectiveGraphCapabilities, GraphSubgraph } from '@/src/domain';
+import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 import './subgraph-node.css';
+import './node-boundary.css';
 
 export type SubgraphNodeData = GraphSubgraph & {
   /** Effective scope is projection data; canonical capability ownership stays on the graph. */
@@ -23,7 +25,8 @@ export type SubgraphNodeData = GraphSubgraph & {
 
 export type SubgraphFlowNode = Node<SubgraphNodeData, 'subgraph'>;
 
-export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
+export function SubgraphNode({ data, id, selected }: NodeProps<SubgraphFlowNode>) {
+  const reviewFocusState = useCanvasNodeReviewFocus(id);
   const action = data.collapsed ? 'Expand' : 'Collapse';
   const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
   const removed = data.proposalState === 'removed';
@@ -67,7 +70,7 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
 
   return (
     <div
-      className={`subgraph-node-shell ${data.collapsed ? 'is-collapsed' : 'is-expanded'} ${selected ? 'is-selected' : ''} ${proposalClass}`}
+      className={`subgraph-node-shell ${data.collapsed ? 'is-collapsed subgraph-node-drag-surface' : 'is-expanded'} ${selected || reviewFocusState === 'active' ? 'is-selected' : ''} ${proposalClass} ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
       data-collapsed={data.collapsed}
       data-proposal-state={data.proposalState}
     >
@@ -79,12 +82,7 @@ export function SubgraphNode({ data, selected }: NodeProps<SubgraphFlowNode>) {
         />
       )}
       {!data.collapsed && (
-        <>
-          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--top" aria-hidden="true" />
-          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--right" aria-hidden="true" />
-          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--bottom" aria-hidden="true" />
-          <div className="subgraph-node-boundary-drag-surface subgraph-node-boundary-drag-surface--left" aria-hidden="true" />
-        </>
+        <div className="subgraph-node-body-drag-surface subgraph-node-drag-surface" aria-hidden="true" />
       )}
       <div className="subgraph-node-header subgraph-node-drag-surface">
         <div className="subgraph-node-heading">

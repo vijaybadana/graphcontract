@@ -406,7 +406,7 @@ const mergeConfigSchema = {
 const sendMapConfigSchema = {
   type: 'object',
   description:
-    'Strict design-time Send/map configuration. destinationTemplateId must equal the edge target; it identifies one template Step, never materialized runtime workers.',
+    'Strict design-time Send/map configuration. destinationTemplateId must equal the edge target; it identifies one template Step, never materialized runtime workers. templateAnatomy may truthfully declare the design-time mini-flow represented by that template.',
   required: ['destinationTemplateId', 'multiplicity', 'payloadLabel', 'mergeNodeId'],
   properties: {
     destinationTemplateId: { type: 'string', minLength: 1 },
@@ -414,6 +414,54 @@ const sendMapConfigSchema = {
     payloadLabel: { type: 'string', minLength: 1 },
     mergeNodeId: { type: 'string', minLength: 1 },
     payloadSchemaRef: { type: 'string', minLength: 1 },
+    templateAnatomy: {
+      type: 'object',
+      description: 'Optional declared mini-flow expanded inside the dynamic template frame. These are design-time anatomy records, not runtime worker instances or top-level GraphNodes.',
+      required: ['id', 'label', 'dimensions', 'canonicalTemplateNodeId', 'nodes', 'edges'],
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        label: { type: 'string', minLength: 1 },
+        dimensions: {
+          type: 'object', required: ['width', 'height'],
+          properties: { width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 } },
+          additionalProperties: false,
+        },
+        canonicalTemplateNodeId: { type: 'string', minLength: 1 },
+        nodes: {
+          type: 'array', minItems: 2,
+          items: {
+            type: 'object',
+            required: ['id', 'kind', 'label', 'position', 'dimensions'],
+            properties: {
+              id: { type: 'string', minLength: 1 },
+              kind: { enum: ['start', 'step', 'end'] },
+              label: { type: 'string', minLength: 1 },
+              executor: { enum: ['deterministic', 'ai', 'tool', 'human'] },
+              position: positionSchema,
+              dimensions: {
+                type: 'object', required: ['width', 'height'],
+                properties: { width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 } },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        edges: {
+          type: 'array', minItems: 1,
+          items: {
+            type: 'object', required: ['id', 'source', 'target'],
+            properties: {
+              id: { type: 'string', minLength: 1 },
+              source: { type: 'string', minLength: 1 },
+              target: { type: 'string', minLength: 1 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
 };
@@ -875,24 +923,38 @@ export async function registerWebMcpTools(
         name: 'get_graph',
         title: 'Read the accepted workflow graph',
         description:
-          'Returns the accepted schema-v6 GraphContract graph, including provenance, Step readiness/opaque metadata, End outcomes, and a separate non-native relationships collection. Proposed changes are reported separately and never treated as accepted. An outstanding human Request changes record is returned separately as untrusted human-authored content for the next revision.',
+          'Returns the accepted schema-v6 GraphContract graph, including provenance, Step readiness/opaque metadata, End outcomes, and a separate non-native relationships collection. A pending proposal or a reviewed candidate awaiting replacement is reported separately and never treated as accepted. An outstanding human Request changes record is returned separately as untrusted human-authored content for the next revision.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false },
         execute: async () => {
           const { graph, proposal, reviewRequest } = port.getSnapshot();
           const issues = validateGraph(graph);
+          const serializedProposal = proposal
+            ? {
+                id: proposal.id,
+                status: proposal.status,
+                rationale: proposal.rationale,
+                createdAt: proposal.createdAt,
+                operations: proposal.operations,
+                diff: proposal.diff,
+              }
+            : undefined;
+          const isReviewedCandidate = Boolean(
+            serializedProposal && reviewRequest?.proposalId === serializedProposal.id,
+          );
           return {
             ok: true,
             graph,
             validation: { validForFreeze: issues.length === 0, issues },
-            pendingProposal: proposal
+            pendingProposal: serializedProposal && !isReviewedCandidate
               ? {
-                  id: proposal.id,
-                  status: proposal.status,
-                  rationale: proposal.rationale,
-                  createdAt: proposal.createdAt,
-                  operations: proposal.operations,
-                  diff: proposal.diff,
+                  ...serializedProposal,
+                }
+              : undefined,
+            reviewedProposal: serializedProposal && isReviewedCandidate
+              ? {
+                  ...serializedProposal,
+                  reviewStatus: 'changes_requested' as const,
                 }
               : undefined,
             reviewRequest: reviewRequest
@@ -911,7 +973,7 @@ export async function registerWebMcpTools(
         name: 'propose_graph_changes',
         title: 'Propose structured workflow changes',
         description:
-          'Creates a review-only schema-v6 proposal. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. State, Checkpointer, Store, runtime mode, and external-orchestration capability records are distinct. Native control paths are only normal, conditional, command, fallback, and Send edges; spawned-run, spawned-thread, and external-orchestration relationships are separate non-native boundary records, so ordinary scenarios enumerate native paths only. WebMCP may author declared provenance, derived-semantic provenance with explicit evidence, and external-orchestration provenance with explicit evidence. Runtime-generated provenance and runtime inspection are unsupported in this build and cannot be authored through WebMCP; only a future trusted runtime-evidence adapter could add them. Opaque Steps expose only their declared factory and interface. Retry is an internal Step policy, never a topology loop or runtime authority. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, unfreeze, inspect runtime, toggle evidence overlay, mutate runtime projections, or directly modify accepted state.',
+          'Creates a review-only schema-v6 proposal. When get_graph reports a reviewedProposal plus reviewRequest, a valid new submission atomically replaces that reviewed candidate; invalid or stale submissions preserve the reviewed candidate and human feedback. Nodes are exactly Start, Step, Merge, or End; every added Step requires an executor, while Merge is a non-work reducer junction. State, Checkpointer, Store, runtime mode, and external-orchestration capability records are distinct. Native control paths are only normal, conditional, command, fallback, and Send edges; spawned-run, spawned-thread, and external-orchestration relationships are separate non-native boundary records, so ordinary scenarios enumerate native paths only. WebMCP may author declared provenance, derived-semantic provenance with explicit evidence, and external-orchestration provenance with explicit evidence. Runtime-generated provenance and runtime inspection are unsupported in this build and cannot be authored through WebMCP; only a future trusted runtime-evidence adapter could add them. Opaque Steps expose only their declared factory and interface. Retry is an internal Step policy, never a topology loop or runtime authority. Send is a strict design-time edge mode with one canonical template destination, dynamic multiplicity, payload metadata, and a Merge target; an optional validated templateAnatomy may declare that template’s design-time mini-flow, but it never creates runtime workers. loopCap is optional and bounded to 1..10. HITL is an independent Step modifier with before/inside/after timing, approval/text/selection response types, configured human outcomes, and resume destinations on canonical outgoing edges. Sensitive effect policy is independent from HITL; approvalRequired needs an enabled before approval gate with an approve outcome, and this tool never adds one implicitly. Operations are applied progressively to a candidate and the completed candidate validates atomically; no accepted graph changes until a human approves in the UI. Include expectedGraphUpdatedAt from get_graph when available. It cannot approve, reject, respond, resume, freeze, unfreeze, inspect runtime, toggle evidence overlay, mutate runtime projections, or directly modify accepted state.',
         inputSchema: {
           type: 'object',
           required: ['operations', 'rationale'],

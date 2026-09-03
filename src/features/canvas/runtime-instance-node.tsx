@@ -4,6 +4,7 @@ import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import { EyeIcon, StackIcon } from '@phosphor-icons/react';
 
 import './runtime-instance-node.css';
+import './node-boundary.css';
 
 /** Runtime-only data. This shape intentionally does not include a GraphNode. */
 export type RuntimeInstanceNodeData = {

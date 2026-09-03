@@ -1,0 +1,22 @@
+.github-brand-mark {
+  display: inline-grid;
+  width: var(--github-brand-mark-size, 1rem);
+  height: calc(var(--github-brand-mark-size, 1rem) * 96 / 98);
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.github-brand-mark img {
+  grid-area: 1 / 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.github-brand-mark__white { display: none !important; }
+
+:root[data-theme='dark'] .github-brand-mark__black,
+:root[data-theme='signal'] .github-brand-mark__black { display: none !important; }
+
+:root[data-theme='dark'] .github-brand-mark__white,
+:root[data-theme='signal'] .github-brand-mark__white { display: block !important; }

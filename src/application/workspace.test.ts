@@ -117,7 +117,7 @@ describe('workspace application service', () => {
     expect(approved.state.proposal).toBeNull();
   });
 
-  it('keeps human revision feedback durable until a valid replacement proposal is pending', () => {
+  it('retains the reviewed candidate and feedback until a current valid replacement becomes pending', () => {
     const initial = service.createInitial();
     const acceptedBefore = structuredClone(initial.graph);
     const proposed = service.submitProposal(initial, {
@@ -148,7 +148,25 @@ describe('workspace application service', () => {
       },
     });
     expect(requested.state.graph).toEqual(acceptedBefore);
-    expect(requested.state.proposal).toBeNull();
+    expect(requested.state.proposal).toEqual(proposed.state.proposal);
+    expect(requested.state.proposal).toMatchObject({
+      id: proposed.state.proposal?.id,
+      operations: proposed.state.proposal?.operations,
+      diff: proposed.state.proposal?.diff,
+    });
+    expect(service.approveProposal(requested.state)).toMatchObject({
+      changed: false,
+      state: { proposal: { id: proposed.state.proposal?.id } },
+      result: { ok: false, error: { code: 'PROPOSAL_CHANGES_REQUESTED' } },
+    });
+    expect(service.rejectProposal(requested.state)).toMatchObject({
+      changed: false,
+      state: { proposal: { id: proposed.state.proposal?.id } },
+    });
+    expect(service.requestProposalChanges(requested.state, 'Ask for something else.')).toMatchObject({
+      changed: false,
+      result: { ok: false, error: { code: 'PROPOSAL_CHANGES_ALREADY_REQUESTED' } },
+    });
 
     const stale = service.submitProposal(requested.state, {
       rationale: 'Use a stale read.',
@@ -156,6 +174,7 @@ describe('workspace application service', () => {
       operations: [{ type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } }],
     });
     expect(stale.result).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+    expect(stale.state.proposal).toEqual(proposed.state.proposal);
     expect(stale.state.reviewRequest).toEqual(requested.state.reviewRequest);
 
     const invalid = service.submitProposal(requested.state, {
@@ -163,12 +182,26 @@ describe('workspace application service', () => {
       expectedGraphUpdatedAt: initial.graph.updatedAt,
       operations: [{ type: 'update_node', nodeId: 'missing', patch: { label: 'Missing' } }],
     });
-    expect(invalid.result).toMatchObject({ ok: true, proposal: { status: 'invalid' } });
+    expect(invalid.result).toMatchObject({ ok: false, error: { code: 'PROPOSAL_INVALID' } });
+    expect(invalid.state.proposal).toEqual(proposed.state.proposal);
     expect(invalid.state.reviewRequest).toEqual(requested.state.reviewRequest);
 
-    const clearedInvalid = service.rejectProposal(invalid.state);
-    expect(clearedInvalid.state.reviewRequest).toEqual(requested.state.reviewRequest);
-    const revised = service.submitProposal(clearedInvalid.state, {
+    const acceptedRevisionChanged = service.submitProposal(
+      {
+        ...invalid.state,
+        graph: { ...invalid.state.graph, updatedAt: '2026-09-02T12:00:00.000Z' },
+      },
+      {
+        rationale: 'Attempt to replace against a different accepted revision.',
+        expectedGraphUpdatedAt: '2026-09-02T12:00:00.000Z',
+        operations: [{ type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } }],
+      },
+    );
+    expect(acceptedRevisionChanged.result).toMatchObject({ ok: false, error: { code: 'PROPOSAL_STALE' } });
+    expect(acceptedRevisionChanged.state.proposal).toEqual(proposed.state.proposal);
+    expect(acceptedRevisionChanged.state.reviewRequest).toEqual(requested.state.reviewRequest);
+
+    const revised = service.submitProposal(invalid.state, {
       rationale: 'Document the escalation route without changing its identity.',
       expectedGraphUpdatedAt: initial.graph.updatedAt,
       operations: [{ type: 'update_node', nodeId: 'billing', patch: { description: 'Escalates complex cases.' } }],

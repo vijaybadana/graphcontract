@@ -2,7 +2,9 @@ import type { Page } from '@playwright/test';
 
 import {
   callWebMcpTool,
+  confirmGraphLibraryReplacement,
   expect,
+  loadGraphLibraryEntry,
   test,
 } from './fixtures';
 
@@ -90,14 +92,7 @@ function projectionMode(page: Page, label: 'Design' | 'Runtime' | 'Proposal' | '
 }
 
 async function loadParallelResearchDemo(page: Page) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain(
-      'Replace the current canvas with the Parallel research Send ×N demo?',
-    );
-    await dialog.accept();
-  });
-  await page.getByRole('button', { name: 'Load Parallel research · Send ×N' }).click();
+  await loadGraphLibraryEntry(page, 'Parallel research · Send ×N', 'dynamic-parallelism-merge-demo');
   await expect(page.getByTestId('rf__node-generate-queries')).toBeVisible();
   await expect.poll(async () => (await readGraph(page)).graph.id).toBe(
     'dynamic-parallelism-merge-demo',
@@ -105,16 +100,10 @@ async function loadParallelResearchDemo(page: Page) {
 }
 
 async function loadHierarchicalResearch(page: Page) {
-  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain(
-      'Replace the current canvas with “Hierarchical Deep Research”?',
-    );
-    await dialog.accept();
-  });
   await page.getByRole('button', { name: 'Open Hierarchical Deep Research' }).click();
+  await confirmGraphLibraryReplacement(page, 'Hierarchical Deep Research');
   await expect.poll(async () => (await readGraph(page)).graph.id).toBe(
     'library-hierarchical-deep-research',
   );
@@ -378,12 +367,12 @@ test('V02 — proposal overview reports every change family by stable identity a
   expect(result).toMatchObject({ ok: true, proposal: { status: 'pending' } });
   expect((await readGraph(app)).graph).toEqual(accepted.graph);
 
-  const comparison = app.getByRole('region', { name: 'Before / Proposed' });
+  const comparison = app.getByRole('region', { name: 'Graph overview' });
   await expect(comparison).toBeVisible();
   const overviewCanvases = comparison.locator('.proposal-overview-canvas');
-  await expect(overviewCanvases).toHaveCount(2);
+  await expect(overviewCanvases).toHaveCount(1);
   const summary = comparison.getByLabel('Proposal diff summary');
-  for (const surface of [overviewCanvases.nth(0), overviewCanvases.nth(1), summary]) {
+  for (const surface of [overviewCanvases.nth(0), summary]) {
     await surface.scrollIntoViewIfNeeded();
     await expect(surface).toBeVisible();
     const geometry = await surface.evaluate((element) => {
@@ -508,7 +497,7 @@ test('V03 — changing scenarios highlights exact native paths and preserves col
   await app.getByRole('button', { name: 'Unfreeze contract; currently frozen' }).click();
   const collapseInspector = app.getByRole('button', { name: 'Collapse inspector' });
   if (await collapseInspector.count()) await collapseInspector.click();
-  await app.getByRole('button', { name: 'Collapse subgraph Research cell' }).click();
+  await app.getByRole('button', { name: 'Collapse subgraph Research Supervisor' }).click();
   await app.getByRole('button', {
     name: 'Confirm and freeze contract; currently draft',
   }).click();
@@ -530,7 +519,7 @@ test('V03 — changing scenarios highlights exact native paths and preserves col
   await selectScenario(app, collapsedDirect!);
 
   await expect(
-    app.getByTestId('rf__edge-subgraph-proxy:research-start:research-cell'),
+    app.getByTestId('rf__edge-subgraph-proxy:write-brief:research-cell'),
   ).toHaveClass(/scenario-state--active/);
   await expect(
     app.getByTestId('rf__edge-system-relationship:v03-frame-review-boundary'),

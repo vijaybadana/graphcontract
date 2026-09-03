@@ -1,7 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import type { Download, Page } from '@playwright/test';
 
-import { callWebMcpTool, expect, freezeResearchIntake, test } from './fixtures';
+import {
+  callWebMcpTool,
+  expect,
+  freezeResearchIntake,
+  loadGraphLibraryEntry,
+  loadResearchIntake,
+  test,
+} from './fixtures';
 
 type GraphRead = {
   ok: true;
@@ -15,7 +22,7 @@ type GraphRead = {
 
 type ScenarioRead = {
   ok: true;
-  scenarios: Array<{ id: string; name: string }>;
+  scenarios: Array<{ id: string; name: string; orderedPath: string[] }>;
 };
 
 async function readGraph(page: Page) {
@@ -23,23 +30,11 @@ async function readGraph(page: Page) {
 }
 
 async function loadHumanControlDemo(page: Page) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with the Human Control & HITL demo?');
-    await dialog.accept();
-  });
-  await page.getByRole('button', { name: 'Load Human Control & HITL demo' }).click();
-  await expect.poll(async () => (await readGraph(page)).id).toBe('human-control-hitl-demo');
+  await loadGraphLibraryEntry(page, 'Human Control & HITL', 'human-control-hitl-demo');
 }
 
 async function loadParallelResearchDemo(page: Page) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with the Parallel research Send ×N demo?');
-    await dialog.accept();
-  });
-  await page.getByRole('button', { name: 'Load Parallel research · Send ×N' }).click();
-  await expect.poll(async () => (await readGraph(page)).id).toBe('dynamic-parallelism-merge-demo');
+  await loadGraphLibraryEntry(page, 'Parallel research · Send ×N', 'dynamic-parallelism-merge-demo');
 }
 
 async function consumeDownload(page: Page, filename: string) {
@@ -56,6 +51,149 @@ async function consumeDownload(page: Page, filename: string) {
     text: string;
   };
 }
+
+async function expectFitInsideOpenDesktopRails(page: Page, nodeIds?: readonly string[]) {
+  await expect.poll(async () => page.evaluate((requestedNodeIds) => {
+    const palette = document.querySelector<HTMLElement>('.workspace-palette-slot');
+    const inspector = document.querySelector<HTMLElement>('.workspace-inspector-panel');
+    const left = palette ? palette.getBoundingClientRect().right + 8 : 8;
+    const right = inspector ? inspector.getBoundingClientRect().left - 8 : window.innerWidth - 8;
+    const candidates = requestedNodeIds?.length
+      ? requestedNodeIds.map((id) => document.querySelector<HTMLElement>(`[data-testid="rf__node-${id}"]`))
+          .filter((node): node is HTMLElement => Boolean(node))
+      : [...document.querySelectorAll<HTMLElement>('.react-flow__node')];
+    const nodes = candidates
+      .filter((node) => node.offsetParent !== null && !node.classList.contains('react-flow__node-subgraph'));
+    return nodes.length > 0 && nodes.every((node) => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= left - 1 && rect.right <= right + 1;
+    });
+  }, nodeIds ? [...nodeIds] : undefined), { timeout: 10_000 }).toBe(true);
+}
+
+async function expectEdgeLabelOnPath(page: Page, edgeId: string) {
+  const distance = await page.locator(`[data-edge-id="${edgeId}"]`).evaluate((label, id) => {
+    const path = document.querySelector<SVGPathElement>(
+      `[data-testid="rf__edge-${id}"] .routing-edge__path`,
+    );
+    if (!path) throw new Error(`Missing route path for ${id}`);
+    const rect = label.getBoundingClientRect();
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const matrix = path.getScreenCTM();
+    if (!matrix) throw new Error(`Missing route transform for ${id}`);
+    const length = path.getTotalLength();
+    let closest = Number.POSITIVE_INFINITY;
+    for (let index = 0; index <= 240; index += 1) {
+      const point = path.getPointAtLength((length * index) / 240);
+      const x = point.x * matrix.a + point.y * matrix.c + matrix.e;
+      const y = point.x * matrix.b + point.y * matrix.d + matrix.f;
+      closest = Math.min(closest, Math.hypot(center.x - x, center.y - y));
+    }
+    return closest;
+  }, edgeId);
+  expect(distance).toBeLessThan(2.5);
+}
+
+test('manual Fit encloses the graph inside whichever desktop side rails are open', async ({ app }) => {
+  await app.setViewportSize({ width: 1440, height: 900 });
+  await loadGraphLibraryEntry(app, 'Hierarchical Deep Research', 'library-hierarchical-deep-research');
+
+  await app.getByRole('button', { name: 'Show inspector' }).click();
+  await expect(app.getByRole('button', { name: 'Collapse inspector' })).toBeVisible();
+  await app.getByRole('button', { name: 'Fit graph' }).click();
+  await expectFitInsideOpenDesktopRails(app);
+  await expectEdgeLabelOnPath(app, 'merge-supervisor');
+
+  await app.getByRole('button', { name: 'Collapse inspector' }).click();
+  await app.getByRole('button', { name: 'Fit graph' }).click();
+  await expectFitInsideOpenDesktopRails(app);
+
+  await app.getByRole('button', { name: 'Open Inspector' }).click();
+  await app.getByRole('button', { name: 'Collapse node palette' }).click();
+  await app.getByRole('button', { name: 'Fit graph' }).click();
+  await expectFitInsideOpenDesktopRails(app);
+});
+
+test('node and edge hover feedback stays visible without changing route patterns', async ({ app }) => {
+  await app.emulateMedia({ reducedMotion: 'no-preference' });
+  await app.setViewportSize({ width: 1440, height: 900 });
+  await loadResearchIntake(app);
+
+  const node = app.getByTestId('rf__node-clarify-request');
+  const shell = node.locator('.contract-node-shell');
+  const restingShadow = await shell.evaluate((element) => getComputedStyle(element).boxShadow);
+  await node.hover();
+  await expect.poll(() => shell.evaluate((element) => {
+    const transform = new DOMMatrixReadOnly(getComputedStyle(element).transform);
+    return { scale: transform.a, lift: transform.f };
+  })).toEqual({ scale: 1.01, lift: -1 });
+  expect(await shell.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe(restingShadow);
+
+  const edge = app.getByTestId('rf__edge-clarify-write-brief');
+  const interactionPath = edge.locator('.react-flow__edge-interaction');
+  const visiblePath = edge.locator('.routing-edge__path');
+  const hoverHalo = edge.locator('.routing-edge__hover-halo');
+  const dashPattern = await visiblePath.evaluate((element) => getComputedStyle(element).strokeDasharray);
+  const midpoint = await interactionPath.evaluate((element) => {
+    const path = element as SVGPathElement;
+    const point = path.getPointAtLength(path.getTotalLength() / 2);
+    const matrix = path.getScreenCTM();
+    if (!matrix) throw new Error('Edge interaction path has no screen transform');
+    return {
+      x: point.x * matrix.a + point.y * matrix.c + matrix.e,
+      y: point.x * matrix.b + point.y * matrix.d + matrix.f,
+    };
+  });
+  await app.mouse.move(midpoint.x, midpoint.y);
+  await expect.poll(() => hoverHalo.evaluate((element) => Number(getComputedStyle(element).opacity)))
+    .toBeGreaterThan(0.8);
+  await expect(hoverHalo).toHaveAttribute('vector-effect', 'non-scaling-stroke');
+  await expect.poll(() => visiblePath.evaluate((element) => Number.parseFloat(getComputedStyle(element).strokeWidth)))
+    .toBeGreaterThanOrEqual(2.35);
+  expect(await visiblePath.evaluate((element) => getComputedStyle(element).strokeDasharray))
+    .toBe(dashPattern);
+
+  // Regression: panel changes followed by Fit View can zoom the graph far
+  // enough that graph-space hover affordances become imperceptible.
+  const hideInventory = app.getByRole('button', { name: 'Hide inventory' });
+  if (await hideInventory.isVisible()) await hideInventory.click();
+  const hideInspector = app.getByRole('button', { name: 'Hide inspector' });
+  if (await hideInspector.isVisible()) await hideInspector.click();
+  await app.getByRole('button', { name: 'Fit graph' }).click();
+  await expect.poll(() => app.locator('.react-flow__viewport').evaluate((element) => {
+    const transform = new DOMMatrixReadOnly(getComputedStyle(element).transform);
+    return transform.a;
+  })).toBeLessThan(0.9);
+
+  // Fit animates the viewport independently from the node shell. Hover only
+  // after that camera motion has settled so the pointer cannot chase a moving
+  // React Flow wrapper and leave the shell between animation frames.
+  await app.waitForTimeout(250);
+  await shell.hover();
+  await expect.poll(() => shell.evaluate((element) => {
+    const transform = new DOMMatrixReadOnly(getComputedStyle(element).transform);
+    return { scale: transform.a, lift: transform.f };
+  })).toEqual({ scale: 1.01, lift: -1 });
+
+  const fittedMidpoint = await interactionPath.evaluate((element) => {
+    const path = element as SVGPathElement;
+    const point = path.getPointAtLength(path.getTotalLength() / 2);
+    const matrix = path.getScreenCTM();
+    if (!matrix) throw new Error('Edge interaction path has no screen transform');
+    return {
+      x: point.x * matrix.a + point.y * matrix.c + matrix.e,
+      y: point.x * matrix.b + point.y * matrix.d + matrix.f,
+    };
+  });
+  await app.mouse.move(fittedMidpoint.x, fittedMidpoint.y);
+  await expect.poll(() => hoverHalo.evaluate((element) => Number(getComputedStyle(element).opacity)))
+    .toBeGreaterThan(0.8);
+
+  await app.mouse.click(fittedMidpoint.x, fittedMidpoint.y);
+  await expect(edge).toHaveClass(/selected/);
+  await expect(edge.locator('.routing-edge__selection-halo'))
+    .toHaveAttribute('vector-effect', 'non-scaling-stroke');
+});
 
 test('repeated mode, viewport, panel, and selection controls preserve accepted truth and history', async ({ app }) => {
   await app.setViewportSize({ width: 1440, height: 900 });
@@ -91,7 +229,7 @@ test('repeated mode, viewport, panel, and selection controls preserve accepted t
 
     const selectionId = index % 2 === 0 ? 'generate-queries' : 'merge-evidence';
     await app.getByTestId(`rf__node-${selectionId}`).click();
-    await expect(app.getByLabel('Graph status')).toContainText('1 selected');
+    await expect(app.getByTestId(`rf__node-${selectionId}`)).toHaveClass(/selected/);
   }
 
   expect(await readGraph(app)).toEqual(accepted);
@@ -103,7 +241,7 @@ test('repeated mode, viewport, panel, and selection controls preserve accepted t
 });
 
 test('portal dialogs establish focus and restore it to their invoking controls', async ({ app }) => {
-  const libraryTrigger = app.getByRole('button', { name: 'Workflow library, 10 templates' });
+  const libraryTrigger = app.getByRole('button', { name: 'Workflow library, 14 templates' });
   await libraryTrigger.focus();
   await libraryTrigger.press('Enter');
   const libraryDialog = app.getByRole('dialog', { name: 'Graph library' });
@@ -138,60 +276,27 @@ test('portal dialogs establish focus and restore it to their invoking controls',
   await expect(previewTrigger).toBeFocused();
 });
 
-test('repeated per-case and all-case downloads remain valid without stale Blob URLs', async ({ app }) => {
+test('scenario accordions and repeated compact downloads remain valid without stale Blob URLs', async ({ app }) => {
   test.setTimeout(120_000);
   await freezeResearchIntake(app);
-  await app.getByRole('tab', { name: 'Scenarios (5)' }).click();
+  await app.getByRole('radio', { name: 'Scenario', exact: true }).click();
   const scenarioRead = await callWebMcpTool<ScenarioRead>(app, 'get_branch_scenarios', {});
   expect(scenarioRead.scenarios.length).toBeGreaterThan(1);
   const firstScenario = scenarioRead.scenarios[0];
   const secondScenario = scenarioRead.scenarios[1];
-  await app.locator(`button[data-scenario-id="${firstScenario.id}"]`).click();
+  const firstRow = app.locator(`button[data-scenario-id="${firstScenario.id}"]`);
+  const secondRow = app.locator(`button[data-scenario-id="${secondScenario.id}"]`);
+  await firstRow.click();
+  await expect(firstRow).toHaveAttribute('aria-expanded', 'true');
+  await expectFitInsideOpenDesktopRails(app, firstScenario.orderedPath);
+  await expect(firstRow.locator('.mode-path-strip.is-expanded')).toBeVisible();
+  await expect(firstRow.locator('.mode-path-strip__overflow')).toHaveCount(0);
+  await expect(firstRow.locator('.mode-path-strip__node')).toHaveCount(firstScenario.orderedPath.length);
 
-  const firstCaseFilenames = [
-    `graph-test-${firstScenario.id}.json`,
-    `test_graph_path_${firstScenario.id.replaceAll('-', '_')}.py`,
-  ];
-  const firstCaseArtifacts = [] as Array<{ href: string; text: string }>;
-  for (const filename of firstCaseFilenames) {
-    const link = app.getByRole('link', { name: `Download ${filename}` });
-    await expect(link).toHaveAttribute('href', /^blob:/);
-    const href = await link.getAttribute('href');
-    expect(href).toBeTruthy();
-    const artifact = await consumeDownload(app, filename);
-    firstCaseArtifacts.push({ href: href!, text: artifact.text });
-  }
-
-  await app.evaluate(() => {
-    const observedWindow = window as Window & { __revokedGraphContractBlobUrls?: string[] };
-    observedWindow.__revokedGraphContractBlobUrls = [];
-    const revokeObjectURL = URL.revokeObjectURL.bind(URL);
-    URL.revokeObjectURL = (url: string) => {
-      observedWindow.__revokedGraphContractBlobUrls!.push(url);
-      revokeObjectURL(url);
-    };
-  });
-  await app.locator(`button[data-scenario-id="${secondScenario.id}"]`).click();
-  await expect(app.getByLabel(`Selected scenario: ${secondScenario.name}`)).toBeVisible();
-  await expect.poll(
-    () => app.evaluate(
-      () => (window as Window & { __revokedGraphContractBlobUrls?: string[] })
-        .__revokedGraphContractBlobUrls ?? [],
-    ),
-    { timeout: 8_000, intervals: [100, 250, 500] },
-  ).toEqual(expect.arrayContaining(firstCaseArtifacts.map((artifact) => artifact.href)));
-
-  const secondCaseFilenames = [
-    `graph-test-${secondScenario.id}.json`,
-    `test_graph_path_${secondScenario.id.replaceAll('-', '_')}.py`,
-  ];
-  for (const [index, filename] of secondCaseFilenames.entries()) {
-    const link = app.getByRole('link', { name: `Download ${filename}` });
-    await expect(link).toHaveAttribute('href', /^blob:/);
-    const artifact = await consumeDownload(app, filename);
-    expect(artifact.text).not.toBe(firstCaseArtifacts[index]!.text);
-    expect(artifact.text.length).toBeGreaterThan(40);
-  }
+  await secondRow.click();
+  await expect(firstRow).toHaveAttribute('aria-expanded', 'false');
+  await expect(secondRow).toHaveAttribute('aria-expanded', 'true');
+  await expect(app.locator('.scenario-row__expanded')).toHaveCount(1);
 
   const globalFilenames = [
     'graph-contract.json',

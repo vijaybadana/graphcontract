@@ -1,6 +1,7 @@
 import {
   callWebMcpTool,
   expect,
+  loadGraphLibraryEntry,
   test,
   webMcpToolMetadata,
   webMcpToolNames,
@@ -69,12 +70,7 @@ type ScenarioResult = {
 };
 
 async function loadParallelResearchDemo(app: Parameters<typeof callWebMcpTool>[0]) {
-  app.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with the Parallel research Send ×N demo?');
-    await dialog.accept();
-  });
-  await app.getByRole('button', { name: 'Load Parallel research · Send ×N' }).click();
+  await loadGraphLibraryEntry(app, 'Parallel research · Send ×N', 'dynamic-parallelism-merge-demo');
   await expect(app.getByTestId('rf__node-generate-queries')).toBeVisible();
   await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph.id).toBe(
     'dynamic-parallelism-merge-demo',
@@ -217,7 +213,8 @@ test('Design, Runtime, Proposal, and Scenario remain read-only presentations ove
   await expect(mode('Runtime')).toBeEnabled();
   await mode('Runtime').click();
   await expect(mode('Runtime')).toHaveAttribute('aria-checked', 'true');
-  await expect(app.getByText('Runtime projection · observed instances are read-only and do not change the contract')).toBeVisible();
+  await expect(app.getByText(/Runtime projection is read-only/)).toBeVisible();
+  await expect(app.locator('.canvas-instruction-strip')).toHaveCount(0);
   await expect(app.locator('.runtime-instance-node')).toHaveCount(3);
   await expect(app.locator('.runtime-instance-node[data-template-node-id="search-evidence"]')).toHaveCount(3);
   await expect(app.getByText('Search evidence · query 1', { exact: true })).toBeVisible();

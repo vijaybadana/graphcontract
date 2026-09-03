@@ -2,13 +2,36 @@
   width: 100%;
   height: 100dvh;
   overflow: hidden;
-  background: #f7f8f6;
-  color: #17211c;
+  background: var(--gc-app-bg);
+  color: var(--gc-ink);
+}
+
+.workspace-loading {
+  background: var(--gc-app-bg);
+  color: var(--gc-ink);
+}
+
+.workspace-loading__mark {
+  background: var(--gc-primary);
+  color: var(--gc-on-primary);
 }
 
 .workspace-stage {
   --palette-width: 232px;
   --inspector-width: 344px;
+  --workspace-edge-gutter: 16px;
+  --workspace-column-gutter: 12px;
+  --workspace-header-height: 52px;
+  /*
+   * Header and capability geometry stays anchored to the authored rail widths.
+   * Collapsing a rail only changes the usable canvas inset; it must not resize
+   * or recenter the persistent workspace chrome.
+   */
+  --workspace-left-track: var(--palette-width);
+  --workspace-right-track: var(--inspector-width);
+  --workspace-rail-top: calc(
+    var(--workspace-edge-gutter) + var(--workspace-header-height) + var(--workspace-column-gutter)
+  );
   --palette-offset: 0px;
   --inspector-offset: 0px;
   position: relative;
@@ -32,11 +55,15 @@
   min-width: 0;
 }
 
+.workspace-stage .react-flow__node.draggable:active {
+  cursor: grabbing;
+}
+
 .workspace-palette-slot {
   position: absolute;
-  top: 82px;
-  bottom: 16px;
-  left: 16px;
+  top: var(--workspace-rail-top);
+  bottom: var(--workspace-edge-gutter);
+  left: var(--workspace-edge-gutter);
   z-index: 35;
   width: min(var(--palette-width), calc(100vw - 32px));
 }
@@ -53,56 +80,23 @@
 
 .workspace-inspector-panel {
   position: absolute;
-  top: 82px;
-  right: 16px;
-  bottom: 16px;
+  top: var(--workspace-rail-top);
+  right: var(--workspace-edge-gutter);
+  bottom: var(--workspace-edge-gutter);
   z-index: 35;
   display: flex;
   width: min(var(--inspector-width), calc(100vw - 32px));
   min-height: 0;
   flex-direction: column;
-  overflow: visible;
-  padding: 10px;
-  animation: workspace-panel-in 180ms cubic-bezier(0.16, 0.84, 0.44, 1);
-}
-
-.workspace-inspector-tabs {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 3px;
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 1px solid rgb(17 24 39 / 8%);
-  border-radius: 10px;
-  background: #f3f5f2;
-  padding: 3px;
-}
-
-.workspace-inspector-tab {
   overflow: hidden;
-  border-radius: 7px;
-  padding: 7px 8px;
-  color: rgb(17 24 39 / 64%);
-  font-size: 10px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-inspector-tab.is-active {
-  border: 1px solid rgb(17 24 39 / 8%);
-  background: white;
-  box-shadow: 0 2px 7px rgb(17 24 39 / 7%);
-  color: #17211c;
+  padding: 0;
+  animation: workspace-panel-in 180ms cubic-bezier(0.16, 0.84, 0.44, 1);
 }
 
 .workspace-inspector-content {
   min-height: 0;
   flex: 1 1 auto;
-  margin-top: 9px;
-  overflow-y: auto;
-  padding-right: 2px;
-  scrollbar-width: thin;
+  overflow: hidden;
 }
 
 .panel-trigger-left,
@@ -118,24 +112,25 @@
   bottom: 16px !important;
   overflow: hidden;
   flex-direction: row;
-  border: 1px solid rgb(17 24 39 / 11%);
+  border: 1px solid color-mix(in srgb, var(--gc-ink) 11%, transparent);
   border-radius: 10px;
-  background: white;
-  box-shadow: 0 5px 18px rgb(35 43 39 / 8%);
+  background: var(--gc-surface);
+  box-shadow: none;
   transition: right 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .workspace-stage .canvas-flow-controls .react-flow__controls-button {
   width: 34px;
   height: 34px;
-  border-right: 1px solid rgb(17 24 39 / 8%);
+  border-right: 1px solid color-mix(in srgb, var(--gc-ink) 8%, transparent);
   border-bottom: 0;
-  color: rgb(17 24 39 / 60%);
+  color: color-mix(in srgb, var(--gc-ink) 60%, transparent);
+  background: var(--gc-surface);
 }
 
 .workspace-stage .canvas-flow-controls .react-flow__controls-button:hover {
-  background: #f4f6f3;
-  color: #17211c;
+  background: var(--gc-surface-hover);
+  color: var(--gc-ink);
 }
 
 .workspace-stage .canvas-flow-controls .react-flow__controls-button:last-child {
@@ -150,28 +145,28 @@
   z-index: 44;
   transform: translateX(-50%);
   border-radius: 999px;
-  box-shadow: 0 10px 24px rgb(35 43 39 / 12%);
+  box-shadow: none;
   font-size: 9px;
   font-weight: 720;
   white-space: nowrap;
 }
 
-.workspace-evidence-legend { position: absolute; top: 128px; right: calc(var(--inspector-offset) + 16px); z-index: 31; width: min(246px, calc(100vw - var(--palette-offset) - var(--inspector-offset) - 32px)); border: 1px solid rgb(37 99 235 / 24%); border-radius: 10px; background: rgb(255 255 255 / 97%); box-shadow: 0 5px 18px rgb(35 43 39 / 9%); padding: 8px 9px; color: #334155; }
-.workspace-evidence-legend strong { display: block; color: #17211c; font-size: 10px; font-weight: 800; }
-.workspace-evidence-legend > span { display: block; margin-top: 3px; color: #64748b; font-size: 9px; line-height: 1.35; }
+.workspace-evidence-legend { position: absolute; top: 128px; right: calc(var(--inspector-offset) + 16px); z-index: 31; width: min(246px, calc(100vw - var(--palette-offset) - var(--inspector-offset) - 32px)); border: 1px solid color-mix(in srgb, var(--gc-focus) 24%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--gc-surface) 97%, transparent); box-shadow: none; padding: 8px 9px; color: var(--gc-ink-muted); }
+.workspace-evidence-legend strong { display: block; color: var(--gc-ink); font-size: 10px; font-weight: 800; }
+.workspace-evidence-legend > span { display: block; margin-top: 3px; color: var(--gc-ink-subtle); font-size: 9px; line-height: 1.35; }
 .workspace-evidence-legend ul { display: flex; flex-wrap: wrap; gap: 4px; margin: 7px 0 0; padding: 0; list-style: none; }
 .workspace-evidence-legend li { border: 1px solid currentColor; border-radius: 999px; padding: 3px 5px; font-size: 8px; font-weight: 760; }
-.workspace-evidence-legend li[data-provenance='declared'] { color: #475569; }
-.workspace-evidence-legend li[data-provenance='runtime-generated'] { border-style: dotted; color: #2563eb; }
-.workspace-evidence-legend li[data-provenance='derived-semantic'] { border-style: dashed; color: #6d28d9; }
-.workspace-evidence-legend li[data-provenance='external-orchestration'] { border-style: dashed; color: #4b5563; }
+.workspace-evidence-legend li[data-provenance='declared'] { color: var(--gc-ink-muted); }
+.workspace-evidence-legend li[data-provenance='runtime-generated'] { border-style: dotted; color: var(--gc-focus); }
+.workspace-evidence-legend li[data-provenance='derived-semantic'] { border-style: dashed; color: var(--gc-purple); }
+.workspace-evidence-legend li[data-provenance='external-orchestration'] { border-style: dashed; color: var(--gc-ink-muted); }
 
 .workspace-notice {
   top: 78px;
-  border: 1px solid rgb(17 24 39 / 10%);
-  background: #17211c;
+  border: 1px solid color-mix(in srgb, var(--gc-ink) 10%, transparent);
+  background: var(--gc-primary);
   padding: 8px 12px;
-  color: white;
+  color: var(--gc-on-primary);
 }
 
 .workspace-proposal-banner,
@@ -181,14 +176,14 @@
 }
 
 .workspace-proposal-banner {
-  border: 1px solid #f5cf73;
-  background: #fff8dd;
-  color: #75420a;
+  border: 1px solid color-mix(in srgb, var(--gc-warning) 40%, transparent);
+  background: var(--gc-warning-soft);
+  color: var(--gc-warning-ink);
 }
 
 .workspace-frozen-banner {
-  background: #17211c;
-  color: white;
+  background: var(--gc-primary);
+  color: var(--gc-on-primary);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -200,6 +195,8 @@
 
 @media (max-width: 1099px) {
   .workspace-stage {
+    --workspace-edge-gutter: 10px;
+    --workspace-column-gutter: 7px;
     --palette-width: min(232px, calc(100vw - 20px));
     --inspector-width: min(344px, calc(100vw - 20px));
     --palette-offset: 0px !important;

@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe('ProposalPanel overview', () => {
-  it('shows a read-only Before/Proposed comparison and applies changes only after human approval', () => {
+  it('shows a compact read-only proposal comparison and applies changes only after human approval', () => {
     const { graph, proposal } = labelProposal();
     const acceptedBefore = structuredClone(graph);
     const onApprove = vi.fn();
@@ -48,21 +48,16 @@ describe('ProposalPanel overview', () => {
 
     render(<ProposalPanel proposal={proposal} review={review} reviewRequest={null} onApprove={onApprove} onRequestChanges={vi.fn()} onReject={vi.fn()} />);
 
-    expect(screen.getByRole('heading', { name: 'Before / Proposed' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Before' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Proposed' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Proposal' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Graph overview' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Changes' })).toBeTruthy();
     expect(screen.getByLabelText('Proposal diff summary').textContent).toContain(
-      'Nodesupdated clarify-request (label)',
+      'clarify-requestNodes · updated clarify-request (label)',
     );
-    expect(screen.getByLabelText('Changed values for clarify-request').textContent).toContain(
-      'Before: Clarify Request',
-    );
-    expect(screen.getByLabelText('Changed values for clarify-request').textContent).toContain(
-      'Proposed: Clarify Research Request',
-    );
+    expect(screen.getByRole('button', { name: 'Review updated clarify-request' })).toBeTruthy();
     expect(screen.getByText(proposal.rationale)).toBeTruthy();
     expect(screen.queryByText('Wrong raw replay label')).toBeNull();
-    expect(screen.getByText('Clarify Research Request')).toBeTruthy();
+    expect(screen.getAllByText('Clarify Research Request')).toHaveLength(1);
     expect(graph).toEqual(acceptedBefore);
 
     const approve = screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement;
@@ -72,6 +67,73 @@ describe('ProposalPanel overview', () => {
     expect(onApprove).toHaveBeenCalledOnce();
     expect(graph).toEqual(acceptedBefore);
   }, 30_000);
+
+  it('opens an ordered change detail, presents Before to After, and restores row focus on Back', async () => {
+    const { graph, proposal } = labelProposal();
+    proposal.operations.push({
+      type: 'update_node',
+      nodeId: 'researcher',
+      patch: { label: 'Research account' },
+    });
+    const onEntrySelect = vi.fn();
+    render(
+      <ProposalPanel
+        proposal={proposal}
+        review={deriveProposalComparison(graph, proposal)}
+        reviewRequest={null}
+        onApprove={vi.fn()}
+        onRequestChanges={vi.fn()}
+        onReject={vi.fn()}
+        onEntrySelect={onEntrySelect}
+      />,
+    );
+
+    const firstChange = screen.getByRole('button', { name: 'Review updated clarify-request' });
+    fireEvent.click(firstChange);
+
+    expect(screen.getByRole('heading', { name: 'clarify-request' })).toBeTruthy();
+    expect(screen.getByText('Change 1 of 2')).toBeTruthy();
+    expect(screen.getByLabelText('Before: Clarify Request. After: Clarify Research Request')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(onEntrySelect).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'nodes:clarify-request' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next change' }));
+    expect(screen.getByRole('heading', { name: 'researcher' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Next change' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Previous change' }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to proposal' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Graph overview' })).toBeTruthy());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Review updated researcher' })));
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy();
+  });
+
+  it('turns a locatable validation issue into the same focused proposal detail', () => {
+    const { graph, proposal } = labelProposal();
+    proposal.status = 'invalid';
+    proposal.validationErrors = [{
+      code: 'NODE_REVIEW_REQUIRED',
+      message: 'Clarify request needs a review owner.',
+      path: 'nodes.clarify-request.owner',
+    }];
+    const onEntrySelect = vi.fn();
+    render(
+      <ProposalPanel
+        proposal={proposal}
+        review={deriveProposalComparison(graph, proposal)}
+        reviewRequest={null}
+        onApprove={vi.fn()}
+        onRequestChanges={vi.fn()}
+        onReject={vi.fn()}
+        onEntrySelect={onEntrySelect}
+      />,
+    );
+
+    const issue = screen.getByRole('button', { name: /Clarify request needs a review owner/i });
+    fireEvent.click(issue);
+    expect(screen.getByRole('heading', { name: 'clarify-request' })).toBeTruthy();
+    expect(onEntrySelect).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'nodes:clarify-request' }));
+  });
 
   it('reports net-zero progressive operations as no effective graph changes', () => {
     const graph = structuredClone(researchIntakeRoutingGraph);
@@ -195,5 +257,35 @@ describe('ProposalPanel overview', () => {
 
     expect(screen.getByText(feedback)).toBeTruthy();
     expect(document.querySelector('img')).toBeNull();
+  });
+
+  it('keeps the reviewed candidate visible and makes its completed review actions read-only', () => {
+    const { graph, proposal } = labelProposal();
+    const feedback = 'Keep the existing name and clarify the technical route.';
+    render(
+      <ProposalPanel
+        proposal={proposal}
+        review={deriveProposalComparison(graph, proposal)}
+        reviewRequest={{
+          status: 'changes_requested',
+          feedback,
+          proposalId: proposal.id,
+          proposalCreatedAt: proposal.createdAt,
+          reviewedGraphId: graph.id,
+          reviewedGraphUpdatedAt: graph.updatedAt,
+          reviewedAt: '2026-09-01T10:00:00.000Z',
+        }}
+        onApprove={vi.fn()}
+        onRequestChanges={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('Changes requested').length).toBeGreaterThan(0);
+    expect(screen.getByText(feedback)).toBeTruthy();
+    expect(screen.getByText(proposal.rationale)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Request changes' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Reject' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

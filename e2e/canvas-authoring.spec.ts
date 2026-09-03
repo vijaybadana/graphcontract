@@ -25,10 +25,10 @@ test('dragging every work palette preset onto the canvas creates canonical Steps
 
   for (const [index, preset] of (
     [
+      { name: 'Task', executor: 'deterministic' },
       { name: 'Agent', executor: 'ai' },
-      { name: 'Action', executor: 'deterministic' },
       { name: 'Tool', executor: 'tool' },
-      { name: 'Human review', executor: 'human' },
+      { name: 'Human', executor: 'human' },
     ] as const
   ).entries()) {
     const before = await readGraph(app);
@@ -50,7 +50,6 @@ test('shift-click creates a multi-selection and exposes its aggregate state', as
   await app.getByTestId('rf__node-billing').click({ modifiers: ['Shift'] });
 
   await expect(app.getByRole('status').filter({ hasText: '2 elements selected' })).toBeVisible();
-  await expect(app.getByText('2 selected', { exact: true })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Duplicate selection' }).first()).toBeEnabled();
 });
 

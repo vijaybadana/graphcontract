@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 
 import {
   callWebMcpTool,
+  confirmGraphLibraryReplacement,
   expect,
   test,
   webMcpToolNames,
@@ -33,6 +34,10 @@ type ScenarioRead = {
 };
 
 const entries = [
+  ['Research Supervisor', 'vijaybadana/graphcontract'],
+  ['Research Intake Routing', 'vijaybadana/graphcontract'],
+  ['Human Control & HITL', 'vijaybadana/graphcontract'],
+  ['Parallel research · Send ×N', 'vijaybadana/graphcontract'],
   ['Hierarchical Deep Research', 'langchain-ai/open_deep_research'],
   ['Guarded Coding-Agent Delivery', 'langchain-ai/open-swe'],
   ['Evidence-to-Approved Social Content', 'CopilotKit/open-fullstack-social-media-agent'],
@@ -50,24 +55,21 @@ async function readGraph(page: Page) {
 }
 
 async function openLibrary(page: Page) {
-  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
 async function openEntry(page: Page, title: string) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain(`Replace the current canvas with “${title}”?`);
-    await dialog.accept();
-  });
   await page.getByRole('button', { name: `Open ${title}` }).click();
+  await confirmGraphLibraryReplacement(page, title);
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }
 
-test('Graph Library exposes all ten normalized templates through search, domain and concept filters', async ({ app }) => {
+test('Graph Library exposes all fourteen normalized templates through search, domain and concept filters', async ({ app }) => {
   await openLibrary(app);
-  await expect(app.getByText('10 graph templates, normalized into editable GraphContract workflows.')).toBeVisible();
-  await expect(app.getByText('Showing 10 of 10 templates', { exact: true })).toBeVisible();
+  await expect(app.getByText('Workflow templates', { exact: true })).toHaveCount(0);
+  await expect(app.getByRole('dialog').locator('.graph-library-sheet__toolbar').getByText('Graph library', { exact: true })).toHaveCount(0);
+  await expect(app.getByText('Showing 14 of 14 templates', { exact: true })).toHaveClass(/sr-only/);
   expect(await webMcpToolNames(app)).toEqual([
     'get_branch_scenarios',
     'get_graph',
@@ -75,32 +77,34 @@ test('Graph Library exposes all ten normalized templates through search, domain 
   ]);
 
   for (const [title, source] of entries) {
-    await expect(app.getByRole('button', { name: `Open ${title}` })).toBeVisible();
-    await expect(app.getByRole('link', { name: `Open Inspired by ${source} on GitHub` })).toBeVisible();
+    const card = app.getByRole('button', { name: `Open ${title}` }).locator('..');
+    await expect(card).toBeVisible();
+    await expect(card.getByRole('link', { name: `Open ${source} on GitHub` })).toBeVisible();
   }
-  await expect(app.getByText('Normalized — no source code copied', { exact: true })).toHaveCount(10);
+  await expect(app.getByText('Normalized — no source code copied', { exact: true })).toHaveCount(0);
+  await expect(app.getByText('Open graph', { exact: true })).toHaveCount(0);
 
   const search = app.getByRole('searchbox', { name: 'Search graph library' });
   await search.fill('OpsCanvas');
-  await expect(app.getByText('Showing 1 of 10 templates', { exact: true })).toBeVisible();
+  await expect(app.getByText('Showing 1 of 14 templates', { exact: true })).toHaveClass(/sr-only/);
   await expect(app.getByRole('button', { name: 'Open Human-Approved Incident Response' })).toBeVisible();
 
   await search.fill('');
   await app.getByRole('button', { name: 'research', exact: true }).click();
-  await expect(app.getByText('Showing 2 of 10 templates', { exact: true })).toBeVisible();
+  await expect(app.getByText('Showing 5 of 14 templates', { exact: true })).toHaveClass(/sr-only/);
   await app.getByRole('button', { name: 'merge', exact: true }).click();
-  await expect(app.getByText('Showing 1 of 10 templates', { exact: true })).toBeVisible();
+  await expect(app.getByText('Showing 3 of 14 templates', { exact: true })).toHaveClass(/sr-only/);
   await expect(app.getByRole('button', { name: 'Open Parallel Research with Reflection' })).toBeVisible();
 
   await search.fill('not-a-library-template');
   await expect(app.getByRole('heading', { name: 'No matching templates' })).toBeVisible();
   await expect(app.getByText('Your existing graph remains unchanged while browsing.')).toBeVisible();
   await app.getByRole('button', { name: 'Clear search and filters' }).click();
-  await expect(app.getByText('Showing 10 of 10 templates', { exact: true })).toBeVisible();
+  await expect(app.getByText('Showing 14 of 14 templates', { exact: true })).toHaveClass(/sr-only/);
 });
 
 test('Graph Library keeps keyboard focus, closes accessibly, and isolates GitHub source links', async ({ app }) => {
-  const trigger = app.getByRole('button', { name: 'Workflow library, 10 templates' });
+  const trigger = app.getByRole('button', { name: 'Workflow library, 14 templates' });
   await trigger.focus();
   await trigger.press('Enter');
   const search = app.getByRole('searchbox', { name: 'Search graph library' });
@@ -112,7 +116,7 @@ test('Graph Library keeps keyboard focus, closes accessibly, and isolates GitHub
   const before = await readGraph(app);
   await openLibrary(app);
   const source = app.getByRole('link', {
-    name: 'Open Inspired by langchain-ai/open_deep_research on GitHub',
+    name: 'Open langchain-ai/open_deep_research on GitHub',
   });
   await expect(source).toHaveAttribute('href', 'https://github.com/langchain-ai/open_deep_research');
   await expect(source).toHaveAttribute('target', '_blank');
@@ -127,10 +131,12 @@ test('library replacement confirms Cancel, then Open, Undo, reload, and automati
   const before = await readGraph(app);
   const beforeViewport = await app.locator('.react-flow__viewport').getAttribute('style');
   await openLibrary(app);
-  app.once('dialog', async (dialog) => await dialog.dismiss());
   await app.getByRole('button', { name: 'Open Guarded Coding-Agent Delivery' }).click();
+  const confirmation = app.getByRole('alertdialog', { name: 'Open “Guarded Coding-Agent Delivery”?' });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'Cancel' }).click();
   expect(await readGraph(app)).toEqual(before);
-  await expect(app.getByRole('dialog')).toBeVisible();
+  await expect(app.getByRole('dialog', { name: 'Graph library' })).toBeVisible();
 
   await openEntry(app, 'Guarded Coding-Agent Delivery');
   expect((await readGraph(app)).id).toBe('library-guarded-coding-agent-delivery');
@@ -152,12 +158,73 @@ test('library replacement confirms Cancel, then Open, Undo, reload, and automati
 });
 
 test('library loads representative subgraph, HITL, and Send/Merge workflows onto the canvas', async ({ app }) => {
+  await app.setViewportSize({ width: 1440, height: 900 });
   await openLibrary(app);
   await openEntry(app, 'Hierarchical Deep Research');
-  expect((await readGraph(app)).subgraphs).toEqual(
+  const hierarchical = await readGraph(app);
+  expect(hierarchical.subgraphs).toEqual(
     expect.arrayContaining([expect.objectContaining({ id: 'research-cell' })]),
   );
+  expect(hierarchical.nodes).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'frame-question', label: 'Supervisor', parentId: 'research-cell' }),
+    expect.objectContaining({ id: 'inspect-evidence', label: 'Supervisor Tools', parentId: 'research-cell' }),
+    expect.objectContaining({ id: 'researcher-template', label: 'Researcher Agent', parentId: 'research-cell' }),
+    expect.objectContaining({ id: 'research-merge', kind: 'merge', parentId: 'research-cell' }),
+  ]));
+  expect(hierarchical.edges).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      id: 'supervisor-send',
+      mode: 'send',
+      target: 'researcher-template',
+      send: expect.objectContaining({ multiplicity: 'dynamic', mergeNodeId: 'research-merge' }),
+    }),
+    expect.objectContaining({ id: 'merge-supervisor', source: 'research-merge', target: 'frame-question', loopCap: 2 }),
+  ]));
   await expect(app.getByTestId('rf__node-research-cell')).toBeVisible();
+  const researcherTemplate = app.getByTestId('rf__node-researcher-template');
+  await expect(researcherTemplate).toBeVisible();
+  await expect(researcherTemplate.locator('.contract-node-shell')).toHaveAttribute('data-send-template', 'true');
+  await expect(researcherTemplate.getByText('Template ×N')).toBeVisible();
+  const dynamicGroup = app.getByTestId('rf__node-dynamic-worker-group:supervisor-send');
+  await expect(dynamicGroup).toBeVisible();
+  await expect(dynamicGroup.getByRole('button', { name: /dynamic subgraph template ×N/i })).toBeVisible();
+  await expect(dynamicGroup.locator('.dynamic-worker-group-copy')).toHaveCount(2);
+  await expect(dynamicGroup.locator('.dynamic-worker-template-node')).toHaveCount(4);
+  await expect(dynamicGroup.locator('.dynamic-worker-template-node .contract-node-shell')).toHaveCount(4);
+  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="start"]')).toHaveCount(1);
+  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="tool"]')).toHaveCount(1);
+  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="task"]')).toHaveCount(1);
+  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="end"]')).toHaveCount(1);
+  await expect(dynamicGroup.locator('.dynamic-worker-template-edge')).toHaveCount(4);
+  await app.getByRole('button', { name: 'Fit graph' }).click();
+  await app.waitForTimeout(250);
+  const [canvasBounds, subgraphBounds, groupBounds, templateBounds, mergeBounds, reportBounds] = await Promise.all([
+    app.locator('.react-flow').boundingBox(),
+    app.getByTestId('rf__node-research-cell').boundingBox(),
+    dynamicGroup.boundingBox(),
+    researcherTemplate.boundingBox(),
+    app.getByTestId('rf__node-research-merge').boundingBox(),
+    app.getByTestId('rf__node-final-report').boundingBox(),
+  ]);
+  expect(canvasBounds).not.toBeNull();
+  expect(subgraphBounds).not.toBeNull();
+  expect(groupBounds).not.toBeNull();
+  expect(templateBounds).not.toBeNull();
+  expect(mergeBounds).not.toBeNull();
+  expect(reportBounds).not.toBeNull();
+  expect(groupBounds!.x).toBeGreaterThanOrEqual(subgraphBounds!.x - 1);
+  expect(groupBounds!.y).toBeGreaterThanOrEqual(subgraphBounds!.y - 1);
+  expect(groupBounds!.x + groupBounds!.width).toBeLessThanOrEqual(subgraphBounds!.x + subgraphBounds!.width + 1);
+  expect(groupBounds!.y + groupBounds!.height).toBeLessThanOrEqual(subgraphBounds!.y + subgraphBounds!.height + 1);
+  expect(templateBounds!.x).toBeGreaterThan(groupBounds!.x);
+  expect(templateBounds!.y).toBeGreaterThan(groupBounds!.y);
+  expect(templateBounds!.x + templateBounds!.width).toBeLessThan(groupBounds!.x + groupBounds!.width);
+  expect(templateBounds!.y + templateBounds!.height).toBeLessThan(groupBounds!.y + groupBounds!.height);
+  expect(groupBounds!.x + groupBounds!.width).toBeLessThanOrEqual(mergeBounds!.x);
+  expect(reportBounds!.x + reportBounds!.width).toBeLessThanOrEqual(canvasBounds!.x + canvasBounds!.width - 8);
+  await dynamicGroup.getByRole('button', { name: /dynamic subgraph template ×N/i }).click();
+  await expect(researcherTemplate).toHaveClass(/selected/);
+  await expect(app.getByRole('heading', { name: 'Researcher Agent' })).toBeVisible();
 
   await openLibrary(app);
   await openEntry(app, 'Human-Approved Incident Response');
@@ -175,7 +242,7 @@ test('library loads representative subgraph, HITL, and Send/Merge workflows onto
   await expect(app.locator('[data-edge-id="questions-send"]')).toHaveAttribute('data-mode', 'send');
 });
 
-test('all ten library templates freeze, select a scenario, and persist through reload', async ({ app }) => {
+test('all fourteen library templates freeze, select a scenario, and persist through reload', async ({ app }) => {
   test.setTimeout(240_000);
 
   for (const [title] of entries) {
@@ -184,7 +251,7 @@ test('all ten library templates freeze, select a scenario, and persist through r
       await openEntry(app, title);
 
       const loaded = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
-      expect(loaded.graph).toMatchObject({ name: title, status: 'draft' });
+      expect(loaded.graph).toMatchObject({ status: 'draft' });
       expect(loaded.validation).toEqual({ validForFreeze: true, issues: [] });
 
       await app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' }).click();
@@ -230,7 +297,9 @@ test('frozen and pending proposals block library replacement while the drawer re
   await openLibrary(app);
   const frozenAction = app.getByRole('button', { name: /Open Hierarchical Deep Research unavailable/ });
   await expect(frozenAction).toBeDisabled();
-  await expect(app.getByRole('status')).toContainText('Unfreeze the contract before opening a library graph.');
+  await expect(app.getByRole('status').filter({
+    hasText: 'Unfreeze the contract before opening a library graph.',
+  })).toBeVisible();
   await app.getByRole('button', { name: 'Close graph library' }).click();
   await app.locator('.workspace-freeze-button').click();
 
@@ -257,7 +326,7 @@ test('Graph Library drawer remains reachable at compact and desktop breakpoints'
     { width: 1440, height: 900 },
   ]) {
     await app.setViewportSize(viewport);
-    const trigger = app.getByRole('button', { name: 'Workflow library, 10 templates' });
+    const trigger = app.getByRole('button', { name: 'Workflow library, 14 templates' });
     await expect(trigger).toBeVisible();
     await trigger.click();
     const dialog = app.getByRole('dialog');

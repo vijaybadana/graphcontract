@@ -36,6 +36,11 @@ type LayoutResult = {
   maxY: number;
 };
 
+export type WorkflowLayoutOptions = {
+  /** Preserve authored relative child positions while still recomputing bounds. */
+  authoredSubgraphIds?: ReadonlySet<string>;
+};
+
 const compareText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0);
 
 const comparePositions = (left: GraphPosition, right: GraphPosition) =>
@@ -248,7 +253,62 @@ const geometryForSubgraph = (
   subgraph: GraphSubgraph,
   children: readonly GraphNode[],
   edges: readonly GraphEdge[],
+  preserveAuthoredComposition: boolean,
 ) => {
+  if (preserveAuthoredComposition && children.length > 0) {
+    const childById = new Map(children.map((child) => [child.id, child]));
+    const declaredTemplateBounds = edges.flatMap((edge) => {
+      if (edge.mode !== 'send' || !edge.send.templateAnatomy) return [];
+      const template = childById.get(edge.target);
+      const anatomy = edge.send.templateAnatomy;
+      const anchor = anatomy.nodes.find((node) => node.id === anatomy.canonicalTemplateNodeId);
+      if (!template || !anchor) return [];
+      return [{
+        x: template.position.x - anchor.position.x,
+        y: template.position.y - anchor.position.y,
+        width: anatomy.dimensions.width,
+        height: anatomy.dimensions.height,
+      }];
+    });
+    const minimumX = Math.min(
+      ...children.map((child) => child.position.x),
+      ...declaredTemplateBounds.map((bounds) => bounds.x),
+    );
+    const minimumY = Math.min(
+      ...children.map((child) => child.position.y),
+      ...declaredTemplateBounds.map((bounds) => bounds.y),
+    );
+    const shiftX = Math.max(0, SUBGRAPH_BODY_INSET - minimumX);
+    const shiftY = Math.max(0, SUBGRAPH_HEADER_HEIGHT + SUBGRAPH_BODY_INSET - minimumY);
+    const positions = new Map(
+      children.map((child) => [
+        child.id,
+        { x: child.position.x + shiftX, y: child.position.y + shiftY },
+      ]),
+    );
+    const maxX = Math.max(
+      ...[...positions.values()].map((position) => position.x + CONTRACT_NODE_WIDTH),
+      ...declaredTemplateBounds.map((bounds) => bounds.x + shiftX + bounds.width),
+    );
+    const maxY = Math.max(
+      ...[...positions.values()].map((position) => position.y + CONTRACT_NODE_HEIGHT),
+      ...declaredTemplateBounds.map((bounds) => bounds.y + shiftY + bounds.height),
+    );
+    return {
+      positions,
+      subgraph: {
+        ...subgraph,
+        dimensions: {
+          // Authored compound layouts may intentionally reserve workspace for
+          // readable nested flows. Content can grow the boundary, but repeated
+          // layout passes must not shrink that declared canvas.
+          width: Math.max(subgraph.dimensions.width, MIN_SUBGRAPH_WIDTH, maxX + SUBGRAPH_BODY_INSET),
+          height: Math.max(subgraph.dimensions.height, MIN_SUBGRAPH_HEIGHT, maxY + SUBGRAPH_BODY_INSET),
+        },
+      },
+    };
+  }
+
   const childIds = new Set(children.map((child) => child.id));
   const result = layoutScope(
     children.map(nodeUnit),
@@ -272,7 +332,10 @@ const geometryForSubgraph = (
  * Edges remain byte-for-byte canonical: compound containers only stand in for
  * their children during rank calculation, never in the returned topology.
  */
-export function layoutWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
+export function layoutWorkflowGraph(
+  graph: WorkflowGraph,
+  options: WorkflowLayoutOptions = {},
+): WorkflowGraph {
   const next = structuredClone(graph);
   const subgraphIds = new Set(next.subgraphs.map((subgraph) => subgraph.id));
   const childPositions = new Map<string, GraphPosition>();
@@ -280,7 +343,17 @@ export function layoutWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
 
   for (const subgraph of next.subgraphs) {
     const children = next.nodes.filter((node) => node.parentId === subgraph.id);
-    const geometry = geometryForSubgraph(subgraph, children, next.edges);
+    const containsDeclaredTemplateAnatomy = next.edges.some((edge) => (
+      edge.mode === 'send'
+      && Boolean(edge.send.templateAnatomy)
+      && children.some((node) => node.id === edge.target)
+    ));
+    const geometry = geometryForSubgraph(
+      subgraph,
+      children,
+      next.edges,
+      (options.authoredSubgraphIds?.has(subgraph.id) ?? false) || containsDeclaredTemplateAnatomy,
+    );
     sizedSubgraphs.set(subgraph.id, geometry.subgraph);
     for (const [nodeId, position] of geometry.positions) childPositions.set(nodeId, position);
   }

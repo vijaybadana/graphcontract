@@ -324,6 +324,35 @@ export type LegacyGraphNodeV1 = GraphNodeBase & {
   hitl?: HitlConfigV2;
 };
 
+export type SendTemplateAnatomyNode = {
+  id: string;
+  kind: 'start' | 'step' | 'end';
+  label: string;
+  executor?: StepExecutor;
+  position: GraphPosition;
+  dimensions: GraphDimensions;
+};
+
+export type SendTemplateAnatomyEdge = {
+  id: string;
+  source: string;
+  target: string;
+};
+
+/**
+ * A declared design-time expansion of one Send destination template. It is
+ * stored with the Send configuration, but its nodes are not runtime workers
+ * and do not become top-level GraphNodes or scenario-control edges.
+ */
+export type SendTemplateAnatomy = {
+  id: string;
+  label: string;
+  dimensions: GraphDimensions;
+  canonicalTemplateNodeId: string;
+  nodes: SendTemplateAnatomyNode[];
+  edges: SendTemplateAnatomyEdge[];
+};
+
 export type SendMapConfig = {
   /** The one canonical template worker; must equal the edge target. */
   destinationTemplateId: string;
@@ -331,6 +360,7 @@ export type SendMapConfig = {
   payloadLabel: string;
   mergeNodeId: string;
   payloadSchemaRef?: string;
+  templateAnatomy?: SendTemplateAnatomy;
 };
 
 type GraphEdgeIdentity = {
@@ -1021,6 +1051,7 @@ export type ScenarioDynamicSend = {
   payloadLabel: string;
   mergeNodeId: string;
   payloadSchemaRef?: string;
+  templateAnatomy?: SendTemplateAnatomy;
 };
 
 /** Reducer metadata reached by a design-time scenario path. */
@@ -1465,6 +1496,41 @@ export const sendMapConfigSchema = z
     payloadLabel: z.string(),
     mergeNodeId: z.string(),
     payloadSchemaRef: z.string().optional(),
+    templateAnatomy: z.object({
+      id: z.string(),
+      label: z.string(),
+      dimensions: dimensionsSchema,
+      canonicalTemplateNodeId: z.string(),
+      nodes: z.array(z.discriminatedUnion('kind', [
+        z.object({
+          id: z.string(),
+          kind: z.literal('start'),
+          label: z.string(),
+          position: positionSchema,
+          dimensions: dimensionsSchema,
+        }).strict(),
+        z.object({
+          id: z.string(),
+          kind: z.literal('step'),
+          label: z.string(),
+          executor: stepExecutorSchema,
+          position: positionSchema,
+          dimensions: dimensionsSchema,
+        }).strict(),
+        z.object({
+          id: z.string(),
+          kind: z.literal('end'),
+          label: z.string(),
+          position: positionSchema,
+          dimensions: dimensionsSchema,
+        }).strict(),
+      ])),
+      edges: z.array(z.object({
+        id: z.string(),
+        source: z.string(),
+        target: z.string(),
+      }).strict()),
+    }).strict().optional(),
   })
   .strict();
 
@@ -2530,6 +2596,111 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
           `edges.${edge.id}.send.payloadSchemaRef`,
         ),
       );
+    }
+    if (send.templateAnatomy) {
+      const anatomy = send.templateAnatomy;
+      const anatomyPath = `edges.${edge.id}.send.templateAnatomy`;
+      const anatomyNodeIds = anatomy.nodes.map((node) => node.id);
+      const anatomyEdgeIds = anatomy.edges.map((candidate) => candidate.id);
+      const anatomyNodeIdSet = new Set(anatomyNodeIds);
+      const startNodes = anatomy.nodes.filter((node) => node.kind === 'start');
+      const endNodes = anatomy.nodes.filter((node) => node.kind === 'end');
+      const canonicalTemplateNode = anatomy.nodes.find(
+        (node) => node.id === anatomy.canonicalTemplateNodeId,
+      );
+      if (!anatomy.id.trim() || !anatomy.label.trim()) {
+        issues.push(issue(
+          'SEND_TEMPLATE_ANATOMY_IDENTITY_REQUIRED',
+          'A declared Send template anatomy needs a readable ID and label.',
+          anatomyPath,
+        ));
+      }
+      if (new Set(anatomyNodeIds).size !== anatomyNodeIds.length) {
+        issues.push(issue(
+          'SEND_TEMPLATE_ANATOMY_NODE_IDS_DUPLICATE',
+          'Declared Send template anatomy node IDs must be unique.',
+          `${anatomyPath}.nodes`,
+        ));
+      }
+      if (new Set(anatomyEdgeIds).size !== anatomyEdgeIds.length) {
+        issues.push(issue(
+          'SEND_TEMPLATE_ANATOMY_EDGE_IDS_DUPLICATE',
+          'Declared Send template anatomy edge IDs must be unique.',
+          `${anatomyPath}.edges`,
+        ));
+      }
+      if (startNodes.length !== 1 || endNodes.length !== 1) {
+        issues.push(issue(
+          'SEND_TEMPLATE_ANATOMY_BOUNDARY_REQUIRED',
+          'Declared Send template anatomy needs exactly one Start and one End.',
+          `${anatomyPath}.nodes`,
+        ));
+      }
+      if (canonicalTemplateNode?.kind !== 'step') {
+        issues.push(issue(
+          'SEND_TEMPLATE_ANATOMY_CANONICAL_STEP_REQUIRED',
+          'The canonical Send template anchor must reference one declared Step.',
+          `${anatomyPath}.canonicalTemplateNodeId`,
+        ));
+      }
+      for (const [index, anatomyNode] of anatomy.nodes.entries()) {
+        if (!anatomyNode.id.trim() || !anatomyNode.label.trim()) {
+          issues.push(issue(
+            'SEND_TEMPLATE_ANATOMY_NODE_REQUIRED',
+            'Declared Send template anatomy nodes need readable IDs and labels.',
+            `${anatomyPath}.nodes.${index}`,
+          ));
+        }
+        if (
+          anatomyNode.position.x < 0 || anatomyNode.position.y < 0
+          || anatomyNode.position.x + anatomyNode.dimensions.width > anatomy.dimensions.width
+          || anatomyNode.position.y + anatomyNode.dimensions.height > anatomy.dimensions.height
+        ) {
+          issues.push(issue(
+            'SEND_TEMPLATE_ANATOMY_NODE_OUT_OF_BOUNDS',
+            `Declared template node “${anatomyNode.label}” must fit inside its template bounds.`,
+            `${anatomyPath}.nodes.${index}.position`,
+          ));
+        }
+      }
+      for (const [index, anatomyEdge] of anatomy.edges.entries()) {
+        if (
+          !anatomyEdge.id.trim()
+          || !anatomyNodeIdSet.has(anatomyEdge.source)
+          || !anatomyNodeIdSet.has(anatomyEdge.target)
+          || anatomyEdge.source === anatomyEdge.target
+        ) {
+          issues.push(issue(
+            'SEND_TEMPLATE_ANATOMY_EDGE_INVALID',
+            'Declared Send template anatomy edges need unique readable IDs and valid distinct endpoints.',
+            `${anatomyPath}.edges.${index}`,
+          ));
+        }
+      }
+      if (startNodes.length === 1 && endNodes.length === 1) {
+        const outgoingAnatomy = new Map<string, string[]>();
+        for (const anatomyEdge of anatomy.edges) {
+          outgoingAnatomy.set(anatomyEdge.source, [
+            ...(outgoingAnatomy.get(anatomyEdge.source) ?? []),
+            anatomyEdge.target,
+          ]);
+        }
+        const reachable = new Set<string>();
+        const queue = [startNodes[0]!.id];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          if (reachable.has(current)) continue;
+          reachable.add(current);
+          queue.push(...(outgoingAnatomy.get(current) ?? []));
+        }
+        if (!reachable.has(endNodes[0]!.id) || anatomy.nodes.some((node) => !reachable.has(node.id))) {
+          issues.push(issue(
+            'SEND_TEMPLATE_ANATOMY_DISCONNECTED',
+            'Every declared worker-template node must be reachable from Start and lead through the declared mini-flow.',
+            `${anatomyPath}.edges`,
+          ));
+        }
+      }
     }
     if (source?.kind !== 'step') {
       issues.push(
@@ -3945,6 +4116,9 @@ export function enumerateScenariosBounded(
                 payloadLabel: edge.send.payloadLabel,
                 mergeNodeId: edge.send.mergeNodeId,
                 ...(edge.send.payloadSchemaRef ? { payloadSchemaRef: edge.send.payloadSchemaRef } : {}),
+                ...(edge.send.templateAnatomy
+                  ? { templateAnatomy: structuredClone(edge.send.templateAnatomy) }
+                  : {}),
               },
             ]
           : dynamicSends;
@@ -4032,6 +4206,7 @@ SCENARIOS = ${JSON.stringify(
         payload_label: send.payloadLabel,
         payload_schema_ref: send.payloadSchemaRef ?? null,
         merge_node_id: send.mergeNodeId,
+        template_anatomy: send.templateAnatomy ?? null,
       })),
       merges: scenario.merges.map((merge) => ({
         node_id: merge.nodeId,

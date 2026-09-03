@@ -1,20 +1,27 @@
 import { useReactFlow } from '@xyflow/react';
 import {
   ArrowBendUpLeft,
+  ArrowRightIcon,
+  BroadcastIcon,
+  GearSixIcon,
   GitBranch,
   Lightning,
   LockSimple,
+  SelectionAllIcon,
+  ShareNetworkIcon,
   Shield,
   WarningCircle,
 } from '@phosphor-icons/react';
 import { ReactNode, useEffect, useRef, useState } from 'react';
 
 import './context-inspector.css';
+import './inspector-flat.css';
 
 import {
   GraphEdge,
   GraphNode,
   GraphSubgraph,
+  EndOutcomeKind,
   HumanOutcome,
   HitlResponseContract,
   HumanSelectionChoice,
@@ -37,6 +44,7 @@ import type {
 } from '@/src/adapters/react-flow/project-graph';
 import { evaluateConnection } from '@/src/application/connection-policy';
 import type { StepModifierInspectorSection } from '@/src/features/canvas/contract-node';
+import { graphNodeVisualKind, NodeVisualIcon } from '@/src/features/canvas/node-visual-taxonomy';
 import type { RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
 import {
   InspectorSelect,
@@ -50,6 +58,11 @@ import {
   StepDurabilitySettings,
   SubgraphDurabilityOverrides,
 } from '@/src/features/inspector/durability-settings';
+import {
+  InspectorAddModifier,
+  InspectorEntityHeader,
+  InspectorShell,
+} from '@/src/features/inspector/inspector-primitives';
 
 type StepNode = Extract<GraphNode, { kind: 'step' }>;
 type StepHitlConfig = NonNullable<StepNode['hitl']>;
@@ -94,10 +107,10 @@ function SystemRelationshipDetails({ relationship }: { relationship: NonNativeRe
       ? 'Spawned thread'
       : 'External orchestration';
   return (
-    <section className="context-inspector__group context-inspector__group--relationship" aria-labelledby="system-relationship-heading">
-      <h3 id="system-relationship-heading">{kind}</h3>
+    <section className="context-inspector__group context-inspector__group--relationship" aria-label="Relationship configuration">
       <div className="context-inspector__fields">
-        <Field label="Relationship"><p className="context-inspector__read-only-value">{relationship.label || relationship.id}</p></Field>
+        <Field label="Kind"><p className="context-inspector__read-only-value">{kind}</p></Field>
+        <Field label="Label"><p className="context-inspector__read-only-value">{relationship.label || relationship.id}</p></Field>
         <Field label="Source"><p className="context-inspector__read-only-value">{endpoint(relationship.source)}</p></Field>
         <Field label="Target"><p className="context-inspector__read-only-value">{endpoint(relationship.target)}</p></Field>
         <Field label="Treatment"><p className="context-inspector__read-only-value">{relationship.kind === 'external-orchestration' ? 'Boundary-crossing grey dashed path' : 'Portal / double-line relationship'}</p></Field>
@@ -142,6 +155,14 @@ const mergeCompletionOptions: readonly InspectorSelectOption<'all' | 'any' | 'qu
 const mergeContinuationOptions: readonly InspectorSelectOption<'once' | 'per_batch'>[] = [
   { value: 'once', label: 'Continue once' },
   { value: 'per_batch', label: 'Continue per batch' },
+];
+const endOutcomeOptions: readonly InspectorSelectOption<EndOutcomeKind>[] = [
+  { value: 'completed', label: 'Completed' },
+  { value: 'awaiting-reply', label: 'Awaiting reply' },
+  { value: 'failure', label: 'Failure' },
+  { value: 'partial-result', label: 'Partial result' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'domain-specific', label: 'Domain-specific' },
 ];
 
 const noParentSubgraphValue = '__no_subgraph__';
@@ -320,6 +341,16 @@ function defaultSendConfig(graph: WorkflowGraph, edge: GraphEdge, target: string
 
 export type RuntimeInstanceInspectorSelection = RuntimeInstanceNodeData;
 
+function EdgeInspectorIcon({ edge, loop }: { edge: GraphEdge; loop: boolean }) {
+  const props = { size: 19, weight: 'bold' as const, 'aria-hidden': true };
+  if (loop) return <ArrowBendUpLeft {...props} />;
+  if (edge.mode === 'conditional') return <GitBranch {...props} />;
+  if (edge.mode === 'command') return <Lightning {...props} />;
+  if (edge.mode === 'fallback') return <Shield {...props} />;
+  if (edge.mode === 'send') return <ShareNetworkIcon {...props} />;
+  return <ArrowRightIcon {...props} />;
+}
+
 export function ContextInspector({
   focusRequest,
   graphSettingsRequest,
@@ -328,6 +359,7 @@ export function ContextInspector({
   evidence,
   reviewProjection,
   readOnly = false,
+  onCollapse,
 }: {
   focusRequest?: InspectorFocusRequest | null;
   graphSettingsRequest?: GraphSettingsRequest | null;
@@ -336,6 +368,7 @@ export function ContextInspector({
   evidence?: EvidenceMarker | null;
   reviewProjection?: CanvasReviewProjection | null;
   readOnly?: boolean;
+  onCollapse?: () => void;
 }) {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
@@ -348,11 +381,16 @@ export function ContextInspector({
   const removeNodeFromSubgraph = useGraphStore((state) => state.removeNodeFromSubgraph);
   const dissolveSubgraph = useGraphStore((state) => state.dissolveSubgraph);
   const removeNode = useGraphStore((state) => state.removeNode);
+  const deleteSelection = useGraphStore((state) => state.deleteSelection);
   const duplicateSelection = useGraphStore((state) => state.duplicateSelection);
   const updateEdge = useGraphStore((state) => state.updateEdge);
   const removeEdge = useGraphStore((state) => state.removeEdge);
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
   const [opaqueInspectionOpen, setOpaqueInspectionOpen] = useState(false);
+  const [revealedModifiers, setRevealedModifiers] = useState<{
+    nodeId: string;
+    sections: StepModifierInspectorSection[];
+  } | null>(null);
   const previewTriggerRef = useRef<HTMLButtonElement>(null);
   const proposalUnderReview = Boolean(proposal || reviewProjection);
   const editable = graph.status === 'draft' && !proposalUnderReview && !readOnly;
@@ -361,7 +399,10 @@ export function ContextInspector({
   const displayGraph = reviewProjection?.kind === 'comparable'
     ? reviewProjection.candidate
     : acceptedGraph;
-  const primary = selection.primary;
+  const selectionCount =
+    selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length;
+  const multipleSelection = selectionCount > 1;
+  const primary = multipleSelection ? null : selection.primary;
   const node = primary?.type === 'node'
     ? displayGraph.nodes.find((item) => item.id === primary.id)
     : undefined;
@@ -379,6 +420,7 @@ export function ContextInspector({
       : undefined;
   const edge = previewEdge ?? acceptedEdge;
   const edgeGraph = previewEdge ? displayGraph : acceptedGraph;
+  const edgeSource = edge ? edgeGraph.nodes.find((candidate) => candidate.id === edge.source) : undefined;
   const edgeTarget = edge ? edgeGraph.nodes.find((node) => node.id === edge.target) : undefined;
   const edgeIssues = edge ? edgeValidationIssues(edgeGraph, edge) : [];
   const edgeIsLoop = edge ? topologyDerivedLoopEdgeIds(edgeGraph).has(edge.id) : false;
@@ -392,6 +434,43 @@ export function ContextInspector({
   const stepSectionRefs = useRef<
     Partial<Record<StepModifierInspectorSection, HTMLElement>>
   >({});
+  const modifierIsRevealed = (section: StepModifierInspectorSection) =>
+    Boolean(
+      revealedModifiers
+      && node
+      && revealedModifiers.nodeId === node.id
+      && revealedModifiers.sections.includes(section),
+    );
+  const revealModifier = (section: StepModifierInspectorSection) => {
+    if (node?.kind !== 'step') return;
+    setRevealedModifiers((current) => ({
+      nodeId: node.id,
+      sections: current?.nodeId === node.id
+        ? [...new Set([...current.sections, section])]
+        : [section],
+    }));
+  };
+  const stepNode = node?.kind === 'step' ? node : null;
+  const showParticipation = Boolean(stepNode?.participation?.internalTools) || modifierIsRevealed('participation') || focusRequest?.section === 'participation';
+  const showHitl = Boolean(stepNode?.hitl?.enabled) || modifierIsRevealed('hitl') || focusRequest?.section === 'hitl';
+  const showSensitive = Boolean(stepNode?.sensitive) || modifierIsRevealed('sensitive') || focusRequest?.section === 'sensitive';
+  const showStoreAccess = Boolean(stepNode?.storeAccess?.read || stepNode?.storeAccess?.write) || modifierIsRevealed('storeAccess') || focusRequest?.section === 'storeAccess';
+  const showRetry = Boolean(stepNode?.retry) || modifierIsRevealed('retry') || focusRequest?.section === 'retry';
+  const showGeneralModifiers = Boolean(
+    stepNode?.modifiers?.guardrail ||
+    stepNode?.opaque ||
+    (stepNode?.readiness?.state && stepNode.readiness.state !== 'ready'),
+  ) || modifierIsRevealed('modifiers') || focusRequest?.section === 'modifiers';
+  const addModifierOptions = stepNode ? [
+    ...(!showParticipation && stepNode.executor === 'ai' ? [{ id: 'participation', label: 'Internal tools', onSelect: () => revealModifier('participation') }] : []),
+    ...(!showHitl ? [{ id: 'hitl', label: 'Human input gate', onSelect: () => revealModifier('hitl') }] : []),
+    ...(!showSensitive ? [{ id: 'sensitive', label: 'Sensitive effect', onSelect: () => revealModifier('sensitive') }] : []),
+    ...(!showStoreAccess ? [{ id: 'storeAccess', label: 'Store access', onSelect: () => revealModifier('storeAccess') }] : []),
+    ...(!showRetry ? [{ id: 'retry', label: 'Retry / fallback policy', onSelect: () => revealModifier('retry') }] : []),
+    ...(!showGeneralModifiers ? [
+      { id: 'guardrail', label: 'Guardrail, readiness, or opaque boundary', onSelect: () => revealModifier('modifiers') },
+    ] : []),
+  ] : [];
 
   useEffect(() => {
     if (!focusRequest || node?.kind !== 'step') return;
@@ -469,19 +548,111 @@ export function ContextInspector({
     });
   };
 
+  const headerStatus = !editable ? (
+    <p role="status">
+      {proposalUnderReview ? 'Proposal preview · read-only' : readOnly ? 'Projection · read-only' : 'Contract frozen'}
+    </p>
+  ) : undefined;
+  const relationshipNodeIds = relationship
+    ? [relationship.source, relationship.target]
+      .filter((endpoint): endpoint is Extract<NonNativeRelationship['source'], { kind: 'node' }> => endpoint.kind === 'node')
+      .map((endpoint) => endpoint.nodeId)
+    : [];
+  const entityHeader = multipleSelection ? (
+    <InspectorEntityHeader
+      title={`${selectionCount} elements selected`}
+      icon={<SelectionAllIcon size={19} weight="bold" />}
+      tone="selection"
+      status={headerStatus}
+      onCollapse={onCollapse}
+      actions={[
+        { label: 'Duplicate selection', onSelect: duplicateSelection, disabled: !editable || selection.nodeIds.length === 0 },
+        { label: 'Remove selection', onSelect: deleteSelection, disabled: !editable, danger: true },
+      ]}
+    />
+  ) : runtimeInstance ? (
+    <InspectorEntityHeader
+      title={runtimeInstance.label}
+      icon={<BroadcastIcon size={19} weight="bold" />}
+      tone="runtime"
+      status={<p role="status">Observed runtime instance · read-only</p>}
+      onCollapse={onCollapse}
+    />
+  ) : relationship ? (
+    <InspectorEntityHeader
+      title={relationship.label || relationship.id}
+      icon={<ShareNetworkIcon size={19} weight="bold" />}
+      tone="relationship"
+      status={<p role="status">External relationship · read-only</p>}
+      onCollapse={onCollapse}
+      onFocus={relationshipNodeIds.length > 0 ? () => void fitView({ nodes: relationshipNodeIds.map((id) => ({ id })), duration: 180, padding: 1.4 }) : undefined}
+    />
+  ) : node ? (
+    <InspectorEntityHeader
+      title={node.label}
+      icon={<NodeVisualIcon kind={graphNodeVisualKind(node)} size={19} weight="bold" />}
+      tone={graphNodeVisualKind(node)}
+      status={headerStatus}
+      onCollapse={onCollapse}
+      onFocus={() => void fitView({ nodes: [{ id: node.id }], duration: 180, padding: 1.4 })}
+      actions={[
+        { label: 'Duplicate selection', onSelect: duplicateSelection, disabled: !editable },
+        { label: 'Remove node', onSelect: () => removeNode(node.id), disabled: !editable, danger: true },
+      ]}
+    />
+  ) : subgraph ? (
+    <InspectorEntityHeader
+      title={subgraph.label}
+      icon={<NodeVisualIcon kind="subgraph" size={19} weight="bold" />}
+      tone="subgraph"
+      status={headerStatus}
+      onCollapse={onCollapse}
+      onFocus={() => void fitView({ nodes: [{ id: subgraph.id }], duration: 180, padding: 1.4 })}
+      actions={[
+        {
+          label: 'Dissolve subgraph — keep child nodes and edges',
+          onSelect: () => dissolveSubgraph(subgraph.id),
+          disabled: !editable,
+          danger: true,
+        },
+      ]}
+    />
+  ) : edge ? (
+    <InspectorEntityHeader
+      title={`${edgeSource?.label ?? edge.source} → ${edgeTarget?.label ?? edge.target}`}
+      icon={<EdgeInspectorIcon edge={edge} loop={edgeIsLoop} />}
+      tone={edgeIsLoop ? 'loop' : edge.mode}
+      status={headerStatus}
+      onCollapse={onCollapse}
+      onFocus={() => void fitView({ nodes: [{ id: edge.source }, { id: edge.target }], duration: 180, padding: 1.4 })}
+      actions={[
+        { label: 'Remove edge', onSelect: () => removeEdge(edge.id), disabled: !editable, danger: true },
+      ]}
+    />
+  ) : evidence ? (
+    <InspectorEntityHeader
+      title={evidence.label}
+      icon={<SelectionAllIcon size={19} weight="bold" />}
+      tone="evidence"
+      status={<p role="status">Evidence details · read-only</p>}
+      onCollapse={onCollapse}
+    />
+  ) : (
+    <InspectorEntityHeader
+      title={displayGraph.name}
+      icon={<GearSixIcon size={19} weight="bold" />}
+      tone="graph"
+      status={headerStatus}
+      onCollapse={onCollapse}
+    />
+  );
+
   return (
-    <section className="context-inspector" aria-label="Context inspector">
-      <header className="context-inspector__header">
-        <p className="context-inspector__eyebrow">Context</p>
-        <h2>Inspector</h2>
-      </header>
+    <InspectorShell label={`${multipleSelection ? 'Selection' : node?.label ?? subgraph?.label ?? edge?.label ?? relationship?.label ?? displayGraph.name} inspector`} header={entityHeader}>
       {evidence?.provenance.evidence && <div className="context-inspector__content"><EvidenceDetails marker={evidence} evidence={evidence.provenance.evidence} /></div>}
       {relationship && <div className="context-inspector__content"><SystemRelationshipDetails relationship={relationship} /></div>}
-      {!runtimeInstance && !relationship && !node && !subgraph && !edge && (
+      {!multipleSelection && !runtimeInstance && !relationship && !node && !subgraph && !edge && (
         <div className="context-inspector__content">
-          <p className="context-inspector__empty">
-            Select a node, subgraph, or edge to configure it. Shift-click or drag-select multiple nodes.
-          </p>
           <GraphDurabilitySettings
             key={graphSettingsRequest?.requestId ?? 'default'}
             graph={displayGraph}
@@ -491,10 +662,10 @@ export function ContextInspector({
           />
         </div>
       )}
-      {selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length > 1 && (
-        <p className="context-inspector__selection-summary" role="status" aria-live="polite">
-          {selection.nodeIds.length + selection.subgraphIds.length + selection.edgeIds.length} elements selected
-        </p>
+      {multipleSelection && (
+        <div className="inspector-multi-selection" role="status" aria-live="polite">
+          <p>Use the header menu for valid bulk actions. Individual fields remain unchanged.</p>
+        </div>
       )}
       {runtimeInstance && (
         <div className="context-inspector__content">
@@ -514,10 +685,9 @@ export function ContextInspector({
       )}
       {subgraph && (
         <div className="context-inspector__content">
-          <section className="context-inspector__group" aria-labelledby="subgraph-details-heading">
-            <h3 id="subgraph-details-heading">Subgraph details</h3>
+          <section className="context-inspector__group" aria-label="Subgraph basics">
             <div className="context-inspector__fields">
-              <Field label="Label">
+              <Field label="Name">
                 <input
                   value={subgraph.label}
                   disabled={!editable}
@@ -625,41 +795,24 @@ export function ContextInspector({
               )}
             </ul>
           </section>
-          <div className="context-inspector__actions">
-            <button
-              type="button"
-              onClick={() => void fitView({ nodes: [{ id: subgraph.id }], duration: 180, padding: 1.4 })}
-              className="secondary-button"
-            >
-              Focus subgraph
-            </button>
-            <button
-              type="button"
-              disabled={!editable}
-              onClick={() => dissolveSubgraph(subgraph.id)}
-              className="danger-button"
-            >
-              Dissolve subgraph — keep child nodes and edges
-            </button>
-          </div>
         </div>
       )}
       {node && (
         <div className="context-inspector__content">
-          <section className="context-inspector__group" aria-labelledby="node-details-heading">
-            <h3 id="node-details-heading">Node details</h3>
+          <section className="context-inspector__group" aria-label="Basics">
             <div className="context-inspector__fields">
-              <Field label="Label">
+              <Field label="Name">
                 <input value={node.label} disabled={!editable} onChange={(event) => updateNode(node.id, { label: event.target.value })} className="input" />
               </Field>
               <Field label="Description">
-                <textarea value={node.description ?? ''} disabled={!editable} onChange={(event) => updateNode(node.id, { description: event.target.value })} className="input min-h-16 resize-y" placeholder="What happens at this step?" />
+                <textarea value={node.description ?? ''} disabled={!editable} onChange={(event) => updateNode(node.id, { description: event.target.value })} className="input min-h-16 resize-y" placeholder="What happens at this node?" />
               </Field>
               <Field label="Parent subgraph">
                 <InspectorSelect
                   value={node.parentId ?? noParentSubgraphValue}
                   options={parentOptions}
                   disabled={!editable}
+                  ariaLabel="Parent subgraph"
                   onChange={(subgraphId) => {
                     if (subgraphId === noParentSubgraphValue) {
                       removeNodeFromSubgraph(node.id);
@@ -668,19 +821,37 @@ export function ContextInspector({
                     }
                   }}
                 />
-                <p className="context-inspector__help">Choose a group or remove this node while keeping its canvas position. Dragging outside a group does not ungroup it.</p>
               </Field>
             </div>
           </section>
           {node.kind === 'end' && (
             <section className="context-inspector__group context-inspector__group--outcome" aria-labelledby="end-outcome-heading">
               <h3 id="end-outcome-heading">Terminal outcome</h3>
-              <p className="context-inspector__read-only-value">
-                {node.outcome?.kind === 'domain-specific'
-                  ? node.outcome.detail || 'Domain-specific outcome needs detail'
-                  : node.outcome?.kind?.replace('-', ' ') || 'Completed'}
-              </p>
-              <p className="context-inspector__help">End is a semantic terminal state, not automatically a successful result.</p>
+              <div className="context-inspector__fields">
+                <Field label="Outcome kind">
+                  <InspectorSelect
+                    value={node.outcome?.kind ?? 'completed'}
+                    options={endOutcomeOptions}
+                    disabled={!editable}
+                    ariaLabel="End outcome kind"
+                    onChange={(kind) => updateNode(node.id, {
+                      outcome: { kind, ...(node.outcome?.detail ? { detail: node.outcome.detail } : {}) },
+                    })}
+                  />
+                </Field>
+                <Field label="Outcome detail">
+                  <textarea
+                    aria-label="End outcome detail"
+                    value={node.outcome?.detail ?? ''}
+                    disabled={!editable}
+                    onChange={(event) => updateNode(node.id, {
+                      outcome: { kind: node.outcome?.kind ?? 'completed', detail: event.target.value },
+                    })}
+                    className="input min-h-16 resize-y"
+                    placeholder="Describe the terminal result"
+                  />
+                </Field>
+              </div>
             </section>
           )}
           {node.kind === 'step' && (
@@ -706,7 +877,7 @@ export function ContextInspector({
                 </Field>
               </div>
             </section>
-            <section
+            {showParticipation && <section
               ref={(element) => { stepSectionRefs.current.participation = element ?? undefined; }}
               id="inspector-step-participation"
               data-inspector-section="participation"
@@ -731,8 +902,8 @@ export function ContextInspector({
                 </label>
               </div>
               <p className="context-inspector__help">Internal calls do not change the Step executor.</p>
-            </section>
-            <section
+            </section>}
+            {showHitl && <section
               ref={(element) => { stepSectionRefs.current.hitl = element ?? undefined; }}
               id="inspector-step-hitl"
               data-inspector-section="hitl"
@@ -888,8 +1059,8 @@ export function ContextInspector({
                   </button>
                 </div>
               )}
-            </section>
-            <section
+            </section>}
+            {showSensitive && <section
               ref={(element) => { stepSectionRefs.current.sensitive = element ?? undefined; }}
               id="inspector-step-sensitive"
               data-inspector-section="sensitive"
@@ -913,11 +1084,13 @@ export function ContextInspector({
                   <Field label="Idempotency"><input aria-label="Sensitive idempotency" value={node.sensitive.idempotency} disabled={!editable} onChange={(event) => updateNode(node.id, { sensitive: { ...node.sensitive!, idempotency: event.target.value } })} className="input" /></Field>
                 </div>
               )}
-            </section>
+            </section>}
             <StepDurabilitySettings
               graph={displayGraph}
               node={node}
               editable={editable}
+              showStoreAccess={showStoreAccess}
+              showRetry={showRetry}
               storeAccessRef={(element) => { stepSectionRefs.current.storeAccess = element ?? undefined; }}
               retryRef={(element) => { stepSectionRefs.current.retry = element ?? undefined; }}
             />
@@ -981,7 +1154,7 @@ export function ContextInspector({
                 )}
               </section>
             )}
-            <section
+            {showGeneralModifiers && <section
               ref={(element) => { stepSectionRefs.current.modifiers = element ?? undefined; }}
               id="inspector-step-modifiers"
               data-inspector-section="modifiers"
@@ -1030,7 +1203,8 @@ export function ContextInspector({
                   </Field>
                 )}
               </div>
-            </section>
+            </section>}
+            <InspectorAddModifier options={addModifierOptions} />
             </>
           )}
           {node.kind === 'merge' && (
@@ -1113,24 +1287,6 @@ export function ContextInspector({
               </div>
             </section>
           )}
-          <div className="context-inspector__actions">
-            <button
-              type="button"
-              onClick={() => void fitView({ nodes: [{ id: node.id }], duration: 180, padding: 1.4 })}
-              className="secondary-button"
-            >
-              Focus node
-            </button>
-            <button
-              type="button"
-              disabled={!editable}
-              onClick={duplicateSelection}
-              className="secondary-button"
-            >
-              Duplicate selection
-            </button>
-            <button disabled={!editable} onClick={() => removeNode(node.id)} className="danger-button">Remove node</button>
-          </div>
         </div>
       )}
       {previewNode?.kind === 'step' && previewNode.hitl?.enabled && previewNode.hitl.response && previewIsCurrent && (
@@ -1144,7 +1300,7 @@ export function ContextInspector({
       {edge && (
         <div className="context-inspector__content">
           <section className="context-inspector__group" aria-labelledby="edge-routing-heading">
-            <h3 id="edge-routing-heading">Edge routing</h3>
+            <h3 id="edge-routing-heading">Routing</h3>
             <div className="context-inspector__fields">
               <Field label="Routing mode">
                 <InspectorSelect
@@ -1166,7 +1322,10 @@ export function ContextInspector({
                   }}
                 />
               </Field>
-              <Field label="Destination">
+              <Field label="Source">
+                <p className="context-inspector__read-only-value">{edgeSource?.label ?? edge.source}</p>
+              </Field>
+              <Field label="Target">
                 <InspectorSelect
                   value={edge.target}
                   options={edge.mode === 'send' ? sendDestinations : edgeDestinations}
@@ -1363,12 +1522,9 @@ export function ContextInspector({
                 : 'Frozen contract: route editing is unavailable until the graph is unfrozen.'}
             </p>
           )}
-          <div className="context-inspector__actions">
-            <button disabled={!editable} onClick={() => removeEdge(edge.id)} className="danger-button">Remove edge</button>
-          </div>
         </div>
       )}
-    </section>
+    </InspectorShell>
   );
 }
 

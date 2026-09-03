@@ -3,17 +3,26 @@
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  border: 1px solid #cbd6ce;
+  border: 1px solid var(--gc-node-border);
   border-radius: 0.875rem;
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 0 3px 12px rgb(15 23 42 / 8%);
-  color: #18211d;
+  background: color-mix(in srgb, var(--gc-node-surface) 94%, transparent);
+  box-shadow: var(--gc-shadow-node);
+  color: var(--gc-ink);
+  cursor: grab;
   transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.react-flow__node.dragging > .subgraph-node-shell,
+.subgraph-node-shell:active {
+  cursor: grabbing;
 }
 
 .subgraph-node-shell.is-expanded {
   min-width: 13rem;
   min-height: 8rem;
+  border-color: var(--gc-node-border-strong);
+  background: color-mix(in srgb, var(--gc-node-surface) 82%, transparent);
+  box-shadow: inset 0 0 0 .5px var(--gc-node-border-strong), var(--gc-shadow-sm);
   padding: 0.75rem;
 }
 
@@ -25,28 +34,37 @@
   padding: 0.75rem;
 }
 
+.subgraph-node-body-drag-surface {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: auto;
+}
+
 .subgraph-node-shell.is-selected {
-  border-color: #2f7660;
-  box-shadow: 0 0 0 3px rgb(47 118 96 / 22%), 0 8px 18px rgb(15 23 42 / 14%);
+  border-color: var(--gc-success);
+  outline: none !important;
+  box-shadow: inset 0 0 0 1px var(--gc-success), var(--gc-shadow-sm);
 }
 
 .subgraph-node-shell.is-proposed-added {
-  border-color: #34b982;
-  box-shadow: 0 0 0 3px rgb(110 231 183 / 54%), 0 3px 12px rgb(15 23 42 / 8%);
+  border-color: var(--gc-proposal-added);
+  box-shadow: none;
 }
 
 .subgraph-node-shell.is-proposed-updated {
-  border-color: #d69d31;
-  box-shadow: 0 0 0 3px rgb(252 211 77 / 54%), 0 3px 12px rgb(15 23 42 / 8%);
+  border-color: var(--gc-proposal-updated);
+  box-shadow: none;
 }
 
 .subgraph-node-shell.is-proposed-removed {
-  border-color: #e56b76;
+  border-color: var(--gc-proposal-removed);
   border-style: dashed;
-  background: rgb(255 241 242 / 92%);
+  background: color-mix(in srgb, var(--gc-danger-soft) 92%, transparent);
   opacity: 0.58;
   pointer-events: none;
-  box-shadow: 0 0 0 3px rgb(253 164 175 / 58%), 0 3px 12px rgb(15 23 42 / 8%);
+  box-shadow: none;
 }
 
 .subgraph-node-shell.is-proposed-removed .subgraph-node-title {
@@ -63,23 +81,11 @@
   width: 100%;
 }
 
-/* Only the visible header and narrow container boundary participate in parent
- * dragging. These strips leave the body free for child node interaction. */
-.subgraph-node-boundary-drag-surface {
-  position: absolute;
-  z-index: 1;
-}
-
-.subgraph-node-boundary-drag-surface--top { top: 0; right: 0; left: 0; height: 12px; }
-.subgraph-node-boundary-drag-surface--right { top: 0; right: 0; bottom: 0; width: 12px; }
-.subgraph-node-boundary-drag-surface--bottom { right: 0; bottom: 0; left: 0; height: 12px; }
-.subgraph-node-boundary-drag-surface--left { top: 0; bottom: 0; left: 0; width: 12px; }
-
 .subgraph-node-heading { min-width: 0; }
 
 .subgraph-node-indicator {
   display: block;
-  color: #3e6f60;
+  color: var(--gc-success);
   font-size: 0.5625rem;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -93,7 +99,7 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  color: #18211d;
+  color: var(--gc-ink);
   font-size: 0.875rem;
   font-weight: 700;
   line-height: 1.2;
@@ -112,20 +118,20 @@
   display: inline-flex;
   align-items: baseline;
   gap: .18rem;
-  color: #5b6c64;
+  color: var(--gc-ink-subtle);
   font-size: .53rem;
   font-weight: 650;
   line-height: 1.15;
   white-space: nowrap;
 }
 
-.subgraph-node-capabilities li[data-source='overridden'] { color: #225f9e; }
-.subgraph-node-capabilities strong { color: #31463b; font-weight: 800; }
-.subgraph-node-capabilities li[data-source='overridden'] strong { color: #1d4f87; }
+.subgraph-node-capabilities li[data-source='overridden'] { color: var(--gc-info); }
+.subgraph-node-capabilities strong { color: var(--gc-ink); font-weight: 800; }
+.subgraph-node-capabilities li[data-source='overridden'] strong { color: var(--gc-info); }
 
 .subgraph-node-description {
   margin: 0.625rem 0 0;
-  color: #607069;
+  color: var(--gc-ink-subtle);
   font-size: 0.6875rem;
   font-weight: 560;
   line-height: 1.35;
@@ -135,28 +141,29 @@
   flex: 0 0 auto;
   min-width: 2rem;
   min-height: 2rem;
-  border: 1px solid #b8cbc1;
+  border: 1px solid var(--gc-border-strong);
   border-radius: 0.5rem;
   padding: 0.35rem 0.5rem;
-  background: #f6f9f6;
-  color: #275e4d;
+  background: var(--gc-surface-hover);
+  color: var(--gc-success);
+  cursor: pointer;
   font-size: 0.6875rem;
   font-weight: 750;
   line-height: 1;
 }
 
-.subgraph-node-toggle:hover { background: #eaf4ee; }
+.subgraph-node-toggle:hover { background: var(--gc-success-soft); }
 
 .subgraph-node-toggle:focus-visible {
-  outline: 2px solid #2f7660;
+  outline: 2px solid var(--gc-success);
   outline-offset: 2px;
 }
 
 .subgraph-node-handle {
   width: 0.6875rem !important;
   height: 0.6875rem !important;
-  border: 2px solid #fff !important;
-  background: #2f7660 !important;
+  border: 2px solid var(--gc-node-surface) !important;
+  background: var(--gc-success) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

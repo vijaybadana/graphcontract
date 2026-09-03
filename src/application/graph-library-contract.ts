@@ -1,7 +1,6 @@
 import type { BranchScenario, WorkflowGraph } from '@/src/domain';
 
-export const GRAPH_LIBRARY_ENTRY_COUNT = 10;
-export const GRAPH_LIBRARY_DISCLAIMER = 'Normalized — no source code copied';
+export const GRAPH_LIBRARY_ENTRY_COUNT = 14;
 
 export type GraphLibraryComplexity = 'foundational' | 'intermediate' | 'advanced';
 
@@ -26,6 +25,16 @@ export type GraphLibraryDefinition = {
   concepts: readonly string[];
   source: GraphLibrarySource;
   graph: WorkflowGraph;
+  /**
+   * Presentation-only layout intent. Canonical topology stays inside `graph`;
+   * this only tells the shared library layout which authored compound
+   * compositions should retain their relative child placement.
+   */
+  layout?: {
+    authoredSubgraphIds?: readonly string[];
+    /** Keep a deliberately arranged fixture byte-for-byte instead of applying the shared auto-layout. */
+    preserveGraphGeometry?: boolean;
+  };
 };
 
 /** Derived data is built through the same scenario service used by the workspace. */
@@ -37,7 +46,7 @@ export type GraphLibraryEntry = GraphLibraryDefinition & {
 };
 
 export function graphLibrarySourceLabel(source: GraphLibrarySource) {
-  return `Inspired by ${source.owner}/${source.repository}`;
+  return `${source.owner}/${source.repository}`;
 }
 
 /** Every open receives a private graph copy; registry fixtures remain immutable inputs. */

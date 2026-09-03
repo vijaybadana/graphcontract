@@ -75,6 +75,33 @@ describe('workspace persistence migration', () => {
     expect(malformed.reviewRequest).toBeNull();
   });
 
+  it('rehydrates a requested candidate with its complete operations and diff alongside feedback', () => {
+    const accepted = service.createInitial().graph;
+    const candidate = createProposal(accepted, {
+      rationale: 'Clarify the billing specialist.',
+      expectedGraphUpdatedAt: accepted.updatedAt,
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } }],
+    }).proposal!;
+    const reviewRequest = {
+      status: 'changes_requested' as const,
+      feedback: 'Document the escalation route instead.',
+      proposalId: candidate.id,
+      proposalCreatedAt: candidate.createdAt,
+      reviewedGraphId: accepted.id,
+      reviewedGraphUpdatedAt: accepted.updatedAt,
+      reviewedAt: '2026-09-01T10:00:00.000Z',
+    };
+
+    const migrated = migrateWorkspaceV6(
+      { graph: accepted, proposal: candidate, reviewRequest },
+      service.createInitial,
+    );
+
+    expect(migrated.graph).toEqual(accepted);
+    expect(migrated.proposal).toEqual(candidate);
+    expect(migrated.reviewRequest).toEqual(reviewRequest);
+  });
+
   it('preserves schema-safe incomplete drafts for ordinary validation', () => {
     const invalid = legacyV1Graph();
     invalid.nodes.push({

@@ -1,7 +1,10 @@
 import {
   createDefaultGraphCapabilities,
   enumerateScenariosBounded,
+  humanControlHitlDemoGraph,
   normalizeWorkflowGraph,
+  researchIntakeRoutingGraph,
+  researchSupervisorGraph,
   validateGraph,
   type GraphNode,
   type GraphCapabilities,
@@ -10,6 +13,9 @@ import {
   type ScenarioEnumerationResult,
   type WorkflowGraph,
 } from '@/src/domain';
+
+import { dynamicParallelismDemoGraph } from './package-three-demo';
+import { layoutWorkflowGraph } from './layout-workflow';
 
 import {
   GRAPH_LIBRARY_ENTRY_COUNT,
@@ -93,42 +99,134 @@ const durability = (patch: Partial<GraphCapabilities>): GraphCapabilities => ({
 
 const definitions: readonly GraphLibraryDefinition[] = [
   {
-    id: 'hierarchical-deep-research',
-    title: 'Hierarchical Deep Research',
-    outcome: 'Turn a clarified question into a compact, reviewed research brief.',
+    id: 'research-supervisor-demo',
+    title: 'Research Supervisor',
+    outcome: 'Inspect a compact supervisor-and-tools workflow inside a movable subgraph.',
+    domain: 'research',
+    complexity: 'foundational',
+    concepts: ['subgraph'],
+    source: source('vijaybadana', 'graphcontract'),
+    graph: researchSupervisorGraph,
+  },
+  {
+    id: 'research-intake-routing-demo',
+    title: 'Research Intake Routing',
+    outcome: 'Review normal, conditional, command, fallback, and bounded loop routing in one contract.',
     domain: 'research',
     complexity: 'advanced',
-    concepts: ['subgraph', 'command routing', 'bounded loop'],
+    concepts: ['conditional repair', 'command routing', 'bounded loop'],
+    source: source('vijaybadana', 'graphcontract'),
+    graph: researchIntakeRoutingGraph,
+  },
+  {
+    id: 'human-control-hitl-demo',
+    title: 'Human Control & HITL',
+    outcome: 'Preview human approval, request-changes, and rejection outcomes without runtime mutation.',
+    domain: 'engineering',
+    complexity: 'advanced',
+    concepts: ['human approval', 'human review', 'sensitive action'],
+    source: source('vijaybadana', 'graphcontract'),
+    graph: humanControlHitlDemoGraph,
+  },
+  {
+    id: 'dynamic-parallelism-merge-demo',
+    title: 'Parallel research · Send ×N',
+    outcome: 'Design one dynamic worker template, merge its results, and inspect an explicit runtime fixture.',
+    domain: 'research',
+    complexity: 'advanced',
+    concepts: ['send fan-out', 'merge'],
+    source: source('vijaybadana', 'graphcontract'),
+    graph: dynamicParallelismDemoGraph,
+  },
+  {
+    id: 'hierarchical-deep-research',
+    title: 'Hierarchical Deep Research',
+    outcome: 'Supervise a dynamic researcher pool, merge its findings, and produce a final report.',
+    domain: 'research',
+    complexity: 'advanced',
+    concepts: ['subgraph', 'send fan-out', 'merge', 'bounded loop'],
     source: source(
       'langchain-ai',
       'open_deep_research',
-      'The source’s elastic researcher pool, tool inventory, and runtime limits are intentionally omitted from this schema-v6 normalization.',
+      'Worker cardinality remains runtime-defined; live tool inventory and runtime limits are intentionally omitted.',
     ),
+    layout: { authoredSubgraphIds: ['research-cell'], preserveGraphGeometry: true },
     graph: graph(
       'library-hierarchical-deep-research',
       'Hierarchical Deep Research',
       [
-        start('research-start', 40, 220),
-        start('research-cell-start', 40, 100, 'research-cell'),
-        step('frame-question', 'Frame research question', 'ai', 220, 100, { parentId: 'research-cell' }),
-        step('inspect-evidence', 'Inspect evidence', 'tool', 450, 100, { parentId: 'research-cell' }),
-        end('research-cell-end', 'Research cell complete', 680, 100, 'research-cell'),
-        step('write-brief', 'Write research brief', 'ai', 950, 220),
-        end('research-complete', 'Research brief complete', 1190, 220),
+        start('research-start', 80, 583),
+        step('clarify-request', 'Clarify request', 'ai', 372, 583),
+        end('awaiting-user-reply', 'Awaiting user reply', 760, 484),
+        step('write-brief', 'Write research brief', 'ai', 760, 682),
+        start('research-cell-start', 76, 160, 'research-cell'),
+        step('frame-question', 'Supervisor', 'ai', 336, 160, { parentId: 'research-cell' }),
+        step('inspect-evidence', 'Supervisor Tools', 'tool', 736, 8, { parentId: 'research-cell' }),
+        end('research-cell-end', 'Research complete', 1676, 160, 'research-cell'),
+        step('researcher-template', 'Researcher Agent', 'ai', 336, 540, { parentId: 'research-cell' }),
+        {
+          id: 'research-merge',
+          kind: 'merge',
+          label: 'Aggregate notes',
+          position: { x: 1456, y: 520 },
+          parentId: 'research-cell',
+          merge: {
+            reducer: { name: 'merge_research_notes', aggregateState: 'researchNotes' },
+            completion: { mode: 'all' },
+            continuation: { mode: 'once' },
+            waitingForDynamicInputs: true,
+          },
+        },
+        step('final-report', 'Final report generation', 'ai', 3156, 583),
+        end('research-complete', 'Report complete', 3492, 583),
       ],
       [
-        { id: 'enter-research-cell', source: 'research-start', target: 'research-cell-start', mode: 'normal' },
+        { id: 'research-clarify', source: 'research-start', target: 'clarify-request', mode: 'normal' },
+        { id: 'clarify-wait', source: 'clarify-request', target: 'awaiting-user-reply', mode: 'conditional', label: 'needs clarification', condition: 'request.needsClarification' },
+        { id: 'clarify-write', source: 'clarify-request', target: 'write-brief', mode: 'conditional', label: 'ready', condition: 'request.ready' },
+        { id: 'enter-research-cell', source: 'write-brief', target: 'research-cell-start', mode: 'normal' },
         { id: 'research-cell-frame', source: 'research-cell-start', target: 'frame-question', mode: 'normal' },
-        { id: 'frame-evidence', source: 'frame-question', target: 'inspect-evidence', mode: 'command', label: 'inspect sources', condition: 'brief.ready' },
-        { id: 'frame-complete', source: 'frame-question', target: 'research-cell-end', mode: 'command', label: 'brief complete', condition: 'brief.complete' },
-        { id: 'evidence-frame', source: 'inspect-evidence', target: 'frame-question', mode: 'command', label: 'refine question', condition: 'evidence.gap', loopCap: 2 },
-        { id: 'evidence-complete', source: 'inspect-evidence', target: 'research-cell-end', mode: 'command', label: 'evidence sufficient', condition: 'evidence.sufficient' },
-        { id: 'leave-research-cell', source: 'research-cell-end', target: 'write-brief', mode: 'normal' },
-        { id: 'brief-complete', source: 'write-brief', target: 'research-complete', mode: 'normal' },
+        { id: 'frame-evidence', source: 'frame-question', target: 'inspect-evidence', mode: 'conditional', label: 'continue', condition: 'supervisor.researchRequired' },
+        { id: 'frame-complete', source: 'frame-question', target: 'research-cell-end', mode: 'conditional', label: 'complete', condition: 'supervisor.complete' },
+        {
+          id: 'supervisor-send',
+          source: 'inspect-evidence',
+          target: 'researcher-template',
+          mode: 'send',
+          send: {
+            destinationTemplateId: 'researcher-template',
+            multiplicity: 'dynamic',
+            payloadLabel: 'research task',
+            mergeNodeId: 'research-merge',
+            templateAnatomy: {
+              id: 'researcher-worker-template',
+              label: 'Researcher ×N',
+              dimensions: { width: 1360, height: 430 },
+              canonicalTemplateNodeId: 'researcher-agent',
+              nodes: [
+                { id: 'researcher-start', kind: 'start', label: 'Start', position: { x: 28, y: 120 }, dimensions: { width: 220, height: 134 } },
+                { id: 'researcher-agent', kind: 'step', executor: 'ai', label: 'Researcher Agent', position: { x: 300, y: 120 }, dimensions: { width: 220, height: 134 } },
+                { id: 'research-tools', kind: 'step', executor: 'tool', label: 'Research Tools', position: { x: 570, y: 120 }, dimensions: { width: 220, height: 134 } },
+                { id: 'compress-findings', kind: 'step', executor: 'deterministic', label: 'Compress Findings', position: { x: 840, y: 120 }, dimensions: { width: 220, height: 134 } },
+                { id: 'researcher-end', kind: 'end', label: 'End', position: { x: 1110, y: 120 }, dimensions: { width: 220, height: 134 } },
+              ],
+              edges: [
+                { id: 'researcher-start-agent', source: 'researcher-start', target: 'researcher-agent' },
+                { id: 'researcher-agent-tools', source: 'researcher-agent', target: 'research-tools' },
+                { id: 'researcher-tools-compress', source: 'research-tools', target: 'compress-findings' },
+                { id: 'researcher-compress-end', source: 'compress-findings', target: 'researcher-end' },
+              ],
+            },
+          },
+        },
+        { id: 'researcher-merge', source: 'researcher-template', target: 'research-merge', mode: 'normal' },
+        { id: 'merge-supervisor', source: 'research-merge', target: 'frame-question', mode: 'normal', loopCap: 2 },
+        { id: 'leave-research-cell', source: 'research-cell-end', target: 'final-report', mode: 'normal' },
+        { id: 'brief-complete', source: 'final-report', target: 'research-complete', mode: 'normal' },
       ],
-      [{ id: 'research-cell', label: 'Research cell', position: { x: 160, y: 40 }, dimensions: { width: 660, height: 230 }, collapsed: false }],
+      [{ id: 'research-cell', label: 'Research Supervisor', position: { x: 1100, y: 100 }, dimensions: { width: 1936, height: 1100 }, collapsed: false }],
       durability({
-        state: { enabled: true, schema: { fields: ['researchBrief', 'evidence'], summary: 'Per-run research brief and evidence.' }, reducers: [] },
+        state: { enabled: true, schema: { fields: ['researchBrief', 'researchTasks', 'researchNotes', 'finalReport'], summary: 'Per-run research plan, dynamic tasks, merged notes, and final report.' }, reducers: [{ key: 'researchNotes', summary: 'Aggregate dynamic researcher notes' }] },
       }),
     ),
   },
@@ -417,12 +515,20 @@ function inspectGraphLibraryDefinitions(
     if (!/^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/.test(entry.source.url) || entry.source.url !== canonicalUrl) {
       issues.push({ code: 'INVALID_SOURCE', entryId: entry.id });
     }
-    const graphIssues = validateGraph(entry.graph);
+    const graph = entry.layout?.preserveGraphGeometry
+      ? structuredClone(entry.graph)
+      : layoutWorkflowGraph(
+        entry.graph,
+        entry.layout?.authoredSubgraphIds
+          ? { authoredSubgraphIds: new Set(entry.layout.authoredSubgraphIds) }
+          : undefined,
+      );
+    const graphIssues = validateGraph(graph);
     if (graphIssues.length > 0) {
       issues.push({ code: 'INVALID_GRAPH', entryId: entry.id, reason: graphIssues.map((issue) => `${issue.code}@${issue.path ?? ''}`).join('|') });
       continue;
     }
-    const enumeration = enumerate(entry.graph);
+    const enumeration = enumerate(graph);
     if (!enumeration.ok) {
       issues.push({
         code: 'SCENARIO_BUDGET_EXCEEDED',
@@ -437,6 +543,7 @@ function inspectGraphLibraryDefinitions(
     }
     materialized.push({
       ...entry,
+      graph,
       scenarioSummary: {
         pathCount: enumeration.scenarios.length,
         scenarios: enumeration.scenarios,

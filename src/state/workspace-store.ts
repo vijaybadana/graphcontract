@@ -508,7 +508,7 @@ export const useGraphStore = create<WorkspaceStore>()(
           });
           if (transition.changed) {
             set((state) => ({
-              runtimeProjectionFixture: null,
+              runtimeProjectionFixture: runtimeFixtureForLoadedDynamicParallelismDemo(get().graph),
               clipboardNodeIds: [],
               fitViewRevision: state.fitViewRevision + 1,
             }));

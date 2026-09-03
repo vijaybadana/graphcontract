@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 
 import {
   callWebMcpTool,
+  confirmGraphLibraryReplacement,
   expect,
   test,
   webMcpToolNames,
@@ -75,7 +76,7 @@ const flagship = {
   title: 'Hierarchical Deep Research',
   graphId: 'library-hierarchical-deep-research',
   nodeId: 'frame-question',
-  acceptedLabel: 'Frame research question',
+  acceptedLabel: 'Supervisor',
 } as const;
 
 async function readAcceptedGraph(page: Page) {
@@ -85,14 +86,10 @@ async function readAcceptedGraph(page: Page) {
 }
 
 async function loadFlagshipGraph(page: Page) {
-  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain(`Replace the current canvas with “${flagship.title}”?`);
-    await dialog.accept();
-  });
   await page.getByRole('button', { name: `Open ${flagship.title}` }).click();
+  await confirmGraphLibraryReplacement(page, flagship.title);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect
     .poll(async () => (await readAcceptedGraph(page)).graph.id)
@@ -219,14 +216,14 @@ test('J01 — read, propose, and reject leaves the accepted complex graph untouc
     'aria-checked',
     'true',
   );
-  await expect(app.getByRole('region', { name: 'Before / Proposed' })).toBeVisible();
-  const acceptedOverviewCanvas = app
-    .getByRole('region', { name: 'Before / Proposed' })
+  await expect(app.getByRole('region', { name: 'Graph overview' })).toBeVisible();
+  const proposedOverviewCanvas = app
+    .getByRole('region', { name: 'Graph overview' })
     .locator('.proposal-overview-graph')
     .first()
     .locator('.proposal-overview-canvas');
-  await expect(acceptedOverviewCanvas).toContainText(flagship.acceptedLabel);
-  await expect(acceptedOverviewCanvas.getByText(candidateLabel, { exact: true })).toHaveCount(0);
+  await expect(proposedOverviewCanvas).toContainText(candidateLabel);
+  await expect(app.getByTestId(`rf__node-${flagship.nodeId}`)).toContainText(flagship.acceptedLabel);
   const pending = await readAcceptedGraph(app);
   expect(pending.graph).toEqual(accepted.graph);
   expect(pending.pendingProposal).toMatchObject({
@@ -238,7 +235,7 @@ test('J01 — read, propose, and reject leaves the accepted complex graph untouc
   const rejected = await readAcceptedGraph(app);
   expect(rejected.graph).toEqual(accepted.graph);
   expect(rejected.pendingProposal).toBeUndefined();
-  await expect(app.getByRole('heading', { name: 'Before / Proposed' })).toHaveCount(0);
+  await expect(app.getByRole('heading', { name: 'Proposal' })).toHaveCount(0);
   await expect(app.getByText(candidateLabel, { exact: true })).toHaveCount(0);
   await expect(app.locator('[data-proposal-state]')).toHaveCount(0);
   await expect(app.getByTestId(`rf__node-${flagship.nodeId}`)).toContainText(
@@ -258,9 +255,8 @@ test('J02 — corrected reproposal compares stable identity, approves once, and 
 
   const correctedLabel = 'Judge-ready research framing';
   await proposeFlagshipLabel(app, correctedLabel, 'J02 corrected agent proposal.');
-  const comparison = app.getByRole('region', { name: 'Before / Proposed' });
-  await expect(comparison.getByRole('heading', { name: 'Before', exact: true })).toBeVisible();
-  await expect(comparison.getByRole('heading', { name: 'Proposed', exact: true })).toBeVisible();
+  const comparison = app.getByRole('region', { name: 'Graph overview' });
+  await expect(comparison.getByRole('heading', { name: 'Graph overview' })).toBeVisible();
   const identityDiff = comparison.getByLabel(`Changed values for ${flagship.nodeId}`);
   await expect(identityDiff).toContainText(flagship.acceptedLabel);
   await expect(identityDiff).toContainText(correctedLabel);

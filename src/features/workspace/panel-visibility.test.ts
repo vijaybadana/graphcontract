@@ -43,16 +43,16 @@ describe('resolveWorkspacePanelVisibility', () => {
     expect(paletteReopened).toEqual({ paletteVisible: true, inspectorVisible: false });
   });
 
-  it('keeps a pending proposal in the inspector even when the compact palette was open', () => {
+  it('lets an explicitly collapsed pending proposal stay collapsed', () => {
     expect(
       resolveWorkspacePanelVisibility({
         compact: true,
-        paletteRequested: true,
+        paletteRequested: false,
         inspectorRequested: false,
-        compactPreference: 'palette',
+        compactPreference: 'inspector',
         proposalPending: true,
       }),
-    ).toEqual({ paletteVisible: false, inspectorVisible: true });
+    ).toEqual({ paletteVisible: false, inspectorVisible: false });
   });
 
   it('allows an explicitly opened scenarios panel to close and reopen', () => {

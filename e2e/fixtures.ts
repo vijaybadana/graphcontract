@@ -147,12 +147,7 @@ export async function callWebMcpTool<Result>(
 }
 
 export async function loadResearchIntake(page: Page) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with Research Intake Routing?');
-    await dialog.accept();
-  });
-  await page.getByRole('button', { name: 'Load Research Intake Routing' }).click();
+  await loadGraphLibraryEntry(page, 'Research Intake Routing', 'research-intake-routing-demo');
   await expect.poll(async () => {
     const result = await callWebMcpTool<{
       ok: true;
@@ -170,6 +165,29 @@ export async function loadResearchIntake(page: Page) {
     nodes: 9,
     edges: 9,
   });
+}
+
+export async function loadGraphLibraryEntry(page: Page, title: string, expectedGraphId: string) {
+  if (!(await page.getByRole('dialog', { name: 'Graph library' }).isVisible().catch(() => false))) {
+    await page.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
+    await expect(page.getByRole('dialog', { name: 'Graph library' })).toBeVisible();
+  }
+  await page.getByRole('button', { name: `Open ${title}` }).click();
+  await confirmGraphLibraryReplacement(page, title);
+  await expect.poll(async () => {
+    const result = await callWebMcpTool<{
+      ok: true; graph: { id: string };
+    }>(page, 'get_graph', {});
+    return result.graph.id;
+  }).toBe(expectedGraphId);
+}
+
+export async function confirmGraphLibraryReplacement(page: Page, title: string) {
+  const confirmation = page.getByRole('alertdialog', { name: `Open “${title}”?` });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText('One Undo restores your current workflow.');
+  await confirmation.getByRole('button', { name: 'Replace canvas' }).click();
+  await expect(confirmation).toHaveCount(0);
 }
 
 export async function freezeResearchIntake(page: Page) {

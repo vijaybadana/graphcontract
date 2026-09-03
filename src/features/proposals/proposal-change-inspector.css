@@ -1,0 +1,40 @@
+.proposal-change-inspector { padding: 14px; color: var(--gc-ink); }
+.proposal-change-inspector__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--gc-ink-subtle); font-size: 10px; font-weight: 760; }
+.proposal-change-inspector__back { display: inline-flex; align-items: center; gap: 4px; color: var(--gc-ink-muted); font-size: 10px; font-weight: 760; }
+.proposal-change-inspector__back:hover { color: var(--gc-ink); }
+.proposal-change-inspector__back:focus-visible { outline: 2px solid var(--gc-focus); outline-offset: 2px; }
+.proposal-change-inspector__title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.proposal-change-inspector__section { color: var(--gc-ink-subtle); font-size: 10px; font-weight: 760; }
+.proposal-change-inspector__title-row h3 { margin: 3px 0 0; color: var(--gc-ink); font-size: 12px; font-weight: 800; overflow-wrap: anywhere; }
+.proposal-change-inspector__status { border-radius: 999px; background: var(--gc-surface-muted); padding: 4px 7px; color: var(--gc-ink-muted); font-size: 10px; font-weight: 780; }
+.proposal-change-inspector__status[data-diff-state='added'] { color: var(--gc-success); }
+.proposal-change-inspector__status[data-diff-state='updated'] { color: var(--gc-warning); }
+.proposal-change-inspector__status[data-diff-state='removed'] { color: var(--gc-danger); }
+.proposal-change-inspector__navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.proposal-change-inspector__navigation .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
+.proposal-change-inspector__changes,
+.proposal-change-inspector__all-details { margin-top: 12px; border-top: 1px solid var(--gc-border); padding-top: 12px; }
+.proposal-change-inspector__changes h4,
+.proposal-change-inspector__all-details > summary { color: var(--gc-ink); font-size: 11px; font-weight: 760; }
+.proposal-change-inspector__all-details > summary { cursor: pointer; }
+.proposal-change-inspector__changes dl,
+.proposal-change-inspector__all-details dl { display: grid; gap: 7px; margin: 8px 0 0; }
+.proposal-change-inspector__changes dl > div,
+.proposal-change-inspector__all-details dl > div { display: grid; gap: 3px; }
+.proposal-change-inspector__changes dl > div {
+  grid-template-columns: minmax(90px, 0.7fr) minmax(0, 1.3fr);
+  align-items: start;
+  border-bottom: 1px solid color-mix(in srgb, var(--gc-border) 62%, transparent);
+  padding: 7px 0;
+}
+.proposal-change-inspector__changes dl > div:last-child { border-bottom: 0; }
+.proposal-change-inspector__changes dt,
+.proposal-change-inspector__all-details dt { color: var(--gc-ink-subtle); font-size: 10px; font-weight: 760; overflow-wrap: anywhere; }
+.proposal-change-inspector__changes dd,
+.proposal-change-inspector__all-details dd { margin: 0; color: var(--gc-ink-muted); font-size: 10px; overflow-wrap: anywhere; }
+.proposal-change-inspector__changes dd { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 5px; }
+.proposal-change-inspector__changes dd[aria-label^='Added'],
+.proposal-change-inspector__changes dd[aria-label$='Removed'] { grid-template-columns: auto minmax(0, 1fr); }
+@media (max-width: 1099px) {
+  .proposal-change-inspector__changes dl > div { grid-template-columns: 1fr; }
+}

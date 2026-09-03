@@ -1,11 +1,12 @@
 'use client';
 
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
-import { ArrowsInIcon, ClockCountdownIcon, LockSimpleIcon, WarningCircleIcon } from '@phosphor-icons/react';
+import { ArrowsInIcon, ClockCountdownIcon, WarningCircleIcon } from '@phosphor-icons/react';
 
 import './merge-node.css';
 import './node-boundary.css';
 import type { Provenance } from '@/src/domain';
+import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 
 /**
  * Merge remains a structural canvas element. Keeping its data shape local to
@@ -42,18 +43,16 @@ const completionLabel = (data: MergeNodeData) => {
   return completion.mode === 'all' ? 'All inputs' : 'Any input';
 };
 
-export function MergeNode({ data, selected }: NodeProps<MergeFlowNode>) {
+export function MergeNode({ data, id, selected }: NodeProps<MergeFlowNode>) {
+  const reviewFocusState = useCanvasNodeReviewFocus(id);
   const reducer = data.merge?.reducer;
   const proposal = data.proposalState ? `Proposed ${data.proposalState}` : undefined;
 
   return (
     <div
-      className={`merge-node-shell ${selected ? 'is-selected' : ''} ${data.invalid ? 'is-invalid' : ''} ${
-        data.frozen ? 'is-frozen' : ''
-      } ${proposal ? `is-proposed-${data.proposalState}` : ''}`}
+      className={`merge-node-shell ${selected || reviewFocusState === 'active' ? 'is-selected' : ''} ${data.invalid ? 'is-invalid' : ''} ${proposal ? `is-proposed-${data.proposalState}` : ''} ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
       data-kind="merge"
       data-invalid={data.invalid || undefined}
-      data-frozen={data.frozen || undefined}
       data-proposal-state={data.proposalState}
     >
       <Handle type="target" position={Position.Left} className="merge-node-handle" />
@@ -89,7 +88,6 @@ export function MergeNode({ data, selected }: NodeProps<MergeFlowNode>) {
       <footer className="merge-node-statuses">
         <span>Waits for dynamic inputs</span>
         {data.invalid && <WarningCircleIcon size={14} weight="fill" aria-label="Invalid Merge" />}
-        {data.frozen && <LockSimpleIcon size={14} weight="bold" aria-label="Frozen Merge" />}
       </footer>
       <Handle type="source" position={Position.Right} className="merge-node-handle" />
     </div>

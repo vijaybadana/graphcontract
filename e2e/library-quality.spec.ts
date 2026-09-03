@@ -3,6 +3,10 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 
 const entries = [
+  ['research-supervisor-demo', 'Research Supervisor', 'vijaybadana/graphcontract'],
+  ['research-intake-routing-demo', 'Research Intake Routing', 'vijaybadana/graphcontract'],
+  ['human-control-hitl-demo', 'Human Control & HITL', 'vijaybadana/graphcontract'],
+  ['dynamic-parallelism-merge-demo', 'Parallel research · Send ×N', 'vijaybadana/graphcontract'],
   ['hierarchical-deep-research', 'Hierarchical Deep Research', 'langchain-ai/open_deep_research'],
   ['guarded-coding-agent-delivery', 'Guarded Coding-Agent Delivery', 'langchain-ai/open-swe'],
   ['evidence-to-approved-social-content', 'Evidence-to-Approved Social Content', 'CopilotKit/open-fullstack-social-media-agent'],
@@ -16,7 +20,7 @@ const entries = [
 ] as const;
 
 async function openLibrary(page: Page) {
-  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
   await expect(page.getByRole('dialog', { name: 'Graph library' })).toBeVisible();
 }
 
@@ -34,11 +38,10 @@ test('every library card exposes complete metadata and a canonical safe source l
       /^(foundational|intermediate|advanced)$/,
     );
     await expect.poll(() => card.locator('.graph-library-card__chips > span').count()).toBeGreaterThanOrEqual(3);
-    const sourceLink = card.getByRole('link', { name: `Open Inspired by ${source} on GitHub` });
+    const sourceLink = card.getByRole('link', { name: `Open ${source} on GitHub` });
     await expect(sourceLink).toHaveAttribute('href', `https://github.com/${source}`);
     await expect(sourceLink).toHaveAttribute('target', '_blank');
     await expect(sourceLink).toHaveAttribute('rel', 'noopener noreferrer');
-    await expect(card.getByText('Normalized — no source code copied', { exact: true })).toBeVisible();
-    await expect(card.locator('.graph-library-card__source-note')).not.toHaveText('');
+    await expect(sourceLink).toContainText('GitHub');
   }
 });

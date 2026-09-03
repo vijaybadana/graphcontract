@@ -56,7 +56,8 @@ test('a derived loop can be selected, removed by keyboard, and restored with und
 
 test('fallback help explains its contract and duplicate fallbacks surface validation', async ({ app }) => {
   await loadResearchIntake(app);
-  await app.getByTestId('rf__edge-supervisor-researcher').click();
+  await app.getByTestId('rf__edge-supervisor-researcher').focus();
+  await app.keyboard.press('Enter');
   await chooseInspectorOption(app, 'Routing mode', 'Fallback');
 
   await expect(app.getByText(/One fallback is allowed per source\./)).toBeVisible();

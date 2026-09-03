@@ -2,8 +2,10 @@
 
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import { GlobeHemisphereWestIcon } from '@phosphor-icons/react';
+import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 
 import './external-system-tile.css';
+import './node-boundary.css';
 
 /** A deterministic canvas-only boundary endpoint for a non-native relationship. */
 export type ExternalSystemTileData = {
@@ -17,9 +19,10 @@ export type ExternalSystemTileFlowNode = Node<
   'externalSystemTile'
 >;
 
-export function ExternalSystemTile({ data }: NodeProps<ExternalSystemTileFlowNode>) {
+export function ExternalSystemTile({ data, id }: NodeProps<ExternalSystemTileFlowNode>) {
+  const reviewFocusState = useCanvasNodeReviewFocus(id);
   return (
-    <div className="external-system-tile" data-external-id={data.externalId}>
+    <div className={`external-system-tile ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`} data-external-id={data.externalId}>
       <Handle type="target" position={Position.Left} className="external-system-tile__handle" />
       <span className="external-system-tile__icon" aria-hidden="true">
         <GlobeHemisphereWestIcon size={19} weight="bold" />

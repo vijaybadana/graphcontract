@@ -11,15 +11,16 @@ import {
   GitFork,
   GitBranch,
   Lightning,
-  LockSimple,
   Shield,
   WarningCircle,
 } from '@phosphor-icons/react';
+import type { CSSProperties } from 'react';
 
 import type {
   CanvasEdgePresentation,
   CanvasNativeEdge,
 } from '@/src/adapters/react-flow/project-graph';
+import { useCanvasEdgeReviewFocus } from './canvas-review-focus';
 
 import './routing-edge.css';
 
@@ -32,48 +33,59 @@ type RoutingEdgeTokens = {
 /** Exported for focused component coverage and to keep state precedence explicit. */
 export function routingEdgeTokens(presentation: CanvasEdgePresentation): RoutingEdgeTokens {
   if (presentation.runtimeInstance) {
-    return { color: '#5969c8', haloColor: 'rgb(89 105 200 / 25%)', dasharray: '4 4' };
-  }
-  if (presentation.frozen) {
-    return { color: '#9ca3af', haloColor: 'rgb(156 163 175 / 30%)', dasharray: '5 5' };
+    return { color: 'var(--gc-route-send)', haloColor: 'color-mix(in srgb, var(--gc-route-send) 25%, transparent)', dasharray: '4 4' };
   }
   if (presentation.invalid) {
-    return { color: '#e0353d', haloColor: 'rgb(224 53 61 / 30%)', dasharray: '4 3' };
+    return { color: 'var(--gc-route-invalid)', haloColor: 'color-mix(in srgb, var(--gc-route-invalid) 30%, transparent)', dasharray: '4 3' };
   }
   if (presentation.provenance === 'runtime-generated') {
-    return { color: '#2563eb', haloColor: 'rgb(37 99 235 / 28%)', dasharray: '2 5' };
+    return { color: 'var(--gc-focus)', haloColor: 'color-mix(in srgb, var(--gc-focus) 28%, transparent)', dasharray: '2 5' };
   }
   if (presentation.provenance === 'derived-semantic') {
-    return { color: '#6d28d9', haloColor: 'rgb(109 40 217 / 28%)', dasharray: '11 4 2 4' };
+    return { color: 'var(--gc-route-conditional)', haloColor: 'color-mix(in srgb, var(--gc-route-conditional) 28%, transparent)', dasharray: '11 4 2 4' };
   }
   if (presentation.provenance === 'external-orchestration') {
-    return { color: '#6b7280', haloColor: 'rgb(107 114 128 / 28%)', dasharray: '7 5' };
+    return { color: 'var(--gc-route-proxy)', haloColor: 'color-mix(in srgb, var(--gc-route-proxy) 28%, transparent)', dasharray: '7 5' };
   }
   if (presentation.loop) {
-    return { color: '#ea6a18', haloColor: 'rgb(234 106 24 / 28%)' };
+    return { color: 'var(--gc-route-loop)', haloColor: 'color-mix(in srgb, var(--gc-route-loop) 28%, transparent)' };
   }
   if (presentation.mode === 'command') {
-    return { color: '#3346c8', haloColor: 'rgb(51 70 200 / 28%)', dasharray: '7 5' };
+    return { color: 'var(--gc-route-command)', haloColor: 'color-mix(in srgb, var(--gc-route-command) 28%, transparent)', dasharray: '7 5' };
   }
   if (presentation.mode === 'conditional') {
-    return { color: '#7136cc', haloColor: 'rgb(113 54 204 / 28%)' };
+    return { color: 'var(--gc-route-fallback)', haloColor: 'color-mix(in srgb, var(--gc-route-fallback) 28%, transparent)' };
   }
   if (presentation.mode === 'fallback') {
-    return { color: '#8b55d8', haloColor: 'rgb(139 85 216 / 28%)', dasharray: '6 5' };
+    return { color: 'var(--gc-purple)', haloColor: 'color-mix(in srgb, var(--gc-purple) 28%, transparent)', dasharray: '6 5' };
   }
   if (presentation.proposalState === 'added') {
-    return { color: '#159160', haloColor: 'rgb(21 145 96 / 28%)' };
+    return { color: 'var(--gc-proposal-added)', haloColor: 'color-mix(in srgb, var(--gc-proposal-added) 28%, transparent)' };
   }
   if (presentation.proposalState === 'updated') {
-    return { color: '#c47b24', haloColor: 'rgb(196 123 36 / 28%)' };
+    return { color: 'var(--gc-proposal-updated)', haloColor: 'color-mix(in srgb, var(--gc-proposal-updated) 28%, transparent)' };
   }
   if (presentation.proposalState === 'removed') {
-    return { color: '#db4b55', haloColor: 'rgb(219 75 85 / 28%)', dasharray: '6 5' };
+    return { color: 'var(--gc-proposal-removed)', haloColor: 'color-mix(in srgb, var(--gc-proposal-removed) 28%, transparent)', dasharray: '6 5' };
   }
-  return { color: '#303a35', haloColor: 'rgb(37 99 235 / 30%)' };
+  return { color: 'var(--gc-route-default)', haloColor: 'color-mix(in srgb, var(--gc-focus) 30%, transparent)' };
 }
 
-function loopPath(
+function cubicPoint(
+  start: number,
+  controlOne: number,
+  controlTwo: number,
+  end: number,
+  t: number,
+) {
+  const inverse = 1 - t;
+  return inverse ** 3 * start +
+    3 * inverse ** 2 * t * controlOne +
+    3 * inverse * t ** 2 * controlTwo +
+    t ** 3 * end;
+}
+
+export function loopPath(
   sourceX: number,
   sourceY: number,
   targetX: number,
@@ -83,10 +95,15 @@ function loopPath(
   const right = Math.max(sourceX, targetX);
   const arcHeight = Math.max(76, Math.abs(sourceY - targetY) * 0.55 + 44);
   const controlX = right + Math.max(56, (right - left) * 0.22);
-  const labelX = (sourceX + targetX) / 2 + Math.max(26, (right - left) * 0.1);
-  const labelY = Math.min(sourceY, targetY) - arcHeight * 0.58;
+  const controlOneY = sourceY + 22;
+  const controlTwoY = targetY - arcHeight;
+  // Keep the route pill centered on the actual cubic instead of estimating a
+  // point above it. This remains correct when layout direction or span changes.
+  const labelT = 0.5;
+  const labelX = cubicPoint(sourceX, controlX, controlX, targetX, labelT);
+  const labelY = cubicPoint(sourceY, controlOneY, controlTwoY, targetY, labelT);
   return [
-    `M ${sourceX},${sourceY} C ${controlX},${sourceY + 22} ${controlX},${targetY - arcHeight} ${targetX},${targetY}`,
+    `M ${sourceX},${sourceY} C ${controlX},${controlOneY} ${controlX},${controlTwoY} ${targetX},${targetY}`,
     labelX,
     labelY,
   ];
@@ -129,6 +146,8 @@ export function RoutingEdge({
   targetPosition = Position.Left,
   interactionWidth,
 }: EdgeProps<CanvasNativeEdge>) {
+  const contextReviewFocusState = useCanvasEdgeReviewFocus(data.domainEdgeIds);
+  const reviewFocusState = contextReviewFocusState ?? data.reviewFocusState;
   const presentation = data.presentation;
   const [edgePath, labelX, labelY] = presentation.loop
     ? loopPath(sourceX, sourceY, targetX, targetY)
@@ -154,7 +173,6 @@ export function RoutingEdge({
       (displayLabel ||
       presentation.mode !== 'normal' ||
       presentation.invalid ||
-      presentation.frozen ||
       proposal ||
       provenance ||
       data.evidenceMarker),
@@ -163,15 +181,38 @@ export function RoutingEdge({
     ...style,
     stroke: tokens.color,
     strokeDasharray: tokens.dasharray ?? style?.strokeDasharray,
-  };
+    '--routing-edge-color': tokens.color,
+    '--routing-edge-width': typeof style?.strokeWidth === 'number'
+      ? `${style.strokeWidth}px`
+      : style?.strokeWidth ?? '1.8px',
+  } as CSSProperties;
 
   return (
     <>
+      <path
+        d={edgePath}
+        className="routing-edge__hover-halo"
+        fill="none"
+        vectorEffect="non-scaling-stroke"
+        aria-hidden="true"
+        style={{
+          stroke: tokens.haloColor,
+          strokeDasharray: tokens.dasharray ?? style?.strokeDasharray,
+          strokeWidth: 2.9,
+        }}
+      />
       {selected && (
-        <BaseEdge
-          path={edgePath}
+        <path
+          d={edgePath}
           className="routing-edge__selection-halo"
-          style={{ stroke: tokens.haloColor, strokeWidth: 8 }}
+          fill="none"
+          vectorEffect="non-scaling-stroke"
+          aria-hidden="true"
+          style={{
+            stroke: 'color-mix(in srgb, var(--gc-focus) 42%, transparent)',
+            strokeDasharray: tokens.dasharray ?? style?.strokeDasharray,
+            strokeWidth: 3.3,
+          }}
         />
       )}
       <BaseEdge
@@ -181,11 +222,19 @@ export function RoutingEdge({
         interactionWidth={interactionWidth ?? 28}
           className={`routing-edge__path routing-edge--${presentation.mode} ${
           presentation.loop ? 'routing-edge--loop' : ''
-        } ${presentation.invalid ? 'routing-edge--invalid' : ''} ${
-          presentation.frozen ? 'routing-edge--frozen' : ''
-        } ${proposal ? `routing-edge--proposal-${presentation.proposalState}` : ''} provenance--${presentation.provenance}`}
+        } ${presentation.invalid ? 'routing-edge--invalid' : ''} ${proposal ? `routing-edge--proposal-${presentation.proposalState}` : ''} ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''} provenance--${presentation.provenance}`}
         style={pathStyle}
       />
+      {presentation.scenarioState === 'active' && (
+        <path
+          d={edgePath}
+          className="routing-edge__scenario-motion"
+          fill="none"
+          vectorEffect="non-scaling-stroke"
+          aria-hidden="true"
+          style={{ stroke: tokens.color }}
+        />
+      )}
       {showSourceDot && (
         <circle
           className="routing-edge__branch-dot"
@@ -202,12 +251,13 @@ export function RoutingEdge({
             className={`routing-edge-label routing-edge-label--${presentation.mode} ${
               presentation.loop ? 'routing-edge-label--loop' : ''
             } ${presentation.invalid ? 'routing-edge-label--invalid' : ''} ${
-              presentation.frozen ? 'routing-edge-label--frozen' : ''}`}
+              presentation.scenarioState ? `scenario-state--${presentation.scenarioState}` : ''} ${
+              reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
+            data-review-focus={reviewFocusState}
             data-edge-id={id}
             data-mode={presentation.mode}
             data-loop={presentation.loop || undefined}
             data-invalid={presentation.invalid || undefined}
-            data-frozen={presentation.frozen || undefined}
             data-proposal-state={presentation.proposalState}
             data-provenance={presentation.provenance}
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)` }}
@@ -215,7 +265,6 @@ export function RoutingEdge({
               semantic,
               displayLabel ? `route ${displayLabel}` : undefined,
               presentation.invalid ? 'invalid' : undefined,
-              presentation.frozen ? 'frozen' : undefined,
               proposal,
               provenance,
             ]
@@ -240,15 +289,11 @@ export function RoutingEdge({
               {presentation.invalid && (
                 <WarningCircle size={15} weight="fill" aria-hidden="true" />
               )}
-              {presentation.frozen && (
-                <LockSimple size={14} weight="bold" aria-hidden="true" />
-              )}
               <span className="routing-edge-label__text">{displayLabel || semantic}</span>
               {presentation.loop && <span className="routing-edge-label__cue">Loop</span>}
               {proposal && <span className="routing-edge-label__proposal">{proposal}</span>}
               {provenance && <span className="routing-edge-label__provenance">{provenance}</span>}
               {presentation.invalid && <span className="routing-edge-label__state">Invalid</span>}
-              {presentation.frozen && <span className="routing-edge-label__state">Frozen</span>}
               {data.evidenceMarker && (
                 <button
                   type="button"

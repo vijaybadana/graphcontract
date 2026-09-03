@@ -110,7 +110,7 @@ describe('ContractNode Step anatomy', () => {
     expect(shell.querySelector('[data-modifier-id="sensitive"]')).toBeTruthy();
   });
 
-  it('uses the unbadged deterministic Step baseline while preserving explicit invalid and frozen status', async () => {
+  it('uses the unbadged deterministic Step baseline without repeating contract-level frozen state', async () => {
     render(
       <MountedContractNode
         data={{
@@ -132,12 +132,12 @@ describe('ContractNode Step anatomy', () => {
     expect(shell.querySelector('[data-node-visual="task"]')).not.toBeNull();
     expect(screen.getByText('Task')).toBeTruthy();
     expect(shell.classList.contains('is-invalid')).toBe(true);
-    expect(shell.classList.contains('is-frozen')).toBe(true);
+    expect(shell.classList.contains('is-frozen')).toBe(false);
     expect(shell.classList.contains('is-proposed-added')).toBe(true);
     expect(shell.querySelector('.contract-node-modifier-rail')).toBeNull();
     expect(screen.queryByText('Deterministic')).toBeNull();
     expect(screen.getByText('Invalid')).toBeTruthy();
-    expect(screen.getByText('Frozen')).toBeTruthy();
+    expect(screen.queryByText('Frozen')).toBeNull();
     expect(screen.getByText('Proposed added')).toBeTruthy();
   });
 
@@ -158,6 +158,29 @@ describe('ContractNode Step anatomy', () => {
     expect(shell.getAttribute('data-display-kind')).toBe('human');
     expect(shell.querySelector('[data-node-visual="human"]')).not.toBeNull();
     expect(within(shell as HTMLElement).getByText('Human', { selector: '.contract-node-kind' })).toBeTruthy();
+  });
+
+  it('marks a Send worker as one canonical dynamic template', async () => {
+    render(
+      <MountedContractNode
+        data={{
+          id: 'researcher-template',
+          kind: 'step',
+          executor: 'ai',
+          label: 'Researcher worker',
+          position: { x: 160, y: 100 },
+          sendTemplate: {
+            edgeId: 'supervisor-send',
+            payloadLabel: 'research task',
+            mergeNodeId: 'research-merge',
+          },
+        }}
+      />,
+    );
+
+    const shell = (await screen.findByText('Researcher worker')).closest('.contract-node-shell')!;
+    expect(shell.getAttribute('data-send-template')).toBe('true');
+    expect(within(shell as HTMLElement).getByText('Template ×N')).toBeTruthy();
   });
 
   it('renders before, inside, and after gates at distinct accessible node boundaries', async () => {

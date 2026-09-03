@@ -17,6 +17,11 @@ type CanvasNodeInteractionsOptions = {
   selectedEdgeIds: string[];
   editable: boolean;
   onCommitPositions: (positions: Record<string, CanvasPosition>) => void;
+  renderedSelectionRequest?: {
+    nodeIds: string[];
+    edgeIds: string[];
+    requestId: number;
+  } | null;
 };
 
 type DragSnapshot = {
@@ -85,7 +90,7 @@ export function reconcileProjectedNodes(
 // Canonical graph projections flow into this layer, while React Flow owns
 // transient selection and measurement. Feeding mirrored selection back through
 // controlled props creates a StoreUpdater loop during rectangle selection.
-function reconcileProjectedEdges(
+export function reconcileProjectedEdges(
   currentEdges: CanvasFlowEdge[],
   projectedEdges: CanvasFlowEdge[],
   selectedEdgeIds: string[],
@@ -100,14 +105,14 @@ function reconcileProjectedEdges(
       return { ...projectedEdge, selected };
     }
     if (currentEdges[index]?.id !== projectedEdge.id) changed = true;
-    if (
-      edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge) &&
-      currentEdge.selected === selected
-    ) {
-      return currentEdge;
-    }
+    if (edgeProjectionKey(currentEdge) === edgeProjectionKey(projectedEdge)) return currentEdge;
     changed = true;
-    return { ...projectedEdge, selected };
+    // React Flow owns selection while a pointer gesture is in progress. The
+    // workspace receives that selection through onSelectionChange, but must
+    // not immediately mirror it back through the controlled edges prop: its
+    // rectangle selector updates incident edges on every pointer move and a
+    // feedback cycle here causes React's maximum-update-depth failure.
+    return { ...projectedEdge, selected: currentEdge.selected };
   });
   return changed ? reconciled : currentEdges;
 }
@@ -119,6 +124,7 @@ export function useCanvasInteractions({
   selectedEdgeIds,
   editable,
   onCommitPositions,
+  renderedSelectionRequest,
 }: CanvasNodeInteractionsOptions) {
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>(projectedNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<CanvasFlowEdge>(projectedEdges);
@@ -126,6 +132,7 @@ export function useCanvasInteractions({
   const [collisionNodeIds, setCollisionNodeIds] = useState<string[]>([]);
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const draggingRef = useRef(false);
+  const selectionGestureRef = useRef(false);
   const lastDragRef = useRef<DragSnapshot | null>(null);
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const selectedEdgeIdsRef = useRef(selectedEdgeIds);
@@ -150,6 +157,7 @@ export function useCanvasInteractions({
   }, [projectedEdges, setEdges]);
 
   useEffect(() => {
+    if (selectionGestureRef.current) return;
     setEdges((currentEdges) => {
       let changed = false;
       const reconciled = currentEdges.map((edge) => {
@@ -161,6 +169,33 @@ export function useCanvasInteractions({
       return changed ? reconciled : currentEdges;
     });
   }, [selectedEdgeIds, setEdges]);
+
+  // Projection-only controls (for example the dynamic worker-group frame)
+  // are not selectable React Flow nodes themselves. Mirror only their
+  // explicit, one-shot selection request into React Flow's transient state;
+  // ordinary pointer selection remains owned by React Flow and never enters
+  // this path, avoiding the rectangle-selection feedback loop.
+  useEffect(() => {
+    if (!renderedSelectionRequest) return;
+    const requestedNodeIds = new Set(renderedSelectionRequest.nodeIds);
+    const requestedEdgeIds = new Set(renderedSelectionRequest.edgeIds);
+    setNodes((currentNodes) => currentNodes.map((node) => ({
+      ...node,
+      selected: requestedNodeIds.has(node.id),
+    })));
+    setEdges((currentEdges) => currentEdges.map((edge) => ({
+      ...edge,
+      selected: requestedEdgeIds.has(edge.id),
+    })));
+  }, [renderedSelectionRequest, setEdges, setNodes]);
+
+  const onSelectionStart = useCallback(() => {
+    selectionGestureRef.current = true;
+  }, []);
+
+  const onSelectionEnd = useCallback(() => {
+    selectionGestureRef.current = false;
+  }, []);
 
   const clearRenderedSelection = useCallback(() => {
     setNodes((currentNodes) =>
@@ -269,6 +304,8 @@ export function useCanvasInteractions({
     guides,
     onNodesChange,
     onEdgesChange,
+    onSelectionStart,
+    onSelectionEnd,
     onNodeDragStart,
     onNodeDrag,
     onNodeDragStop,

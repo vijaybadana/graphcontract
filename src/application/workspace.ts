@@ -196,6 +196,24 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
   const editable = (state: WorkspaceCore) =>
     state.graph.status === 'draft' && state.proposal === null;
 
+  /**
+   * A revision request belongs to both the candidate the human reviewed and
+   * the accepted graph revision they reviewed it against. Keeping both checks
+   * at this seam prevents a later proposal from consuming feedback that was
+   * written for a different candidate or accepted revision.
+   */
+  const reviewRequestMatchesCurrentCandidate = (state: WorkspaceCore) => {
+    const reviewRequest = state.reviewRequest;
+    const proposal = state.proposal;
+    return !!reviewRequest &&
+      !!proposal &&
+      reviewRequest.proposalId === proposal.id &&
+      reviewRequest.proposalCreatedAt === proposal.createdAt &&
+      reviewRequest.reviewedGraphId === state.graph.id &&
+      reviewRequest.reviewedGraphUpdatedAt === state.graph.updatedAt &&
+      proposalMatchesGraph(proposal, state.graph);
+  };
+
   const blocked = (state: WorkspaceCore): WorkspaceTransition => ({
     state,
     changed: false,
@@ -745,16 +763,36 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     },
 
     submitProposal(state: WorkspaceCore, input: unknown): WorkspaceTransition<ProposalResult> {
-      if (state.proposal) {
+      const replacingRequestedProposal = !!state.proposal && !!state.reviewRequest;
+      if (state.proposal && !replacingRequestedProposal) {
         const error = {
           code: 'PENDING_PROPOSAL_EXISTS',
           message: 'Review the current proposal before submitting another one.',
         };
         return { state, changed: false, result: { ok: false, error } };
       }
+      if (replacingRequestedProposal && !reviewRequestMatchesCurrentCandidate(state)) {
+        const error = {
+          code: 'PROPOSAL_STALE',
+          message: 'The requested revision no longer matches the accepted graph. Read it again before proposing changes.',
+        };
+        return { state, changed: false, result: { ok: false, error } };
+      }
       const result = createProposal(state.graph, input);
       if (!result.proposal) {
         return { state, changed: false, result: { ok: false, error: result.error! } };
+      }
+      if (replacingRequestedProposal &&
+        (result.proposal.status !== 'pending' || !proposalMatchesGraph(result.proposal, state.graph))) {
+        const error = {
+          code: result.proposal.status === 'invalid' ? 'PROPOSAL_INVALID' : 'PROPOSAL_STALE',
+          message:
+            result.proposal.status === 'invalid'
+              ? 'The replacement proposal is invalid. The requested candidate and feedback were retained.'
+              : 'The replacement proposal no longer matches the accepted graph.',
+          ...(result.proposal.validationErrors ? { issues: result.proposal.validationErrors } : {}),
+        };
+        return { state, changed: false, result: { ok: false, error } };
       }
       return {
         state: {
@@ -776,6 +814,13 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
 
     approveProposal(state: WorkspaceCore): WorkspaceTransition<ProposalResult> {
       const proposal = state.proposal;
+      if (reviewRequestMatchesCurrentCandidate(state)) {
+        const error = {
+          code: 'PROPOSAL_CHANGES_REQUESTED',
+          message: 'This reviewed candidate is awaiting a valid replacement and cannot be approved.',
+        };
+        return { state, changed: false, result: { ok: false, error } };
+      }
       if (!proposal || proposal.status !== 'pending') {
         const error = {
           code: 'PROPOSAL_INVALID',
@@ -826,6 +871,13 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
 
     rejectProposal(state: WorkspaceCore): WorkspaceTransition {
       if (!state.proposal) return { state, changed: false };
+      if (reviewRequestMatchesCurrentCandidate(state)) {
+        return {
+          state,
+          changed: false,
+          notice: 'This reviewed candidate is awaiting a valid replacement.',
+        };
+      }
       return {
         state: { ...state, proposal: null },
         changed: true,
@@ -842,6 +894,13 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         const error = {
           code: 'PROPOSAL_MISSING',
           message: 'There is no proposal awaiting human review.',
+        };
+        return { state, changed: false, result: { ok: false, error } };
+      }
+      if (reviewRequestMatchesCurrentCandidate(state)) {
+        const error = {
+          code: 'PROPOSAL_CHANGES_ALREADY_REQUESTED',
+          message: 'Changes were already requested for this candidate. Wait for a valid replacement.',
         };
         return { state, changed: false, result: { ok: false, error } };
       }
@@ -863,7 +922,9 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         reviewedAt: dependencies.now(),
       };
       return {
-        state: { ...state, proposal: null, reviewRequest },
+        // Preserve the reviewed candidate in full (operations, diff, and ID)
+        // alongside the feedback so a replacement can be validated atomically.
+        state: { ...state, proposal, reviewRequest },
         changed: true,
         notice: 'Changes requested. The accepted graph was not changed.',
         result: { ok: true, reviewRequest },
@@ -950,7 +1011,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       return {
         ...changeGraph(
           state,
-          () => layoutWorkflowGraph(entry.graph),
+          () => clone(entry.graph),
           `“${entry.title}” opened from the Graph Library. One Undo restores your previous workflow.`,
         ),
         layoutApplied: true,

@@ -4,6 +4,7 @@ import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSmoothStepPath, Position } f
 import { ArrowsOutCardinalIcon, PathIcon, PlugsConnectedIcon } from '@phosphor-icons/react';
 
 import type { CanvasSystemRelationshipEdge } from '@/src/adapters/react-flow/project-graph';
+import { useCanvasEdgeReviewFocus } from './canvas-review-focus';
 
 import './system-relationship-edge.css';
 
@@ -28,6 +29,8 @@ export function SystemRelationshipEdge({
   markerEnd,
   interactionWidth,
 }: EdgeProps<CanvasSystemRelationshipEdge>) {
+  const contextReviewFocusState = useCanvasEdgeReviewFocus([], data.relationship.id);
+  const reviewFocusState = contextReviewFocusState ?? data.reviewFocusState;
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
@@ -61,13 +64,14 @@ export function SystemRelationshipEdge({
         interactionWidth={interactionWidth ?? 34}
         className={`system-relationship-edge__path ${external ? 'is-external' : 'is-spawned'} ${
           proposal ? `is-proposed-${proposal}` : ''
-        }`}
+        } ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
       />
       <EdgeLabelRenderer>
         <div
           className={`system-relationship-edge__label ${external ? 'is-external' : 'is-spawned'} ${
             proposal ? `is-proposed-${proposal}` : ''
-          }`}
+          } ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
+          data-review-focus={reviewFocusState}
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)` }}
         >
           <button

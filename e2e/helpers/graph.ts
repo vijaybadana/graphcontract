@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { callWebMcpTool, expect } from '../fixtures';
+import { callWebMcpTool, expect, loadGraphLibraryEntry } from '../fixtures';
 
 export type E2EGraphNode = {
   id: string;
@@ -43,12 +43,7 @@ export async function readGraph(page: Page): Promise<E2EGraph> {
 }
 
 export async function loadResearchSupervisor(page: Page) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with the Research Supervisor demo?');
-    await dialog.accept();
-  });
-  await page.getByRole('button', { name: 'Load Research Supervisor demo' }).click();
+  await loadGraphLibraryEntry(page, 'Research Supervisor', 'research-supervisor-demo');
   await expect.poll(async () => {
     const graph = await readGraph(page);
     return { id: graph.id, name: graph.name, nodes: graph.nodes.length, edges: graph.edges.length };

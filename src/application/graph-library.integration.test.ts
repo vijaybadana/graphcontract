@@ -48,6 +48,12 @@ describe('graph library all-template integration', () => {
     expect(loaded).toMatchObject({ changed: true, layoutApplied: true });
     expect(loaded.state.graph).not.toBe(entry.graph);
     expect(loaded.state.graph.id).toBe(entry.graph.id);
+    expect(loaded.state.graph.nodes.map((node) => node.position)).toEqual(
+      entry.graph.nodes.map((node) => node.position),
+    );
+    expect(loaded.state.graph.subgraphs.map((subgraph) => ({ position: subgraph.position, dimensions: subgraph.dimensions }))).toEqual(
+      entry.graph.subgraphs.map((subgraph) => ({ position: subgraph.position, dimensions: subgraph.dimensions })),
+    );
     expect(validateGraph(loaded.state.graph)).toEqual([]);
 
     const frozen = service.freezeGraph(loaded.state);

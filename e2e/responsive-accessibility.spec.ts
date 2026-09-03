@@ -4,6 +4,7 @@ import {
   callWebMcpTool,
   expect,
   freezeResearchIntake,
+  loadGraphLibraryEntry,
   test,
 } from './fixtures';
 
@@ -23,14 +24,7 @@ async function expectNoHorizontalPageOverflow(page: Page) {
 }
 
 async function loadResearchSupervisor(page: Page) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain(
-      'Replace the current canvas with the Research Supervisor demo?',
-    );
-    await dialog.accept();
-  });
-  await page.getByRole('button', { name: 'Load Research Supervisor demo' }).click();
+  await loadGraphLibraryEntry(page, 'Research Supervisor', 'research-supervisor-demo');
   await expect(page.getByTestId('rf__node-research-supervisor')).toBeVisible();
   await expect(page.getByLabel('Graph status')).toContainText('6 nodes');
 }
@@ -57,7 +51,6 @@ test('1440 desktop keeps palette and inspector independently operable', async ({
 test('1024 compact workspace swaps palette and inspector instead of overlapping them', async ({ app }) => {
   await app.setViewportSize({ width: 1024, height: 768 });
 
-  await expect(app.getByText('Graph overview', { exact: true })).toBeVisible();
   await expect(app.getByRole('img', { name: /Graph overview navigator/ })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Fit view' })).toBeVisible();
   await expect(app.getByLabel('Graph status')).toBeVisible();
@@ -83,21 +76,23 @@ test('1024 compact workspace swaps palette and inspector instead of overlapping 
   });
   const projection = app.getByRole('radiogroup', { name: 'Canvas projection' });
   await expect(projection.getByRole('radio', { name: 'Proposal', exact: true })).toHaveAttribute('aria-checked', 'true');
-  await expect(app.getByRole('heading', { name: 'Before / Proposed' })).toBeVisible();
+  await expect(app.getByRole('heading', { name: 'Proposal' })).toBeVisible();
+  await expect(app.getByRole('heading', { name: 'Graph overview' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Collapse inspector' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Open Palette' })).toBeVisible();
   await app.getByRole('button', { name: 'Reject' }).click();
   await expectNoHorizontalPageOverflow(app);
 });
 
-test('768 tablet keeps editor chrome and inspector tabs reachable', async ({ app }) => {
+test('768 tablet keeps editor chrome and contextual Design inspector reachable', async ({ app }) => {
   await app.setViewportSize({ width: 768, height: 820 });
 
   await expect(app.getByRole('button', { name: 'Fit graph' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeVisible();
   await app.getByRole('button', { name: 'Open Inspector' }).click();
-  await expect(app.getByRole('tab', { name: 'Edit & review' })).toBeVisible();
-  await expect(app.getByRole('tab', { name: 'Scenarios' })).toBeVisible();
+  await expect(app.getByRole('heading', { name: /Customer Support Workflow/ })).toBeVisible();
+  await expect(app.getByRole('tab', { name: 'Edit & review' })).toHaveCount(0);
+  await expect(app.getByRole('tab', { name: 'Scenarios' })).toHaveCount(0);
   await expect(app.getByRole('button', { name: 'Open Palette' })).toBeVisible();
   await expectNoHorizontalPageOverflow(app);
 });
@@ -155,7 +150,6 @@ test('canvas chrome exposes named zoom, fit, reset, and minimap controls', async
   await expect(app.getByRole('button', { name: 'Fit view' })).toBeEnabled();
   await expect(app.getByRole('button', { name: 'Fit graph' })).toBeEnabled();
   await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeEnabled();
-  await expect(app.getByText('Graph overview', { exact: true })).toBeVisible();
   const overview = app.getByRole('img', { name: /Graph overview navigator/ });
   await expect(overview).toBeVisible();
   await expect
@@ -192,7 +186,7 @@ test('canvas chrome exposes named zoom, fit, reset, and minimap controls', async
 
 test('keyboard duplicate, delete, undo, and redo keep graph counts truthful', async ({ app }) => {
   await app.getByTestId('rf__node-classifier').click();
-  await expect(app.getByLabel('Graph status').getByText('1 selected')).toBeVisible();
+  await expect(app.getByTestId('rf__node-classifier')).toHaveClass(/selected/);
 
   await app.keyboard.press('Control+d');
   await expect(app.getByLabel('Graph status')).toContainText('8 nodes');
@@ -208,7 +202,7 @@ test('keyboard duplicate, delete, undo, and redo keep graph counts truthful', as
   await duplicate.focus();
   await expect(duplicate).toBeFocused();
   await duplicate.press('Enter');
-  await expect(app.getByLabel('Graph status')).toContainText('1 selected');
+  await expect(duplicate).toHaveClass(/selected/);
   await app.keyboard.press('Delete');
   await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
 });
@@ -216,9 +210,9 @@ test('keyboard duplicate, delete, undo, and redo keep graph counts truthful', as
 test('palette search filters components and announces a useful empty state', async ({ app }) => {
   const search = app.getByRole('searchbox', { name: 'Search components' });
   await search.fill('human');
-  await expect(app.getByRole('button', { name: 'Human review' })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Human' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Agent', exact: true })).toHaveCount(0);
-  await expect(app.getByText('1 of 9 components shown', { exact: true })).toBeAttached();
+  await expect(app.getByText('1 component and 0 references shown', { exact: true })).toBeAttached();
 
   await search.fill('not-a-component');
   await expect(
@@ -266,17 +260,16 @@ test('subgraph focus and collapse affordances expose their complete state', asyn
   await expect(subgraph).toHaveAccessibleName('Research Supervisor subgraph, collapsed');
 });
 
-test('frozen workspace announces review mode and disables authoring controls', async ({ app }) => {
+test('frozen workspace removes canvas instructions and disables authoring controls', async ({ app }) => {
   await freezeResearchIntake(app);
 
-  await expect(app.getByRole('note')).toContainText(
-    'Review mode · graph editing is temporarily locked',
-  );
+  await expect(app.locator('.canvas-instruction-strip')).toHaveCount(0);
   await expect(app.getByRole('button', { name: 'Duplicate selection' })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Delete selection' })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Redo' })).toBeDisabled();
   await expect(app.locator('.routing-edge-label[data-frozen="true"]')).toHaveCount(9);
-  await expect(app.getByLabel('Graph status')).toContainText('5 frozen paths');
+  await expect(app.getByLabel('Graph status')).toContainText('5 scenarios');
+  await expect(app.getByLabel('Graph status')).toContainText('Contract frozen');
 });
 
 test('reduced-motion preference removes workspace animation and transitions', async ({ app }) => {
@@ -303,25 +296,22 @@ test('reduced-motion preference removes workspace animation and transitions', as
   });
 });
 
-test('status counts and inspector tabs remain keyboard reachable', async ({ app }) => {
+test('status counts and global modes remain keyboard reachable', async ({ app }) => {
   await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
-  await expect(app.getByLabel('Graph status')).toContainText('8 branches');
-  await expect(app.getByLabel('Graph status')).toContainText('Contract valid');
+  await expect(app.getByLabel('Graph status')).toContainText('8 edges');
+  await expect(app.getByLabel('Graph status')).toContainText('0 scenarios');
+  await expect(app.getByLabel('Graph status')).toContainText('Ready to freeze');
 
   await app.getByTestId('rf__node-classifier').click();
-  await expect(app.getByLabel('Graph status')).toContainText('1 selected');
-  const review = app.getByRole('tab', { name: 'Edit & review' });
-  await expect(review).toHaveAttribute('aria-selected', 'true');
-  await review.focus();
-  await review.press('ArrowRight');
+  await expect(app.getByTestId('rf__node-classifier')).toHaveClass(/selected/);
+  await expect(app.getByRole('heading', { name: 'Classifier Agent' })).toBeVisible();
+  const design = app.getByRole('radio', { name: 'Design', exact: true });
+  await design.focus();
+  await expect(design).toBeFocused();
+  await expect(design).toHaveAttribute('aria-checked', 'true');
 
-  const scenarios = app.getByRole('tab', { name: 'Scenarios' });
-  await expect(scenarios).toBeFocused();
-  await expect(scenarios).toHaveAttribute('aria-selected', 'true');
-  await expect(app.getByRole('tabpanel')).toContainText(
-    'Freeze a valid contract',
-  );
-  await expect(app.getByRole('tabpanel')).toContainText(
-    'Every reachable Start-to-End path will be generated here.',
-  );
+  await freezeResearchIntake(app);
+  const scenario = app.getByRole('radio', { name: 'Scenario', exact: true });
+  await expect(scenario).toHaveAttribute('aria-checked', 'true');
+  await expect(app.getByRole('heading', { name: 'Scenarios' })).toBeVisible();
 });

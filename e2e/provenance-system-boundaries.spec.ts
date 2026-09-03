@@ -1,5 +1,6 @@
 import {
   callWebMcpTool,
+  confirmGraphLibraryReplacement,
   expect,
   test,
   webMcpToolNames,
@@ -271,14 +272,10 @@ test('relationship add, update, and removal previews are projection-only and rej
 
 test('selected scenarios preserve collapsed native proxies and dim unrelated non-native relationships', async ({ app }) => {
   const canvas = app.getByRole('application');
-  await app.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
+  await app.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
   await expect(app.getByRole('dialog')).toBeVisible();
-  app.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('Replace the current canvas with “Hierarchical Deep Research”?');
-    await dialog.accept();
-  });
   await app.getByRole('button', { name: 'Open Hierarchical Deep Research' }).click();
+  await confirmGraphLibraryReplacement(app, 'Hierarchical Deep Research');
   await expect.poll(async () => (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph.id).toBe(
     'library-hierarchical-deep-research',
   );
@@ -331,7 +328,7 @@ test('selected scenarios preserve collapsed native proxies and dim unrelated non
   expect(proposal).toMatchObject({ ok: true, proposal: { status: 'pending' } });
   await app.getByRole('button', { name: 'Approve' }).click();
   await app.getByRole('button', { name: 'Collapse inspector' }).click();
-  await app.getByRole('button', { name: 'Collapse subgraph Research cell' }).click();
+  await app.getByRole('button', { name: 'Collapse subgraph Research Supervisor' }).click();
   await app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' }).click();
 
   const frozen = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
@@ -352,7 +349,7 @@ test('selected scenarios preserve collapsed native proxies and dim unrelated non
   await scenarioRow.click();
   await expect(scenarioRow).toHaveAttribute('aria-pressed', 'true');
 
-  const proxy = canvas.getByTestId('rf__edge-subgraph-proxy:research-start:research-cell');
+  const proxy = canvas.getByTestId('rf__edge-subgraph-proxy:write-brief:research-cell');
   const activeBoundary = canvas.getByTestId('rf__edge-system-relationship:frame-review-boundary');
   const dimmedBoundary = canvas.getByTestId('rf__edge-system-relationship:evidence-archive-boundary');
   await expect(proxy).toHaveClass(/scenario-state--active/);

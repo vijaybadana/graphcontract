@@ -9,6 +9,7 @@ import {
   validateGraphLibraryDefinitions,
 } from './graph-library';
 import { GRAPH_LIBRARY_ENTRY_COUNT, cloneGraphLibraryGraph } from './graph-library-contract';
+import { layoutWorkflowGraph } from './layout-workflow';
 
 describe('graph library registry', () => {
   it('contains exactly ten distinct, safe, schema-v6 graph templates', () => {
@@ -62,6 +63,83 @@ describe('graph library registry', () => {
     expect(voice.nodes.some((node) => node.kind === 'step' && node.retry !== undefined)).toBe(false);
   });
 
+  it('models hierarchical research with one dynamic worker template inside one authored Supervisor subgraph', () => {
+    const entry = graphLibraryEntries.find((candidate) => candidate.id === 'hierarchical-deep-research')!;
+    const supervisor = entry.graph.subgraphs.find((subgraph) => subgraph.id === 'research-cell')!;
+    const members = entry.graph.nodes.filter((node) => node.parentId === supervisor.id);
+    const researcher = entry.graph.nodes.find((node) => node.id === 'researcher-template');
+    const merge = entry.graph.nodes.find((node) => node.id === 'research-merge');
+    const send = entry.graph.edges.find((edge) => edge.id === 'supervisor-send');
+
+    expect(supervisor).toMatchObject({
+      label: 'Research Supervisor',
+      collapsed: false,
+      position: { x: 1100, y: 100 },
+    });
+    expect(entry.layout?.preserveGraphGeometry).toBe(true);
+    expect(members.map((node) => node.id)).toEqual(expect.arrayContaining([
+      'research-cell-start',
+      'frame-question',
+      'inspect-evidence',
+      'researcher-template',
+      'research-merge',
+      'research-cell-end',
+    ]));
+    expect(researcher).toMatchObject({ kind: 'step', executor: 'ai', label: 'Researcher Agent' });
+    expect(merge).toMatchObject({
+      kind: 'merge',
+      merge: {
+        reducer: { name: 'merge_research_notes', aggregateState: 'researchNotes' },
+        completion: { mode: 'all' },
+        waitingForDynamicInputs: true,
+      },
+    });
+    expect(send).toMatchObject({
+      mode: 'send',
+      source: 'inspect-evidence',
+      target: 'researcher-template',
+      send: {
+        destinationTemplateId: 'researcher-template',
+        multiplicity: 'dynamic',
+        payloadLabel: 'research task',
+        mergeNodeId: 'research-merge',
+        templateAnatomy: {
+          canonicalTemplateNodeId: 'researcher-agent',
+          dimensions: { width: 1360, height: 430 },
+          nodes: expect.arrayContaining([
+            expect.objectContaining({ id: 'researcher-start', kind: 'start' }),
+            expect.objectContaining({ id: 'researcher-agent', kind: 'step', executor: 'ai' }),
+            expect.objectContaining({ id: 'research-tools', kind: 'step', executor: 'tool' }),
+            expect.objectContaining({ id: 'compress-findings', kind: 'step', executor: 'deterministic' }),
+            expect.objectContaining({ id: 'researcher-end', kind: 'end' }),
+          ]),
+        },
+      },
+    });
+    expect(entry.graph.edges.find((edge) => edge.id === 'merge-supervisor')).toMatchObject({
+      source: 'research-merge',
+      target: 'frame-question',
+      loopCap: 2,
+    });
+    expect(supervisor.dimensions).toEqual({ width: 1936, height: 1100 });
+    expect(researcher?.position).toEqual({ x: 336, y: 540 });
+    expect(researcher?.position.y).toBeGreaterThan(entry.graph.nodes.find((node) => node.id === 'frame-question')!.position.y);
+    expect(Object.fromEntries(entry.graph.nodes.map((node) => [node.id, node.position]))).toEqual({
+      'research-start': { x: 80, y: 583 },
+      'clarify-request': { x: 372, y: 583 },
+      'awaiting-user-reply': { x: 760, y: 484 },
+      'write-brief': { x: 760, y: 682 },
+      'research-cell-start': { x: 76, y: 160 },
+      'frame-question': { x: 336, y: 160 },
+      'inspect-evidence': { x: 736, y: 8 },
+      'research-cell-end': { x: 1676, y: 160 },
+      'researcher-template': { x: 336, y: 540 },
+      'research-merge': { x: 1456, y: 520 },
+      'final-report': { x: 3156, y: 583 },
+      'research-complete': { x: 3492, y: 583 },
+    });
+  });
+
   it('rejects duplicate IDs, unsafe sources, and invalid graph inputs', () => {
     const duplicate = structuredClone(graphLibraryEntries[0]!);
     const unsafe = structuredClone(graphLibraryEntries[1]!);
@@ -92,7 +170,17 @@ describe('graph library registry', () => {
     }
   });
 
-  it('has distinct supported topology signatures', () => {
+  it('materializes template geometry with the shared deterministic auto-layout', () => {
+    const sourceDefinitions = structuredClone(graphLibraryEntries);
+    const unlaidGraph = sourceDefinitions[0]!.graph;
+    unlaidGraph.nodes = unlaidGraph.nodes.map((node) => ({ ...node, position: { x: 0, y: 0 } }));
+    unlaidGraph.subgraphs = unlaidGraph.subgraphs.map((subgraph) => ({ ...subgraph, position: { x: 0, y: 0 } }));
+
+    const materialized = createGraphLibraryEntries(sourceDefinitions);
+    expect(materialized[0]!.graph).toEqual(layoutWorkflowGraph(unlaidGraph));
+  });
+
+  it('retains the original breadth while allowing focused built-in verification variants', () => {
     const signatures = graphLibraryEntries.map((entry) => ({
       subgraph: entry.graph.subgraphs.length > 0,
       send: entry.graph.edges.some((edge) => edge.mode === 'send'),
@@ -102,7 +190,7 @@ describe('graph library registry', () => {
       opaque: entry.graph.nodes.some((node) => node.kind === 'step' && node.opaque !== undefined),
       loop: entry.graph.edges.some((edge) => edge.loopCap !== undefined),
     }));
-    expect(new Set(signatures.map((signature) => JSON.stringify(signature))).size).toBe(GRAPH_LIBRARY_ENTRY_COUNT);
+    expect(new Set(signatures.map((signature) => JSON.stringify(signature))).size).toBeGreaterThanOrEqual(10);
   });
 
   it('uses canonical opaque metadata rather than presentation-only legacy flags', () => {

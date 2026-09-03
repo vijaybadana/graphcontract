@@ -5,7 +5,9 @@ test('freeze locks editing, survives reload, and unfreeze restores authoring', a
   await freezeResearchIntake(app);
 
   await expect(app.getByRole('button', { name: 'Agent' })).toBeDisabled();
-  await expect(app.getByRole('button', { name: 'Load Research Intake Routing' })).toBeDisabled();
+  await app.getByRole('button', { name: 'Workflow library, 14 templates' }).click();
+  await expect(app.getByRole('button', { name: /Open Research Intake Routing unavailable/ })).toBeDisabled();
+  await app.getByRole('button', { name: 'Close graph library' }).click();
   await expect(app.getByRole('button', { name: 'Undo' })).toBeDisabled();
 
   await app.reload();

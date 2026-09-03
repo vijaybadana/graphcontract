@@ -10,7 +10,6 @@ import { projectGraphToCanvas } from '@/src/adapters/react-flow/project-graph';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
 import { ContractNode } from './contract-node';
-import { NodePalette } from './node-palette';
 import { SubgraphNode } from './subgraph-node';
 
 const nodeTypes = { contractNode: ContractNode, subgraph: SubgraphNode };
@@ -195,20 +194,20 @@ describe('SubgraphNode in React Flow', () => {
     expect(onMove).toHaveBeenCalledTimes(movesBeforeKeys);
   });
 
-  it('keeps child clicks above explicit parent drag surfaces and renders visual-containment status', async () => {
+  it('keeps child clicks above the parent node surface and renders visual-containment status', async () => {
     const onNodeClick = vi.fn();
     render(<InteractiveSubgraphCanvas onNodeClick={onNodeClick} />);
 
     await screen.findByText('Child node');
     const header = screen.getByText('Review process');
-    const boundary = document.querySelector('.subgraph-node-boundary-drag-surface--bottom');
+    const shell = document.querySelector('.subgraph-node-shell');
 
-    expect(document.querySelector('.subgraph-node-drag-surface')).not.toBeNull();
-    expect(boundary).not.toBeNull();
+    expect(shell).not.toBeNull();
+    expect(document.querySelector('.subgraph-node-body-drag-surface')).not.toBeNull();
     expect(screen.getByText('Outside subgraph')).toBeTruthy();
 
     fireEvent.click(header);
-    fireEvent.click(boundary!);
+    fireEvent.click(shell!);
     fireEvent.click(screen.getByText('Child node'));
 
     expect(onNodeClick.mock.calls.map(([nodeId]) => nodeId)).toEqual([
@@ -216,41 +215,6 @@ describe('SubgraphNode in React Flow', () => {
       'review-group',
       'child-node',
     ]);
-  });
-
-  it('requires a clear confirmation before loading Research Intake Routing', () => {
-    const onLoadResearchSupervisorDemo = vi.fn();
-    const onLoadResearchIntakeRoutingDemo = vi.fn();
-    const onLoadHumanControlHitlDemo = vi.fn();
-    const onLoadDynamicParallelismDemo = vi.fn();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
-    render(
-      <NodePalette
-        graph={sampleGraph}
-        proposal={null}
-        disabled={false}
-        validationIssueCount={0}
-        onAdd={vi.fn()}
-        onLoadResearchSupervisorDemo={onLoadResearchSupervisorDemo}
-        onLoadResearchIntakeRoutingDemo={onLoadResearchIntakeRoutingDemo}
-        onLoadHumanControlHitlDemo={onLoadHumanControlHitlDemo}
-        onLoadDynamicParallelismDemo={onLoadDynamicParallelismDemo}
-        onCollapse={vi.fn()}
-      />,
-    );
-
-    const demoButton = screen.getByRole('button', { name: 'Load Research Intake Routing' });
-    fireEvent.click(demoButton);
-    expect(confirm).toHaveBeenLastCalledWith(
-      'Replace the current canvas with Research Intake Routing? This replaces the current workflow; one Undo restores it.',
-    );
-    expect(onLoadResearchIntakeRoutingDemo).not.toHaveBeenCalled();
-
-    fireEvent.click(demoButton);
-    expect(onLoadResearchIntakeRoutingDemo).toHaveBeenCalledOnce();
-    expect(onLoadResearchSupervisorDemo).not.toHaveBeenCalled();
-    expect(onLoadHumanControlHitlDemo).not.toHaveBeenCalled();
-    expect(onLoadDynamicParallelismDemo).not.toHaveBeenCalled();
   });
 
   it('prepares native Blob download links and releases their URLs after unmount', () => {
