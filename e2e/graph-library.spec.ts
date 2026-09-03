@@ -240,6 +240,46 @@ test('library loads representative subgraph, HITL, and Send/Merge workflows onto
   await expect(researcherSubgraph).toHaveClass(/selected/);
   await expect(app.getByRole('heading', { name: 'Researcher ×N' })).toBeVisible();
 
+  const beforeResize = await readGraph(app);
+  const beforeResizeSubgraph = beforeResize.subgraphs.find(
+    (subgraph) => subgraph.id === 'researcher-workflow',
+  )!;
+  const beforeResizeChildren = Object.fromEntries(
+    beforeResize.nodes
+      .filter((node) => node.parentId === 'researcher-workflow')
+      .map((node) => [node.id, node.position]),
+  );
+  const resizeHandle = researcherSubgraph.locator('.subgraph-node-resize-control');
+  await expect(resizeHandle).toBeVisible();
+  await resizeHandle.hover();
+  const resizeBounds = await resizeHandle.boundingBox();
+  expect(resizeBounds).not.toBeNull();
+  await app.mouse.move(
+    resizeBounds!.x + resizeBounds!.width / 2,
+    resizeBounds!.y + resizeBounds!.height / 2,
+  );
+  await app.mouse.down();
+  await app.mouse.move(resizeBounds!.x + 28, resizeBounds!.y + 28, { steps: 5 });
+  await app.mouse.up();
+  await expect.poll(async () => (
+    await readGraph(app)
+  ).subgraphs.find((subgraph) => subgraph.id === 'researcher-workflow')?.dimensions)
+    .not.toEqual(beforeResizeSubgraph.dimensions);
+  const afterResize = await readGraph(app);
+  const resizedSubgraph = afterResize.subgraphs.find(
+    (subgraph) => subgraph.id === 'researcher-workflow',
+  )!;
+  const outerSubgraph = afterResize.subgraphs.find((subgraph) => subgraph.id === 'research-cell')!;
+  expect(resizedSubgraph.position.x + resizedSubgraph.dimensions.width)
+    .toBeLessThanOrEqual(outerSubgraph.dimensions.width - 36);
+  expect(resizedSubgraph.position.y + resizedSubgraph.dimensions.height)
+    .toBeLessThanOrEqual(outerSubgraph.dimensions.height - 36);
+  expect(Object.fromEntries(
+    afterResize.nodes
+      .filter((node) => node.parentId === 'researcher-workflow')
+      .map((node) => [node.id, node.position]),
+  )).toEqual(beforeResizeChildren);
+
   const beforeMove = await readGraph(app);
   const beforeResearcher = beforeMove.subgraphs.find((subgraph) => subgraph.id === 'researcher-workflow')!;
   const childPositions = Object.fromEntries(

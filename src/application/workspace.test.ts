@@ -904,7 +904,9 @@ describe('workspace application service', () => {
 
   it('supports inspector-level subgraph label, size, membership, collapse, and dissolve edits', () => {
     const created = service.createSubgraph(service.createInitial(), {
-      position: { x: 300, y: 100 },
+      // Keep this inspector-edit fixture clear of the sample graph so the
+      // resize constraint is not exercising sibling collision behavior.
+      position: { x: 1_600, y: 100 },
     });
     const subgraphId = created.result!.subgraphId;
     const configured = service.updateSubgraph(created.state, subgraphId, {

@@ -30,6 +30,10 @@ import { dynamicParallelismDemoGraph } from './package-three-demo';
 import { layoutWorkflowGraph, type WorkflowLayoutOptions } from './layout-workflow';
 import { createDraftEdge } from './connection-policy';
 import { CONTRACT_NODE_HEIGHT, CONTRACT_NODE_WIDTH } from './canvas-geometry';
+import {
+  constrainSubgraphDimensions,
+  subgraphResizeLimits,
+} from './subgraph-resize';
 
 export type WorkspaceCore = {
   graph: WorkflowGraph;
@@ -563,12 +567,23 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
         return { state, changed: false };
       }
-      return changeGraph(state, (graph) => ({
-        ...graph,
-        subgraphs: graph.subgraphs.map((subgraph) =>
-          subgraph.id === subgraphId ? { ...subgraph, ...patch } : subgraph,
-        ),
-      }));
+      return changeGraph(state, (graph) => {
+        const limits = patch.dimensions
+          ? subgraphResizeLimits(graph, subgraphId)
+          : undefined;
+        const constrainedPatch = patch.dimensions && limits
+          ? {
+              ...patch,
+              dimensions: constrainSubgraphDimensions(patch.dimensions, limits),
+            }
+          : patch;
+        return {
+          ...graph,
+          subgraphs: graph.subgraphs.map((subgraph) =>
+            subgraph.id === subgraphId ? { ...subgraph, ...constrainedPatch } : subgraph,
+          ),
+        };
+      });
     },
 
     moveSubgraph(

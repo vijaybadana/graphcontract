@@ -35,6 +35,7 @@ import { evaluateConnection } from '@/src/application/connection-policy';
 import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
 import { graphLibraryEntries } from '@/src/application/graph-library';
 import { deriveProposalComparison } from '@/src/application/proposal-comparison';
+import { subgraphResizeLimits } from '@/src/application/subgraph-resize';
 import { validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
@@ -153,6 +154,7 @@ export function GraphWorkspace() {
   const createSubgraph = useGraphStore((state) => state.createSubgraph);
   const moveCanvasElements = useGraphStore((state) => state.moveCanvasElements);
   const setSubgraphCollapsed = useGraphStore((state) => state.setSubgraphCollapsed);
+  const updateSubgraph = useGraphStore((state) => state.updateSubgraph);
   const addEdge = useGraphStore((state) => state.addEdge);
   const updateEdge = useGraphStore((state) => state.updateEdge);
   const setSelection = useGraphStore((state) => state.setSelection);
@@ -462,6 +464,12 @@ export function GraphWorkspace() {
     },
     [canvasEditable, setSubgraphCollapsed],
   );
+  const resizeSubgraph = useCallback(
+    (subgraphId: string, dimensions: { width: number; height: number }) => {
+      if (canvasEditable) updateSubgraph(subgraphId, { dimensions });
+    },
+    [canvasEditable, updateSubgraph],
+  );
   const validationIssues = useMemo(() => validateGraph(graph), [graph]);
   const canvas = useMemo(() => {
     const projected = projectGraphToCanvas(graph, reviewProjection, {
@@ -492,6 +500,8 @@ export function GraphWorkspace() {
               ...node.data,
               collapseEditable: canvasEditable,
               onToggleCollapse: canvasEditable ? toggleSubgraphCollapse : undefined,
+              resizeLimits: canvasEditable ? subgraphResizeLimits(graph, node.id) : undefined,
+              onResize: canvasEditable ? resizeSubgraph : undefined,
             },
           };
         }
@@ -560,6 +570,7 @@ export function GraphWorkspace() {
     runtimeProjectionFixture,
     scenarioPresentation,
     toggleSubgraphCollapse,
+    resizeSubgraph,
     activeViewMode,
     activateEvidence,
     evidenceMarkerByTarget,
@@ -677,6 +688,18 @@ export function GraphWorkspace() {
     padding: fitPadding,
     minZoom: fitMinZoom,
   });
+
+  useEffect(() => {
+    if (!inspectorVisible || selection.primary?.type !== 'subgraph') return;
+    const selectedSubgraph = graph.subgraphs.find(
+      (subgraph) => subgraph.id === selection.primary?.id,
+    );
+    if (!selectedSubgraph || selectedSubgraph.collapsed) return;
+    // Expanded frames can be wider than the canvas area that remains after
+    // the contextual inspector opens. Refit that one frame through the same
+    // asymmetric panel padding so its header and resize handle stay reachable.
+    fitNodes([selectedSubgraph.id]);
+  }, [fitNodes, graph.subgraphs, inspectorVisible, selection.primary]);
 
   useEffect(() => {
     const focus = activeViewMode === 'proposal' ? proposalCanvasFocus : null;

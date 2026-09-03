@@ -34,6 +34,30 @@
   padding: 0.75rem;
 }
 
+.subgraph-node-resize-control {
+  z-index: 5 !important;
+  width: 1rem !important;
+  height: 1rem !important;
+  right: -.35rem !important;
+  bottom: -.35rem !important;
+  border: 1px solid var(--gc-success) !important;
+  border-radius: .28rem !important;
+  background: var(--gc-surface) !important;
+  box-shadow: var(--gc-shadow-sm);
+  cursor: nwse-resize;
+}
+
+.subgraph-node-resize-control::after {
+  position: absolute;
+  right: .2rem;
+  bottom: .2rem;
+  width: .34rem;
+  height: .34rem;
+  border-right: 1px solid var(--gc-success);
+  border-bottom: 1px solid var(--gc-success);
+  content: '';
+}
+
 .subgraph-node-body-drag-surface {
   position: absolute;
   z-index: 0;

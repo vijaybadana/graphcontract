@@ -137,6 +137,47 @@ function InteractiveSubgraphCanvas({ onNodeClick }: { onNodeClick: (id: string) 
   );
 }
 
+function ResizableSubgraphCanvas({ editable = true }: { editable?: boolean }) {
+  const nodes = useMemo<CanvasFlowNode[]>(
+    () => [
+      {
+        id: 'resizable-group',
+        type: 'subgraph',
+        position: { x: 120, y: 90 },
+        width: 640,
+        height: 360,
+        selected: true,
+        data: {
+          id: 'resizable-group',
+          label: 'Resizable process',
+          position: { x: 120, y: 90 },
+          dimensions: { width: 640, height: 360 },
+          collapsed: false,
+          collapseEditable: editable,
+          resizeLimits: {
+            current: { width: 640, height: 360 },
+            minWidth: 340,
+            minHeight: 244,
+            maxWidth: 900,
+            maxHeight: 600,
+            obstacles: [],
+          },
+          onResize: vi.fn(),
+        },
+      },
+    ],
+    [editable],
+  );
+
+  return (
+    <div style={{ width: 1280, height: 720 }}>
+      <ReactFlowProvider>
+        <ReactFlow nodes={nodes} edges={[]} nodeTypes={nodeTypes} />
+      </ReactFlowProvider>
+    </div>
+  );
+}
+
 function ResearchSupervisorCanvas() {
   const canvas = useMemo(() => projectGraphToCanvas(researchSupervisorGraph, null), []);
 
@@ -215,6 +256,18 @@ describe('SubgraphNode in React Flow', () => {
       'review-group',
       'child-node',
     ]);
+  });
+
+  it('shows the resize handle only for a selected editable expanded subgraph', async () => {
+    const { rerender } = render(<ResizableSubgraphCanvas />);
+
+    await screen.findByText('Resizable process');
+    expect(document.querySelector('.subgraph-node-resize-control')).not.toBeNull();
+
+    rerender(<ResizableSubgraphCanvas editable={false} />);
+    await waitFor(() => {
+      expect(document.querySelector('.subgraph-node-resize-control')).toBeNull();
+    });
   });
 
   it('prepares native Blob download links and releases their URLs after unmount', () => {

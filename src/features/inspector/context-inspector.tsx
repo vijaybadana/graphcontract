@@ -43,6 +43,7 @@ import type {
   EvidenceMarker,
 } from '@/src/adapters/react-flow/project-graph';
 import { evaluateConnection } from '@/src/application/connection-policy';
+import { subgraphResizeLimits } from '@/src/application/subgraph-resize';
 import type { StepModifierInspectorSection } from '@/src/features/canvas/contract-node';
 import { graphNodeVisualKind, NodeVisualIcon } from '@/src/features/canvas/node-visual-taxonomy';
 import type { RuntimeInstanceNodeData } from '@/src/features/canvas/runtime-instance-node';
@@ -410,6 +411,9 @@ export function ContextInspector({
     primary?.type === 'subgraph'
       ? displayGraph.subgraphs.find((item) => item.id === primary.id)
       : undefined;
+  const selectedSubgraphResizeLimits = subgraph
+    ? subgraphResizeLimits(displayGraph, subgraph.id)
+    : undefined;
   const acceptedEdge =
     primary?.type === 'edge'
       ? acceptedGraph.edges.find((item) => item.id === primary.id)
@@ -718,7 +722,8 @@ export function ContextInspector({
                 <Field label="Width">
                   <input
                     type="number"
-                    min="160"
+                    min={selectedSubgraphResizeLimits?.minWidth ?? 160}
+                    max={selectedSubgraphResizeLimits?.maxWidth}
                     step="12"
                     inputMode="numeric"
                     value={subgraph.dimensions.width}
@@ -737,7 +742,8 @@ export function ContextInspector({
                 <Field label="Height">
                   <input
                     type="number"
-                    min="160"
+                    min={selectedSubgraphResizeLimits?.minHeight ?? 160}
+                    max={selectedSubgraphResizeLimits?.maxHeight}
                     step="12"
                     inputMode="numeric"
                     value={subgraph.dimensions.height}

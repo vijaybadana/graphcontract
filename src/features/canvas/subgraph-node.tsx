@@ -1,13 +1,24 @@
 'use client';
 
-import { Handle, Node, NodeProps, Position } from '@xyflow/react';
-import type { KeyboardEvent, PointerEvent } from 'react';
+import {
+  Handle,
+  Node,
+  NodeProps,
+  NodeResizeControl,
+  Position,
+  ResizeControlVariant,
+} from '@xyflow/react';
+import { useCallback, type KeyboardEvent, type PointerEvent } from 'react';
 
 import { EffectiveGraphCapabilities, GraphSubgraph } from '@/src/domain';
 import {
   CANVAS_INPUT_PORT_ID,
   CANVAS_OUTPUT_PORT_ID,
 } from '@/src/application/layout-workflow';
+import {
+  constrainSubgraphDimensions,
+  type SubgraphResizeLimits,
+} from '@/src/application/subgraph-resize';
 import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 import './subgraph-node.css';
 import './node-boundary.css';
@@ -22,6 +33,9 @@ export type SubgraphNodeData = GraphSubgraph & {
    * mutation. The workspace seam supplies it when subgraph editing is wired.
    */
   onToggleCollapse?: (subgraphId: string, collapsed: boolean) => void;
+  /** Shared application constraints for the bottom-right canvas resize seam. */
+  resizeLimits?: SubgraphResizeLimits;
+  onResize?: (subgraphId: string, dimensions: GraphSubgraph['dimensions']) => void;
   /** Projection-only edit affordance; it never belongs to the canonical graph. */
   collapseEditable?: boolean;
   [key: string]: unknown;
@@ -31,10 +45,33 @@ export type SubgraphFlowNode = Node<SubgraphNodeData, 'subgraph'>;
 
 export function SubgraphNode({ data, id, selected }: NodeProps<SubgraphFlowNode>) {
   const reviewFocusState = useCanvasNodeReviewFocus(id);
+  const resizeLimits = data.resizeLimits;
+  const onResize = data.onResize;
+  const subgraphId = data.id;
   const action = data.collapsed ? 'Expand' : 'Collapse';
   const proposalClass = data.proposalState ? `is-proposed-${data.proposalState}` : '';
   const removed = data.proposalState === 'removed';
   const toggleCollapse = () => data.onToggleCollapse?.(data.id, !data.collapsed);
+  const constrainedResize = useCallback(
+    (dimensions: GraphSubgraph['dimensions']) =>
+      resizeLimits
+        ? constrainSubgraphDimensions(dimensions, resizeLimits)
+        : dimensions,
+    [resizeLimits],
+  );
+  const allowResize = useCallback(
+    (_: unknown, dimensions: GraphSubgraph['dimensions']) => {
+      const constrained = constrainedResize(dimensions);
+      return constrained.width === dimensions.width && constrained.height === dimensions.height;
+    },
+    [constrainedResize],
+  );
+  const finishResize = useCallback(
+    (_: unknown, dimensions: GraphSubgraph['dimensions']) => {
+      onResize?.(subgraphId, constrainedResize(dimensions));
+    },
+    [constrainedResize, onResize, subgraphId],
+  );
   const stopCanvasPointer = (event: PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
   };
@@ -78,6 +115,21 @@ export function SubgraphNode({ data, id, selected }: NodeProps<SubgraphFlowNode>
       data-collapsed={data.collapsed}
       data-proposal-state={data.proposalState}
     >
+      {selected && data.collapseEditable && !data.collapsed && resizeLimits && (
+        <NodeResizeControl
+          position="bottom-right"
+          variant={ResizeControlVariant.Handle}
+          minWidth={resizeLimits.minWidth}
+          minHeight={resizeLimits.minHeight}
+          maxWidth={resizeLimits.maxWidth}
+          maxHeight={resizeLimits.maxHeight}
+          shouldResize={allowResize}
+          onResizeEnd={finishResize}
+          className="subgraph-node-resize-control nodrag nopan"
+        >
+          <span aria-hidden="true" />
+        </NodeResizeControl>
+      )}
       {!removed && (
         <Handle
           type="target"
