@@ -40,6 +40,7 @@ type LayoutGraph = {
   subgraphs: Array<{
     id: string;
     label: string;
+    parentId?: string;
     position: Position;
     dimensions: { width: number; height: number };
     collapsed: boolean;
@@ -96,10 +97,24 @@ async function openLibraryTemplate(page: Page, title: string) {
 
 function visibleCanvasElementIds(graph: LayoutGraph) {
   const parents = new Map(graph.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
+  const hasCollapsedAncestor = (parentId: string | undefined) => {
+    const visited = new Set<string>();
+    let currentId = parentId;
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      const parent = parents.get(currentId);
+      if (!parent) return false;
+      if (parent.collapsed) return true;
+      currentId = parent.parentId;
+    }
+    return false;
+  };
   return [
-    ...graph.subgraphs.map((subgraph) => subgraph.id),
+    ...graph.subgraphs
+      .filter((subgraph) => !hasCollapsedAncestor(subgraph.parentId))
+      .map((subgraph) => subgraph.id),
     ...graph.nodes
-      .filter((node) => !node.parentId || !parents.get(node.parentId)?.collapsed)
+      .filter((node) => !hasCollapsedAncestor(node.parentId))
       .map((node) => node.id),
   ];
 }
@@ -193,15 +208,26 @@ function assertNoUnexpectedNodeOverlap(
 ) {
   const rectById = new Map(rects.map((rect) => [rect.id, rect]));
   const items = [
-    ...graph.subgraphs.map((subgraph) => ({ id: subgraph.id, parentId: undefined })),
+    ...graph.subgraphs.map((subgraph) => ({ id: subgraph.id, parentId: subgraph.parentId })),
     ...graph.nodes.map((node) => ({ id: node.id, parentId: node.parentId })),
   ].filter((item) => rectById.has(item.id));
+  const parentById = new Map(items.map((item) => [item.id, item.parentId]));
+  const isAncestor = (ancestorId: string, descendantId: string) => {
+    const visited = new Set<string>();
+    let parentId = parentById.get(descendantId);
+    while (parentId && !visited.has(parentId)) {
+      if (parentId === ancestorId) return true;
+      visited.add(parentId);
+      parentId = parentById.get(parentId);
+    }
+    return false;
+  };
 
   for (let leftIndex = 0; leftIndex < items.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < items.length; rightIndex += 1) {
       const left = items[leftIndex]!;
       const right = items[rightIndex]!;
-      if (left.parentId === right.id || right.parentId === left.id) continue;
+      if (isAncestor(left.id, right.id) || isAncestor(right.id, left.id)) continue;
       const leftRect = rectById.get(left.id)!;
       const rightRect = rectById.get(right.id)!;
       const overlapWidth = Math.max(

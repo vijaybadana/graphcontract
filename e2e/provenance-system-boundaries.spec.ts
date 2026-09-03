@@ -318,7 +318,7 @@ test('selected scenarios preserve collapsed native proxies and dim unrelated non
   );
   const dimmedRelationship = relationship(
     'evidence-archive-boundary',
-    'inspect-evidence',
+    'researcher-agent',
     'archive-boundary',
     'Archive boundary',
   );
@@ -345,7 +345,7 @@ test('selected scenarios preserve collapsed native proxies and dim unrelated non
   const scenarios = await callWebMcpTool<ScenarioResult>(app, 'get_branch_scenarios', {});
   const selected = scenarios.scenarios?.find((scenario) =>
     scenario.orderedPath.includes('frame-question') &&
-    !scenario.orderedPath.includes('inspect-evidence'),
+    !scenario.orderedPath.includes('researcher-agent'),
   );
   expect(selected).toBeDefined();
   expect(selected?.relationshipAnnotations).toEqual(expect.arrayContaining([

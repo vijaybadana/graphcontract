@@ -138,7 +138,7 @@ test('manual Fit encloses the graph inside whichever desktop side rails are open
   await expect(app.getByRole('button', { name: 'Collapse inspector' })).toBeVisible();
   await app.getByRole('button', { name: 'Fit graph' }).click();
   await expectFitInsideOpenDesktopRails(app);
-  await expectEdgeLabelOnPath(app, 'merge-supervisor');
+  await expectEdgeLabelOnPath(app, 'researcher-supervisor-loop');
 
   await app.getByRole('button', { name: 'Collapse inspector' }).click();
   await app.getByRole('button', { name: 'Fit graph' }).click();

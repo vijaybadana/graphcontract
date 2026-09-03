@@ -159,6 +159,8 @@ export type GraphSubgraphBase = {
 export type GraphSubgraphV4 = GraphSubgraphBase;
 
 export type GraphSubgraph = GraphSubgraphBase & {
+  /** Relative to its containing subgraph when present. */
+  parentId?: string;
   capabilityOverrides?: GraphCapabilityOverrides;
 };
 
@@ -1475,6 +1477,7 @@ const graphSubgraphBaseSchema = z.object({
 export const graphSubgraphV4Schema = graphSubgraphBaseSchema;
 
 export const graphSubgraphSchema = graphSubgraphBaseSchema.extend({
+  parentId: z.string().min(1).optional(),
   capabilityOverrides: graphCapabilityOverridesSchema.optional(),
 }).strict();
 
@@ -2365,6 +2368,45 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     }
   }
 
+  for (const subgraph of normalized.subgraphs) {
+    if (subgraph.parentId && !subgraphIds.has(subgraph.parentId)) {
+      issues.push(
+        issue(
+          'MISSING_SUBGRAPH_PARENT',
+          `Subgraph “${subgraph.label}” references a containing subgraph that does not exist.`,
+          `subgraphs.${subgraph.id}.parentId`,
+        ),
+      );
+      continue;
+    }
+    if (subgraph.parentId === subgraph.id) {
+      issues.push(
+        issue(
+          'SUBGRAPH_PARENT_CYCLE',
+          `Subgraph “${subgraph.label}” cannot contain itself.`,
+          `subgraphs.${subgraph.id}.parentId`,
+        ),
+      );
+      continue;
+    }
+    const visited = new Set([subgraph.id]);
+    let ancestorId = subgraph.parentId;
+    while (ancestorId) {
+      if (visited.has(ancestorId)) {
+        issues.push(
+          issue(
+            'SUBGRAPH_PARENT_CYCLE',
+            `Subgraph “${subgraph.label}” belongs to a cyclic containment chain.`,
+            `subgraphs.${subgraph.id}.parentId`,
+          ),
+        );
+        break;
+      }
+      visited.add(ancestorId);
+      ancestorId = normalized.subgraphs.find((candidate) => candidate.id === ancestorId)?.parentId;
+    }
+  }
+
   for (const node of normalized.nodes) {
     if (nodeIds.has(node.id)) {
       issues.push(issue('DUPLICATE_NODE_ID', `Node ID “${node.id}” is duplicated.`, `nodes.${node.id}`));
@@ -2441,7 +2483,20 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
     const connectionKey = `${edge.source}\u0000${edge.target}`;
     edgesByConnection.set(connectionKey, [...(edgesByConnection.get(connectionKey) ?? []), edge]);
     if (source.parentId !== target.parentId) {
-      if (source.parentId && source.kind !== 'end') {
+      const isAncestorScope = (ancestorId: string | undefined, descendantId: string | undefined) => {
+        if (!ancestorId || !descendantId) return false;
+        const visited = new Set<string>();
+        let currentId: string | undefined = descendantId;
+        while (currentId && !visited.has(currentId)) {
+          if (currentId === ancestorId) return true;
+          visited.add(currentId);
+          currentId = normalized.subgraphs.find((subgraph) => subgraph.id === currentId)?.parentId;
+        }
+        return false;
+      };
+      const targetIsInsideSourceScope = isAncestorScope(source.parentId, target.parentId);
+      const sourceIsInsideTargetScope = isAncestorScope(target.parentId, source.parentId);
+      if (source.parentId && !targetIsInsideSourceScope && source.kind !== 'end') {
         issues.push(
           issue(
             'INVALID_SUBGRAPH_EXIT',
@@ -2450,7 +2505,7 @@ export function validateGraph(graph: WorkflowGraph): ValidationIssue[] {
           ),
         );
       }
-      if (target.parentId && target.kind !== 'start') {
+      if (target.parentId && !sourceIsInsideTargetScope && target.kind !== 'start') {
         issues.push(
           issue(
             'INVALID_SUBGRAPH_ENTRY',
@@ -3443,13 +3498,27 @@ export function applyGraphOperations(
   const hasSubgraph = (subgraphId: string) =>
     next.subgraphs.some((subgraph) => subgraph.id === subgraphId);
   const findNode = (nodeId: string) => next.nodes.find((node) => node.id === nodeId);
+  const absoluteSubgraphPosition = (subgraph: GraphSubgraph): GraphPosition => {
+    const position = structuredClone(subgraph.position);
+    const visited = new Set([subgraph.id]);
+    let parentId = subgraph.parentId;
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      const parent = next.subgraphs.find((candidate) => candidate.id === parentId);
+      if (!parent) break;
+      position.x += parent.position.x;
+      position.y += parent.position.y;
+      parentId = parent.parentId;
+    }
+    return position;
+  };
   const absoluteNodePosition = (node: GraphNode): GraphPosition => {
     const parent = node.parentId
       ? next.subgraphs.find((subgraph) => subgraph.id === node.parentId)
       : undefined;
-    return parent
-      ? { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y }
-      : structuredClone(node.position);
+    if (!parent) return structuredClone(node.position);
+    const parentPosition = absoluteSubgraphPosition(parent);
+    return { x: parentPosition.x + node.position.x, y: parentPosition.y + node.position.y };
   };
   const uniqueNodeIds = (nodeIds: string[]) => [...new Set(nodeIds)];
   const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
@@ -3647,6 +3716,7 @@ export function applyGraphOperations(
         errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}`));
       } else if (!missingNodes(operation.nodeIds, index)) {
         const target = next.subgraphs.find((subgraph) => subgraph.id === operation.subgraphId)!;
+        const targetPosition = absoluteSubgraphPosition(target);
         const requested = new Set(uniqueNodeIds(operation.nodeIds));
         next.nodes = next.nodes.map((node) => {
           if (!requested.has(node.id)) return node;
@@ -3655,8 +3725,8 @@ export function applyGraphOperations(
             ...node,
             parentId: operation.subgraphId,
             position: {
-              x: absolute.x - target.position.x,
-              y: absolute.y - target.position.y,
+              x: absolute.x - targetPosition.x,
+              y: absolute.y - targetPosition.y,
             },
           };
         });
@@ -3676,16 +3746,34 @@ export function applyGraphOperations(
       if (!hasSubgraph(operation.subgraphId)) {
         errors.push(issue('OPERATION_NOT_FOUND', `Subgraph “${operation.subgraphId}” was not found.`, `operations.${index}`));
       } else {
+        const dissolved = next.subgraphs.find((subgraph) => subgraph.id === operation.subgraphId)!;
+        const parent = dissolved.parentId
+          ? next.subgraphs.find((subgraph) => subgraph.id === dissolved.parentId)
+          : undefined;
+        const parentPosition = parent ? absoluteSubgraphPosition(parent) : undefined;
+        const relativeToParent = (position: GraphPosition) => parentPosition
+          ? { x: position.x - parentPosition.x, y: position.y - parentPosition.y }
+          : position;
         next.nodes = next.nodes.map((node) => {
           if (node.parentId !== operation.subgraphId) return node;
-          const position = absoluteNodePosition(node);
+          const position = relativeToParent(absoluteNodePosition(node));
+          if (parent) return { ...node, parentId: parent.id, position };
           const unparented = { ...node };
           delete unparented.parentId;
           return { ...unparented, position };
         });
         // Edges remain canonical node-to-node edges. Only the container is
         // removed, after direct children have been converted to screen space.
-        next.subgraphs = next.subgraphs.filter((subgraph) => subgraph.id !== operation.subgraphId);
+        next.subgraphs = next.subgraphs
+          .filter((subgraph) => subgraph.id !== operation.subgraphId)
+          .map((subgraph) => {
+            if (subgraph.parentId !== operation.subgraphId) return subgraph;
+            const position = relativeToParent(absoluteSubgraphPosition(subgraph));
+            if (parent) return { ...subgraph, parentId: parent.id, position };
+            const unparented = { ...subgraph, position };
+            delete unparented.parentId;
+            return unparented;
+          });
       }
     } else if (operation.type === 'add_edge') {
       if (

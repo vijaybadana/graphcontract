@@ -493,6 +493,8 @@ function subgraphFlowNode(
   scenarioState?: ScenarioElementState,
   descendantReviewState?: CanvasReviewAggregate,
 ): CanvasFlowNode {
+  const subgraphsById = new Map(graph.subgraphs.map((candidate) => [candidate.id, candidate]));
+  const parent = subgraph.parentId ? subgraphsById.get(subgraph.parentId) : undefined;
   const dimensions = canvasNodeRenderer('subgraph').dimensions;
   const width = subgraph.collapsed ? dimensions.width : subgraph.dimensions.width;
   const height = subgraph.collapsed ? dimensions.height : subgraph.dimensions.height;
@@ -502,10 +504,18 @@ function subgraphFlowNode(
     type: 'subgraph',
     className: scenarioPresentationClassName(scenarioState),
     position: subgraph.position,
+    ...(parent
+      ? {
+          parentId: parent.id,
+          extent: 'parent' as const,
+          expandParent: false,
+          hidden: Boolean(outermostCollapsedSubgraphId(parent.id, subgraphsById)),
+        }
+      : {}),
     // Expanded containers sit directly below their member nodes. Their
     // component supplies a transparent body drag surface below those member
     // wrappers, plus the visible header. Controls opt out with `nodrag`.
-    zIndex: removed ? -1 : subgraph.collapsed ? 10 : 0,
+    zIndex: removed ? -1 : subgraph.collapsed ? 10 : parent ? 1 : 0,
     width,
     height,
     initialWidth: width,
@@ -535,28 +545,92 @@ function isUnparentedNodeInsideExpandedSubgraph(
   subgraphs: readonly GraphSubgraph[],
 ): boolean {
   if (node.parentId) return false;
+  const subgraphsById = new Map(subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const centre = {
     x: node.position.x + canvasNodeRenderer('contractNode').dimensions.width / 2,
     y: node.position.y + canvasNodeRenderer('contractNode').dimensions.height / 2,
   };
-  return subgraphs.some(
-    (subgraph) =>
-      !subgraph.collapsed &&
-      centre.x > subgraph.position.x + SUBGRAPH_BODY_INSET &&
-      centre.x < subgraph.position.x + subgraph.dimensions.width - SUBGRAPH_BODY_INSET &&
-      centre.y > subgraph.position.y + SUBGRAPH_HEADER_HEIGHT &&
-      centre.y < subgraph.position.y + subgraph.dimensions.height - SUBGRAPH_BODY_INSET,
-  );
+  return subgraphs.some((subgraph) => {
+    if (subgraph.collapsed) return false;
+    const position = absoluteSubgraphPosition(subgraph, subgraphsById);
+    return centre.x > position.x + SUBGRAPH_BODY_INSET &&
+      centre.x < position.x + subgraph.dimensions.width - SUBGRAPH_BODY_INSET &&
+      centre.y > position.y + SUBGRAPH_HEADER_HEIGHT &&
+      centre.y < position.y + subgraph.dimensions.height - SUBGRAPH_BODY_INSET;
+  });
 }
 
 function absolutePosition(
   node: GraphNode,
   subgraphsById: ReadonlyMap<string, GraphSubgraph>,
 ) {
-  const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
-  return parent
-    ? { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y }
-    : node.position;
+  const position = { ...node.position };
+  const visited = new Set<string>();
+  let parentId = node.parentId;
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = subgraphsById.get(parentId);
+    if (!parent) break;
+    position.x += parent.position.x;
+    position.y += parent.position.y;
+    parentId = parent.parentId;
+  }
+  return position;
+}
+
+function absoluteSubgraphPosition(
+  subgraph: GraphSubgraph,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+) {
+  const position = { ...subgraph.position };
+  const visited = new Set([subgraph.id]);
+  let parentId = subgraph.parentId;
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = subgraphsById.get(parentId);
+    if (!parent) break;
+    position.x += parent.position.x;
+    position.y += parent.position.y;
+    parentId = parent.parentId;
+  }
+  return position;
+}
+
+/** The outermost collapsed ancestor is the only visible boundary for any
+ * deeply contained endpoint. Returning the nearest collapsed child would
+ * target a React Flow node that is itself hidden by its parent. */
+function outermostCollapsedSubgraphId(
+  parentId: string | undefined,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+): string | undefined {
+  const visited = new Set<string>();
+  let currentId = parentId;
+  let collapsedId: string | undefined;
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const current = subgraphsById.get(currentId);
+    if (!current) break;
+    if (current.collapsed) collapsedId = current.id;
+    currentId = current.parentId;
+  }
+  return collapsedId;
+}
+
+function subgraphDepth(
+  subgraph: GraphSubgraph,
+  subgraphsById: ReadonlyMap<string, GraphSubgraph>,
+): number {
+  let depth = 0;
+  const visited = new Set<string>();
+  let parentId = subgraph.parentId;
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = subgraphsById.get(parentId);
+    if (!parent) break;
+    depth += 1;
+    parentId = parent.parentId;
+  }
+  return depth;
 }
 
 function descendantReviewStateForSubgraph(
@@ -635,7 +709,10 @@ function dynamicWorkerGroupNodes(
   scenarioPresentation: ScenarioPresentation | null,
 ): CanvasFlowNode[] {
   return graph.edges.flatMap((edge) => {
-    if (edge.mode !== 'send' || !edge.send) return [];
+    // A derived worker-group exists only when the contract explicitly carries
+    // render-only template anatomy. Ordinary Send edges—including Sends inside
+    // a real nested subgraph—must keep their canonical Step and container UI.
+    if (edge.mode !== 'send' || !edge.send?.templateAnatomy) return [];
     const source = graph.nodes.find((node) => node.id === edge.source);
     const template = graph.nodes.find((node) => node.id === edge.target);
     const merge = graph.nodes.find((node) => node.id === edge.send!.mergeNodeId);
@@ -722,7 +799,6 @@ function projectDomainNode(
   runtimeHiddenNodeIds: ReadonlySet<string>,
   scenarioState?: ScenarioElementState,
 ): CanvasFlowNode {
-  const parent = node.parentId ? subgraphsById.get(node.parentId) : undefined;
   const proposalState = proposalVisualState(reviewStates[node.id]);
   const outsideSubgraph =
     proposalState !== 'removed' && isUnparentedNodeInsideExpandedSubgraph(node, preview.subgraphs);
@@ -736,7 +812,8 @@ function projectDomainNode(
     : {};
   const invalid = isNodeInvalid(node.id, preview, validationIssues);
   const frozen = preview.status === 'frozen';
-  const hidden = Boolean(parent?.collapsed) || runtimeHiddenNodeIds.has(node.id);
+  const hidden = Boolean(outermostCollapsedSubgraphId(node.parentId, subgraphsById))
+    || runtimeHiddenNodeIds.has(node.id);
 
   if (node.kind === 'merge') {
     const dimensions = canvasNodeRenderer('mergeJunction').dimensions;
@@ -868,15 +945,25 @@ export function projectGraphToCanvas(
       scenarioPresentation,
       Boolean(scenarioPresentation?.activeNodeIds.has(nodeId)),
     );
+  const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
+  const isWithinSubgraph = (node: GraphNode, subgraphId: string) => {
+    const visited = new Set<string>();
+    let parentId = node.parentId;
+    while (parentId && !visited.has(parentId)) {
+      if (parentId === subgraphId) return true;
+      visited.add(parentId);
+      parentId = subgraphsById.get(parentId)?.parentId;
+    }
+    return false;
+  };
   const subgraphScenarioState = (subgraphId: string) =>
     scenarioElementState(
       scenarioPresentation,
       sourceNodes.some(
-        (node) => node.parentId === subgraphId && scenarioPresentation?.activeNodeIds.has(node.id),
+        (node) => isWithinSubgraph(node, subgraphId) && scenarioPresentation?.activeNodeIds.has(node.id),
       ),
     );
 
-  const subgraphsById = new Map(preview.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const validationIssues = validateGraph(preview);
   const dynamicWorkerGroups = dynamicWorkerGroupNodes(
     preview,
@@ -885,7 +972,12 @@ export function projectGraphToCanvas(
     scenarioPresentation,
   );
   const nodes: CanvasFlowNode[] = [
-    ...sourceSubgraphs.map((subgraph) => {
+    ...sourceSubgraphs
+      .toSorted((left, right) =>
+        subgraphDepth(left, subgraphsById) - subgraphDepth(right, subgraphsById)
+        || left.id.localeCompare(right.id),
+      )
+      .map((subgraph) => {
       const review = subgraphReviewProjection(subgraph);
       return subgraphFlowNode(
         subgraph,
@@ -935,20 +1027,18 @@ export function projectGraphToCanvas(
         : [];
     }),
   );
+  const visibleNodeEndpoint = (nodeId: string) => {
+    const node = preview.nodes.find((candidate) => candidate.id === nodeId);
+    return outermostCollapsedSubgraphId(node?.parentId, subgraphsById) ?? nodeId;
+  };
   const domainEdges: ProjectedDomainEdge[] = sourceEdges.map((edge) => {
-    const sourceParent = subgraphsById.get(
-      preview.nodes.find((node) => node.id === edge.source)?.parentId ?? '',
-    );
-    const targetParent = subgraphsById.get(
-      preview.nodes.find((node) => node.id === edge.target)?.parentId ?? '',
-    );
     return {
       edge,
-      source: sourceParent?.collapsed
-        ? sourceParent.id
+      source: visibleNodeEndpoint(edge.source) !== edge.source
+        ? visibleNodeEndpoint(edge.source)
         : dynamicGroupByTemplateContinuationId.get(edge.id) ?? edge.source,
-      target: targetParent?.collapsed
-        ? targetParent.id
+      target: visibleNodeEndpoint(edge.target) !== edge.target
+        ? visibleNodeEndpoint(edge.target)
         : dynamicGroupBySendEdgeId.get(edge.id) ?? edge.target,
     };
   });
@@ -1069,8 +1159,7 @@ export function projectGraphToCanvas(
   if (runtime?.available) {
     const visibleEndpoint = (nodeId: string) => {
       const node = preview.nodes.find((candidate) => candidate.id === nodeId);
-      const parent = node?.parentId ? subgraphsById.get(node.parentId) : undefined;
-      return parent?.collapsed ? parent.id : nodeId;
+      return outermostCollapsedSubgraphId(node?.parentId, subgraphsById) ?? nodeId;
     };
     const instancesByTemplate = new Map<string, typeof runtime.fixture.instances>();
     for (const instance of runtime.fixture.instances) {
@@ -1190,8 +1279,7 @@ export function projectGraphToCanvas(
   const visibleRelationshipEndpointId = (endpoint: NonNativeRelationship['source']) => {
     if (endpoint.kind === 'external') return relationshipEndpointId(endpoint);
     const node = sourceNodes.find((candidate) => candidate.id === endpoint.nodeId);
-    const parent = node?.parentId ? subgraphsById.get(node.parentId) : undefined;
-    return parent?.collapsed ? parent.id : endpoint.nodeId;
+    return outermostCollapsedSubgraphId(node?.parentId, subgraphsById) ?? endpoint.nodeId;
   };
   // Candidate relationships are authoritative during review. Base-only
   // records are retained strictly as removed ghosts; selection can still
@@ -1221,9 +1309,10 @@ export function projectGraphToCanvas(
     if (!externalTileIds.has(tileId)) {
       externalTileIds.add(tileId);
       const anchor = sourceNodes.find((node) => node.id === nodeEndpoint.nodeId);
-      const anchorParent = anchor?.parentId ? subgraphsById.get(anchor.parentId) : undefined;
-      const anchorPosition = anchorParent?.collapsed
-        ? anchorParent.position
+      const collapsedAnchorId = outermostCollapsedSubgraphId(anchor?.parentId, subgraphsById);
+      const collapsedAnchor = collapsedAnchorId ? subgraphsById.get(collapsedAnchorId) : undefined;
+      const anchorPosition = collapsedAnchor
+        ? absoluteSubgraphPosition(collapsedAnchor, subgraphsById)
         : anchor
           ? absolutePosition(anchor, subgraphsById)
           : { x: 0, y: 0 };

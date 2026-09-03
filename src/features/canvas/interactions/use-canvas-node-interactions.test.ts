@@ -31,6 +31,20 @@ describe('positionsForCanvasCommit', () => {
         data: { id: 'child', kind: 'step', executor: 'ai', label: 'Supervisor', position: { x: 70, y: 38 } },
       },
       {
+        id: 'nested-group',
+        type: 'subgraph',
+        parentId: 'group',
+        position: { x: 90, y: 150 },
+        data: {
+          id: 'nested-group',
+          label: 'Researcher',
+          parentId: 'group',
+          position: { x: 90, y: 150 },
+          dimensions: { width: 420, height: 220 },
+          collapsed: false,
+        },
+      },
+      {
         id: 'ordinary',
         type: 'contractNode',
         position: { x: 960, y: 220 },
@@ -42,6 +56,7 @@ describe('positionsForCanvasCommit', () => {
       positionsForCanvasCommit(nodes, {
         group: { x: 420, y: 180 },
         child: { x: 70, y: 38 },
+        'nested-group': { x: 90, y: 150 },
         ordinary: { x: 960, y: 220 },
       }),
     ).toEqual({

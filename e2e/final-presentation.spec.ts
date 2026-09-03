@@ -440,7 +440,7 @@ test('V03 — changing scenarios highlights exact native paths and preserves col
   );
   const conditionalRelationship = externalRelationship(
     'v03-evidence-archive-boundary',
-    'inspect-evidence',
+    'researcher-agent',
     'v03-archive-boundary',
     'V03 archive boundary',
   );
@@ -473,10 +473,10 @@ test('V03 — changing scenarios highlights exact native paths and preserves col
   const direct = expandedScenarioRead.scenarios?.find(
     (scenario) =>
       scenario.orderedPath.includes('frame-question') &&
-      !scenario.orderedPath.includes('inspect-evidence'),
+      !scenario.orderedPath.includes('researcher-agent'),
   );
   const withEvidence = expandedScenarioRead.scenarios?.find((scenario) =>
-    scenario.orderedPath.includes('inspect-evidence'),
+    scenario.orderedPath.includes('researcher-agent'),
   );
   expect(direct).toBeDefined();
   expect(withEvidence).toBeDefined();
@@ -508,6 +508,11 @@ test('V03 — changing scenarios highlights exact native paths and preserves col
   const collapsedFrozen = await readGraph(app);
   expect(collapsedFrozen.graph.subgraphs).toEqual([
     expect.objectContaining({ id: 'research-cell', collapsed: true }),
+    expect.objectContaining({
+      id: 'researcher-workflow',
+      parentId: 'research-cell',
+      collapsed: false,
+    }),
   ]);
   const collapsedScenarioRead = await callWebMcpTool<ScenarioRead>(
     app,
@@ -517,7 +522,7 @@ test('V03 — changing scenarios highlights exact native paths and preserves col
   const collapsedDirect = collapsedScenarioRead.scenarios?.find(
     (scenario) =>
       scenario.orderedPath.includes('frame-question') &&
-      !scenario.orderedPath.includes('inspect-evidence'),
+      !scenario.orderedPath.includes('researcher-agent'),
   );
   expect(collapsedDirect).toBeDefined();
   await selectScenario(app, collapsedDirect!);

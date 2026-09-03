@@ -275,9 +275,17 @@ function buildWorkflowLayoutInput(
 ): WorkflowLayoutInput {
   const subgraphById = new Map(graph.subgraphs.map((subgraph) => [subgraph.id, subgraph]));
   const childrenBySubgraphId = new Map<string, GraphNode[]>();
+  const subgraphsByParentId = new Map<string, GraphSubgraph[]>();
   for (const node of graph.nodes) {
     if (!node.parentId || !subgraphById.has(node.parentId)) continue;
     childrenBySubgraphId.set(node.parentId, [...(childrenBySubgraphId.get(node.parentId) ?? []), node]);
+  }
+  for (const subgraph of graph.subgraphs) {
+    if (!subgraph.parentId || !subgraphById.has(subgraph.parentId)) continue;
+    subgraphsByParentId.set(subgraph.parentId, [
+      ...(subgraphsByParentId.get(subgraph.parentId) ?? []),
+      subgraph,
+    ]);
   }
 
   const authoredGeometry = new Map<string, AuthoredSubgraphGeometry>();
@@ -316,11 +324,14 @@ function buildWorkflowLayoutInput(
         width: MIN_SUBGRAPH_WIDTH,
         height: MIN_SUBGRAPH_HEIGHT,
       },
-      children: (childrenBySubgraphId.get(subgraph.id) ?? []).map((node) => ({
-        id: node.id,
-        value: node,
-        dimensions: nodeDimensions(),
-      })),
+      children: [
+        ...(childrenBySubgraphId.get(subgraph.id) ?? []).map((node) => ({
+          id: node.id,
+          value: node,
+          dimensions: nodeDimensions(),
+        })),
+        ...(subgraphsByParentId.get(subgraph.id) ?? []).map(normalSubgraph),
+      ],
     };
   };
 
@@ -328,14 +339,23 @@ function buildWorkflowLayoutInput(
     ...graph.nodes
       .filter((node) => !node.parentId || !subgraphById.has(node.parentId))
       .map((node) => ({ id: node.id, value: node, dimensions: nodeDimensions() })),
-    ...graph.subgraphs.map(normalSubgraph),
+    ...graph.subgraphs
+      .filter((subgraph) => !subgraph.parentId || !subgraphById.has(subgraph.parentId))
+      .map(normalSubgraph),
   ];
 
   const unitForNode = (nodeId: string) => {
     const node = graph.nodes.find((candidate) => candidate.id === nodeId);
     if (!node) return undefined;
-    const parent = node.parentId ? subgraphById.get(node.parentId) : undefined;
-    return parent && (parent.collapsed || authoredIds.has(parent.id)) ? parent.id : node.id;
+    let parent = node.parentId ? subgraphById.get(node.parentId) : undefined;
+    let unit = node.id;
+    const visited = new Set<string>();
+    while (parent && !visited.has(parent.id)) {
+      visited.add(parent.id);
+      if (parent.collapsed || authoredIds.has(parent.id)) unit = parent.id;
+      parent = parent.parentId ? subgraphById.get(parent.parentId) : undefined;
+    }
+    return unit;
   };
 
   const edges = graph.edges.flatMap((edge) => {
@@ -358,6 +378,7 @@ const workflowStructuralSignature = (
   nodes: graph.nodes.map((node) => ({ id: node.id, parentId: node.parentId, kind: node.kind })),
   subgraphs: graph.subgraphs.map((subgraph) => ({
     id: subgraph.id,
+    parentId: subgraph.parentId,
     collapsed: subgraph.collapsed,
   })),
   edges: graph.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),

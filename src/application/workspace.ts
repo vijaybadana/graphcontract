@@ -166,11 +166,29 @@ const hasMergeOnlyPatchFields = (patch: GraphNodePatch) => 'merge' in patch;
 const SUBGRAPH_BODY_INSET = 12;
 const SUBGRAPH_HEADER_HEIGHT = 56;
 
+const absoluteSubgraphPosition = (
+  graph: WorkflowGraph,
+  subgraph: GraphSubgraph,
+): GraphSubgraph['position'] => {
+  const position = { ...subgraph.position };
+  const visited = new Set([subgraph.id]);
+  let parentId = subgraph.parentId;
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = graph.subgraphs.find((candidate) => candidate.id === parentId);
+    if (!parent) break;
+    position.x += parent.position.x;
+    position.y += parent.position.y;
+    parentId = parent.parentId;
+  }
+  return position;
+};
+
 const absoluteNodePosition = (graph: WorkflowGraph, node: GraphNode): GraphNode['position'] => {
   const parent = graph.subgraphs.find((subgraph) => subgraph.id === node.parentId);
-  return parent
-    ? { x: parent.position.x + node.position.x, y: parent.position.y + node.position.y }
-    : node.position;
+  if (!parent) return node.position;
+  const parentPosition = absoluteSubgraphPosition(graph, parent);
+  return { x: parentPosition.x + node.position.x, y: parentPosition.y + node.position.y };
 };
 
 const removeParent = (node: GraphNode, position: GraphNode['position']): GraphNode => {
@@ -195,15 +213,22 @@ const dropParentForNode = (
     x: absolute.x + CONTRACT_NODE_WIDTH / 2,
     y: absolute.y + CONTRACT_NODE_HEIGHT / 2,
   };
-  const matches = graph.subgraphs.filter(
-    (subgraph) =>
-      !subgraph.collapsed &&
-      centre.x > subgraph.position.x + SUBGRAPH_BODY_INSET &&
-      centre.x < subgraph.position.x + subgraph.dimensions.width - SUBGRAPH_BODY_INSET &&
-      centre.y > subgraph.position.y + SUBGRAPH_HEADER_HEIGHT &&
-      centre.y < subgraph.position.y + subgraph.dimensions.height - SUBGRAPH_BODY_INSET,
+  const matches = graph.subgraphs.filter((subgraph) => {
+    if (subgraph.collapsed) return false;
+    const position = absoluteSubgraphPosition(graph, subgraph);
+    return centre.x > position.x + SUBGRAPH_BODY_INSET &&
+      centre.x < position.x + subgraph.dimensions.width - SUBGRAPH_BODY_INSET &&
+      centre.y > position.y + SUBGRAPH_HEADER_HEIGHT &&
+      centre.y < position.y + subgraph.dimensions.height - SUBGRAPH_BODY_INSET;
+  });
+  if (matches.length === 0) return undefined;
+  const matchIds = new Set(matches.map((subgraph) => subgraph.id));
+  const innermost = matches.filter(
+    (candidate) => !graph.subgraphs.some(
+      (other) => other.parentId === candidate.id && matchIds.has(other.id),
+    ),
   );
-  return matches.length === 1 ? matches[0] : undefined;
+  return innermost.length === 1 ? innermost[0] : undefined;
 };
 
 export function createWorkspaceService(dependencies: WorkspaceDependencies) {
@@ -504,6 +529,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         position: GraphSubgraph['position'];
         dimensions?: GraphSubgraph['dimensions'];
         collapsed?: boolean;
+        parentId?: string;
       },
     ): WorkspaceTransition<{ subgraphId: string }> {
       if (!editable(state)) return { ...blocked(state), result: undefined };
@@ -520,6 +546,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
               position: input.position,
               dimensions: input.dimensions ?? { width: 640, height: 360 },
               collapsed: input.collapsed ?? false,
+              ...(input.parentId ? { parentId: input.parentId } : {}),
             },
           ],
         }),
@@ -588,6 +615,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         state,
         (graph) => {
           const parent = graph.subgraphs.find((subgraph) => subgraph.id === subgraphId)!;
+          const parentPosition = absoluteSubgraphPosition(graph, parent);
           return {
             ...graph,
             nodes: graph.nodes.map((node) => {
@@ -597,8 +625,8 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
                 ...node,
                 parentId: subgraphId,
                 position: {
-                  x: absolute.x - parent.position.x,
-                  y: absolute.y - parent.position.y,
+                  x: absolute.x - parentPosition.x,
+                  y: absolute.y - parentPosition.y,
                 },
               };
             }),
@@ -618,6 +646,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         state,
         (graph) => {
           const parent = graph.subgraphs.find((subgraph) => subgraph.id === subgraphId)!;
+          const parentPosition = absoluteSubgraphPosition(graph, parent);
           const current = graph.nodes.find((candidate) => candidate.id === nodeId)!;
           const absolute = absoluteNodePosition(graph, current);
           return {
@@ -628,8 +657,8 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
                     ...candidate,
                     parentId: subgraphId,
                     position: {
-                      x: absolute.x - parent.position.x,
-                      y: absolute.y - parent.position.y,
+                      x: absolute.x - parentPosition.x,
+                      y: absolute.y - parentPosition.y,
                     },
                   }
                 : candidate,
@@ -676,20 +705,41 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     },
 
     dissolveSubgraph(state: WorkspaceCore, subgraphId: string, scheduleLayout = true) {
-      if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
+      const dissolved = state.graph.subgraphs.find((subgraph) => subgraph.id === subgraphId);
+      if (!dissolved) {
         return { state, changed: false };
       }
       const transition = changeGraph(
         state,
-        (graph) => ({
-          ...graph,
-          nodes: graph.nodes.map((node) =>
-            node.parentId === subgraphId
-              ? removeParent(node, absoluteNodePosition(graph, node))
-              : node,
-          ),
-          subgraphs: graph.subgraphs.filter((subgraph) => subgraph.id !== subgraphId),
-        }),
+        (graph) => {
+          const parent = dissolved.parentId
+            ? graph.subgraphs.find((subgraph) => subgraph.id === dissolved.parentId)
+            : undefined;
+          const parentPosition = parent ? absoluteSubgraphPosition(graph, parent) : undefined;
+          const reparentPosition = (position: GraphSubgraph['position']) => parentPosition
+            ? { x: position.x - parentPosition.x, y: position.y - parentPosition.y }
+            : position;
+          return {
+            ...graph,
+            nodes: graph.nodes.map((node) => {
+              if (node.parentId !== subgraphId) return node;
+              const position = reparentPosition(absoluteNodePosition(graph, node));
+              return parent
+                ? { ...node, parentId: parent.id, position }
+                : removeParent(node, position);
+            }),
+            subgraphs: graph.subgraphs
+              .filter((subgraph) => subgraph.id !== subgraphId)
+              .map((subgraph) => {
+                if (subgraph.parentId !== subgraphId) return subgraph;
+                const position = reparentPosition(absoluteSubgraphPosition(graph, subgraph));
+                if (parent) return { ...subgraph, parentId: parent.id, position };
+                const reparented = { ...subgraph, position };
+                delete reparented.parentId;
+                return reparented;
+              }),
+          };
+        },
         'Subgraph dissolved. Its child nodes remain at their absolute positions.',
       );
       return scheduleLayout ? withScheduledWorkflowLayout(transition) : transition;

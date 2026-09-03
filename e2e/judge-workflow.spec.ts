@@ -191,10 +191,11 @@ test('J01 — read, propose, and reject leaves the accepted complex graph untouc
     name: flagship.title,
     status: 'draft',
   });
-  expect(accepted.graph.nodes).toHaveLength(12);
-  expect(accepted.graph.edges).toHaveLength(12);
+  expect(accepted.graph.nodes).toHaveLength(16);
+  expect(accepted.graph.edges).toHaveLength(16);
   expect(accepted.graph.subgraphs).toEqual([
     expect.objectContaining({ id: 'research-cell' }),
+    expect.objectContaining({ id: 'researcher-workflow', parentId: 'research-cell' }),
   ]);
 
   const candidateLabel = 'Unapproved judge framing';
@@ -297,7 +298,7 @@ test('J03 — selected path emphasis and its artifact describe one accepted revi
     'Judge-approved research framing',
   );
   const selected = scenarios.find((scenario) =>
-    scenario.orderedPath.includes('inspect-evidence'),
+    scenario.orderedPath.includes('researcher-agent'),
   );
   expect(selected).toBeDefined();
   await selectScenario(app, selected!);

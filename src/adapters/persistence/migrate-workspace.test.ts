@@ -5,6 +5,7 @@ import {
   createProposal,
   enumerateScenarios,
   researchIntakeRoutingGraph,
+  researchSupervisorGraph,
   sampleGraph,
   validateGraph,
   WorkflowGraphV1,
@@ -147,6 +148,32 @@ describe('workspace persistence migration', () => {
     expect(validateGraph(migrated.graph!).map((entry) => entry.code)).toEqual(
       expect.arrayContaining(['MISSING_EDGE_NODE', 'OUTGOING_REQUIRED', 'SUBGRAPH_START_COUNT']),
     );
+  });
+
+  it('preserves nested subgraph membership and relative geometry on reload', () => {
+    const graph = structuredClone(researchSupervisorGraph);
+    graph.subgraphs.push({
+      id: 'researcher-workflow',
+      label: 'Researcher',
+      parentId: 'research-supervisor',
+      position: { x: 96, y: 188 },
+      dimensions: { width: 540, height: 280 },
+      collapsed: true,
+    });
+
+    const migrated = migrateWorkspaceV6(
+      { graph, proposal: null, scenarios: [] },
+      service.createInitial,
+    );
+
+    expect(migrated.graph?.subgraphs.find(
+      (subgraph) => subgraph.id === 'researcher-workflow',
+    )).toMatchObject({
+      parentId: 'research-supervisor',
+      position: { x: 96, y: 188 },
+      dimensions: { width: 540, height: 280 },
+      collapsed: true,
+    });
   });
 
   it('migrates v4 modifier summaries into explicit v5 capability records without changing topology', () => {

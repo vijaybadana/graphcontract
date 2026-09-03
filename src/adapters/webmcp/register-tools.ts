@@ -159,6 +159,10 @@ const subgraphSchema = {
   properties: {
     id: { type: 'string' },
     label: { type: 'string' },
+    parentId: {
+      type: 'string',
+      description: 'Optional containing subgraph id. Position is relative to this parent.',
+    },
     position: positionSchema,
     dimensions: {
       type: 'object',
@@ -566,6 +570,7 @@ const subgraphPatchSchema = {
   type: 'object',
   properties: {
     label: { type: 'string' },
+    parentId: { type: 'string' },
     position: positionSchema,
     dimensions: subgraphSchema.properties.dimensions,
     collapsed: { type: 'boolean' },

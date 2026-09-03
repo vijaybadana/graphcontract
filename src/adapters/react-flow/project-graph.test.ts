@@ -187,60 +187,60 @@ describe('projectGraphToCanvas', () => {
     )).toBe(false);
   });
 
-  it('derives one contained dynamic worker-group wrapper without changing canonical subgraphs', () => {
+  it('projects the canonical Researcher workflow as a movable nested subgraph', () => {
     const graph = graphLibraryEntries.find((entry) => entry.id === 'hierarchical-deep-research')!.graph;
     const design = projectGraphToCanvas(graph, null);
-    const wrapper = design.nodes.find((node) => node.id === 'dynamic-worker-group:supervisor-send');
-    const template = design.nodes.find((node) => node.id === 'researcher-template');
+    const supervisor = design.nodes.find((node) => node.id === 'research-cell');
+    const researcher = design.nodes.find((node) => node.id === 'researcher-workflow');
+    const researcherAgent = design.nodes.find((node) => node.id === 'researcher-agent');
 
-    expect(graph.subgraphs).toHaveLength(1);
+    expect(graph.subgraphs).toHaveLength(2);
     expect(graph.subgraphs[0]).toMatchObject({ id: 'research-cell', label: 'Research Supervisor' });
-    expect(wrapper).toMatchObject({
-      type: 'dynamicWorkerGroup',
+    expect(supervisor).toMatchObject({ type: 'subgraph' });
+    expect(supervisor).not.toHaveProperty('parentId');
+    expect(researcher).toMatchObject({
+      id: 'researcher-workflow',
+      type: 'subgraph',
       parentId: 'research-cell',
-      draggable: false,
-      selectable: false,
-      style: { pointerEvents: 'none' },
-      data: {
-        templateNodeId: 'researcher-template',
-        sendEdgeId: 'supervisor-send',
-        mergeNodeId: 'research-merge',
-        payloadLabel: 'research task',
-        memberNodeIds: [
-          'researcher-start',
-          'researcher-agent',
-          'research-tools',
-          'compress-findings',
-          'researcher-end',
-        ],
-        memberEdgeIds: [
-          'researcher-start-agent',
-          'researcher-agent-tools',
-          'researcher-tools-compress',
-          'researcher-compress-end',
-        ],
-      },
+      position: { x: 88, y: 520 },
+      initialWidth: 1760,
+      initialHeight: 430,
+      draggable: true,
+      selectable: true,
+      dragHandle: '.subgraph-node-drag-surface',
+      hidden: false,
     });
-    expect(wrapper?.initialWidth).toBe(1360);
-    expect(wrapper?.initialHeight).toBe(430);
-    expect(wrapper?.position.y).toBe(420);
-    expect(template).toMatchObject({ parentId: 'research-cell', type: 'contractNode' });
-    expect(design.edges.find((edge) => edge.id === 'supervisor-send')).toMatchObject({
-      target: 'dynamic-worker-group:supervisor-send',
-      data: { edge: { target: 'researcher-template' } },
+    expect(researcherAgent).toMatchObject({
+      parentId: 'researcher-workflow',
+      type: 'contractNode',
+      position: { x: 500, y: 148 },
+      hidden: false,
+    });
+    expect(design.nodes.some((node) => node.type === 'dynamicWorkerGroup')).toBe(false);
+    expect(design.edges.find((edge) => edge.id === 'dispatch-send')).toMatchObject({
+      source: 'dispatch-research',
+      target: 'researcher-agent',
+      data: { edge: { mode: 'send', target: 'researcher-agent' } },
     });
     expect(design.edges.find((edge) => edge.id === 'researcher-merge')).toMatchObject({
-      source: 'dynamic-worker-group:supervisor-send',
-      data: { edge: { source: 'researcher-template', target: 'research-merge' } },
+      source: 'researcher-agent',
+      data: { edge: { source: 'researcher-agent', target: 'research-merge' } },
     });
 
-    const collapsed = structuredClone(graph);
-    collapsed.subgraphs[0]!.collapsed = true;
-    expect(
-      projectGraphToCanvas(collapsed, null).nodes.find(
-        (node) => node.id === 'dynamic-worker-group:supervisor-send',
-      )?.hidden,
-    ).toBe(true);
+    const researcherCollapsed = structuredClone(graph);
+    researcherCollapsed.subgraphs.find((subgraph) => subgraph.id === 'researcher-workflow')!.collapsed = true;
+    const researcherCollapsedCanvas = projectGraphToCanvas(researcherCollapsed, null);
+    expect(researcherCollapsedCanvas.nodes.find((node) => node.id === 'researcher-workflow')?.hidden).toBe(false);
+    expect(researcherCollapsedCanvas.nodes.find((node) => node.id === 'researcher-agent')?.hidden).toBe(true);
+    expect(researcherCollapsedCanvas.edges.some(
+      (edge) => edge.source === 'researcher-workflow' || edge.target === 'researcher-workflow',
+    )).toBe(true);
+
+    const supervisorCollapsed = structuredClone(graph);
+    supervisorCollapsed.subgraphs.find((subgraph) => subgraph.id === 'research-cell')!.collapsed = true;
+    const supervisorCollapsedCanvas = projectGraphToCanvas(supervisorCollapsed, null);
+    expect(supervisorCollapsedCanvas.nodes.find((node) => node.id === 'researcher-workflow')?.hidden).toBe(true);
+    expect(supervisorCollapsedCanvas.nodes.find((node) => node.id === 'researcher-agent')?.hidden).toBe(true);
   });
 
   it('projects evidence and system relationships without turning them into native or collapsed-proxy edges', () => {

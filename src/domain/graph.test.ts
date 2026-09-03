@@ -237,6 +237,38 @@ describe('routing edge semantics', () => {
     expect(validateGraph(graph)).toEqual([]);
   });
 
+  it('persists nested subgraph membership and rejects cyclic containment', () => {
+    const graph = structuredClone(researchSupervisorGraph);
+    graph.subgraphs.push({
+      id: 'researcher-workflow',
+      label: 'Researcher',
+      parentId: 'research-supervisor',
+      position: { x: 80, y: 180 },
+      dimensions: { width: 520, height: 260 },
+      collapsed: false,
+    });
+
+    const parsed = workflowGraphSchema.parse(graph);
+    expect(parsed.subgraphs.find((subgraph) => subgraph.id === 'researcher-workflow')).toMatchObject({
+      parentId: 'research-supervisor',
+      position: { x: 80, y: 180 },
+      dimensions: { width: 520, height: 260 },
+      collapsed: false,
+    });
+
+    parsed.subgraphs.find((subgraph) => subgraph.id === 'research-supervisor')!.parentId = 'researcher-workflow';
+    expect(validateGraph(parsed)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'SUBGRAPH_PARENT_CYCLE',
+        path: 'subgraphs.research-supervisor.parentId',
+      }),
+      expect.objectContaining({
+        code: 'SUBGRAPH_PARENT_CYCLE',
+        path: 'subgraphs.researcher-workflow.parentId',
+      }),
+    ]));
+  });
+
   it('requires a durable-thread configuration source only for enabled required Checkpointers', () => {
     const graph = structuredClone(sampleGraph);
     graph.capabilities.checkpointer = { enabled: true, durableThread: { required: true } };

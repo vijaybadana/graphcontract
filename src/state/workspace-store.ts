@@ -57,6 +57,7 @@ type WorkspaceStore = WorkspaceCore & {
     position: GraphPosition;
     dimensions?: GraphSubgraph['dimensions'];
     collapsed?: boolean;
+    parentId?: string;
   }) => void;
   moveNode: (id: string, position: { x: number; y: number }) => void;
   moveNodes: (positions: Record<string, { x: number; y: number }>) => void;

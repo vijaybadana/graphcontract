@@ -91,6 +91,8 @@ describe('WebMCP adapter', () => {
     const operationTypes = variants.map((variant) => variant.properties?.type?.const);
     const addNode = variants.find((variant) => variant.properties?.type?.const === 'add_node');
     const updateNode = variants.find((variant) => variant.properties?.type?.const === 'update_node');
+    const addSubgraph = variants.find((variant) => variant.properties?.type?.const === 'add_subgraph');
+    const updateSubgraph = variants.find((variant) => variant.properties?.type?.const === 'update_subgraph');
     const addEdge = variants.find((variant) => variant.properties?.type?.const === 'add_edge');
     const updateEdge = variants.find((variant) => variant.properties?.type?.const === 'update_edge');
     const addRelationship = variants.find((variant) => variant.properties?.type?.const === 'add_relationship');
@@ -124,6 +126,10 @@ describe('WebMCP adapter', () => {
       'remove_relationship',
     ]));
     expect(variants.every((variant) => variant.additionalProperties === false)).toBe(true);
+    expect(addSubgraph?.properties?.subgraph?.properties?.parentId).toMatchObject({
+      type: 'string',
+    });
+    expect(updateSubgraph?.properties?.patch?.properties?.parentId).toEqual({ type: 'string' });
     expect(addNodeVariants).toHaveLength(4);
     expect([nodeKind(startNode!), nodeKind(stepNode!), nodeKind(mergeNode!), nodeKind(endNode!)]).toEqual([
       'start',

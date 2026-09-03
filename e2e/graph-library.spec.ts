@@ -15,9 +15,29 @@ type GraphRead = {
     name: string;
     status: 'draft' | 'frozen';
     updatedAt: string;
-    nodes: Array<{ id: string; kind: string; label: string; executor?: string }>;
-    edges: Array<{ id: string; mode: string }>;
-    subgraphs: Array<{ id: string }>;
+    nodes: Array<{
+      id: string;
+      kind: string;
+      label: string;
+      executor?: string;
+      parentId?: string;
+      position: { x: number; y: number };
+    }>;
+    edges: Array<{
+      id: string;
+      source: string;
+      target: string;
+      mode: string;
+      loopCap?: number;
+      send?: { multiplicity: string; mergeNodeId: string };
+    }>;
+    subgraphs: Array<{
+      id: string;
+      parentId?: string;
+      position: { x: number; y: number };
+      dimensions: { width: number; height: number };
+      collapsed: boolean;
+    }>;
   };
   validation: { validForFreeze: boolean; issues: unknown[] };
   pendingProposal?: { status: string };
@@ -163,68 +183,86 @@ test('library loads representative subgraph, HITL, and Send/Merge workflows onto
   await openEntry(app, 'Hierarchical Deep Research');
   const hierarchical = await readGraph(app);
   expect(hierarchical.subgraphs).toEqual(
-    expect.arrayContaining([expect.objectContaining({ id: 'research-cell' })]),
+    expect.arrayContaining([
+      expect.objectContaining({ id: 'research-cell' }),
+      expect.objectContaining({ id: 'researcher-workflow', parentId: 'research-cell' }),
+    ]),
   );
   expect(hierarchical.nodes).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: 'frame-question', label: 'Supervisor', parentId: 'research-cell' }),
-    expect.objectContaining({ id: 'inspect-evidence', label: 'Supervisor Tools', parentId: 'research-cell' }),
-    expect.objectContaining({ id: 'researcher-template', label: 'Researcher Agent', parentId: 'research-cell' }),
-    expect.objectContaining({ id: 'research-merge', kind: 'merge', parentId: 'research-cell' }),
+    expect.objectContaining({ id: 'researcher-agent', label: 'Researcher Agent', parentId: 'researcher-workflow' }),
+    expect.objectContaining({ id: 'research-tools', label: 'Research Tools', parentId: 'researcher-workflow' }),
+    expect.objectContaining({ id: 'compress-findings', label: 'Compress Findings', parentId: 'researcher-workflow' }),
+    expect.objectContaining({ id: 'research-merge', kind: 'merge', parentId: 'researcher-workflow' }),
   ]));
   expect(hierarchical.edges).toEqual(expect.arrayContaining([
     expect.objectContaining({
-      id: 'supervisor-send',
+      id: 'dispatch-send',
       mode: 'send',
-      target: 'researcher-template',
+      target: 'researcher-agent',
       send: expect.objectContaining({ multiplicity: 'dynamic', mergeNodeId: 'research-merge' }),
     }),
-    expect.objectContaining({ id: 'merge-supervisor', source: 'research-merge', target: 'frame-question', loopCap: 2 }),
+    expect.objectContaining({ id: 'researcher-supervisor-loop', source: 'researcher-end', target: 'frame-question', loopCap: 2 }),
   ]));
   await expect(app.getByTestId('rf__node-research-cell')).toBeVisible();
-  const researcherTemplate = app.getByTestId('rf__node-researcher-template');
-  await expect(researcherTemplate).toBeVisible();
-  await expect(researcherTemplate.locator('.contract-node-shell')).toHaveAttribute('data-send-template', 'true');
-  await expect(researcherTemplate.getByText('Template ×N')).toBeVisible();
-  const dynamicGroup = app.getByTestId('rf__node-dynamic-worker-group:supervisor-send');
-  await expect(dynamicGroup).toBeVisible();
-  await expect(dynamicGroup.getByRole('button', { name: /dynamic subgraph template ×N/i })).toBeVisible();
-  await expect(dynamicGroup.locator('.dynamic-worker-group-copy')).toHaveCount(2);
-  await expect(dynamicGroup.locator('.dynamic-worker-template-node')).toHaveCount(4);
-  await expect(dynamicGroup.locator('.dynamic-worker-template-node .contract-node-shell')).toHaveCount(4);
-  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="start"]')).toHaveCount(1);
-  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="tool"]')).toHaveCount(1);
-  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="task"]')).toHaveCount(1);
-  await expect(dynamicGroup.locator('.contract-node-shell[data-display-kind="end"]')).toHaveCount(1);
-  await expect(dynamicGroup.locator('.dynamic-worker-template-edge')).toHaveCount(4);
+  const researcherSubgraph = app.getByTestId('rf__node-researcher-workflow');
+  const researcherAgent = app.getByTestId('rf__node-researcher-agent');
+  await expect(researcherSubgraph).toBeVisible();
+  await expect(researcherAgent).toBeVisible();
+  await expect(app.locator('[data-testid^="rf__node-dynamic-worker-group:"]')).toHaveCount(0);
   await app.getByRole('button', { name: 'Fit graph' }).click();
   await app.waitForTimeout(250);
-  const [canvasBounds, subgraphBounds, groupBounds, templateBounds, mergeBounds, reportBounds] = await Promise.all([
+  const [canvasBounds, subgraphBounds, researcherBounds, templateBounds, mergeBounds, reportBounds] = await Promise.all([
     app.locator('.react-flow').boundingBox(),
     app.getByTestId('rf__node-research-cell').boundingBox(),
-    dynamicGroup.boundingBox(),
-    researcherTemplate.boundingBox(),
+    researcherSubgraph.boundingBox(),
+    researcherAgent.boundingBox(),
     app.getByTestId('rf__node-research-merge').boundingBox(),
     app.getByTestId('rf__node-final-report').boundingBox(),
   ]);
   expect(canvasBounds).not.toBeNull();
   expect(subgraphBounds).not.toBeNull();
-  expect(groupBounds).not.toBeNull();
+  expect(researcherBounds).not.toBeNull();
   expect(templateBounds).not.toBeNull();
   expect(mergeBounds).not.toBeNull();
   expect(reportBounds).not.toBeNull();
-  expect(groupBounds!.x).toBeGreaterThanOrEqual(subgraphBounds!.x - 1);
-  expect(groupBounds!.y).toBeGreaterThanOrEqual(subgraphBounds!.y - 1);
-  expect(groupBounds!.x + groupBounds!.width).toBeLessThanOrEqual(subgraphBounds!.x + subgraphBounds!.width + 1);
-  expect(groupBounds!.y + groupBounds!.height).toBeLessThanOrEqual(subgraphBounds!.y + subgraphBounds!.height + 1);
-  expect(templateBounds!.x).toBeGreaterThan(groupBounds!.x);
-  expect(templateBounds!.y).toBeGreaterThan(groupBounds!.y);
-  expect(templateBounds!.x + templateBounds!.width).toBeLessThan(groupBounds!.x + groupBounds!.width);
-  expect(templateBounds!.y + templateBounds!.height).toBeLessThan(groupBounds!.y + groupBounds!.height);
-  expect(groupBounds!.x + groupBounds!.width).toBeLessThanOrEqual(mergeBounds!.x);
+  expect(researcherBounds!.x).toBeGreaterThanOrEqual(subgraphBounds!.x - 1);
+  expect(researcherBounds!.y).toBeGreaterThanOrEqual(subgraphBounds!.y - 1);
+  expect(researcherBounds!.x + researcherBounds!.width).toBeLessThanOrEqual(subgraphBounds!.x + subgraphBounds!.width + 1);
+  expect(researcherBounds!.y + researcherBounds!.height).toBeLessThanOrEqual(subgraphBounds!.y + subgraphBounds!.height + 1);
+  expect(templateBounds!.x).toBeGreaterThan(researcherBounds!.x);
+  expect(templateBounds!.y).toBeGreaterThan(researcherBounds!.y);
+  expect(templateBounds!.x + templateBounds!.width).toBeLessThan(researcherBounds!.x + researcherBounds!.width);
+  expect(templateBounds!.y + templateBounds!.height).toBeLessThan(researcherBounds!.y + researcherBounds!.height);
+  expect(mergeBounds!.x).toBeGreaterThan(templateBounds!.x);
   expect(reportBounds!.x + reportBounds!.width).toBeLessThanOrEqual(canvasBounds!.x + canvasBounds!.width - 8);
-  await dynamicGroup.getByRole('button', { name: /dynamic subgraph template ×N/i }).click();
-  await expect(researcherTemplate).toHaveClass(/selected/);
-  await expect(app.getByRole('heading', { name: 'Researcher Agent' })).toBeVisible();
+  await researcherSubgraph.locator('.subgraph-node-header').click();
+  await expect(researcherSubgraph).toHaveClass(/selected/);
+  await expect(app.getByRole('heading', { name: 'Researcher ×N' })).toBeVisible();
+
+  const beforeMove = await readGraph(app);
+  const beforeResearcher = beforeMove.subgraphs.find((subgraph) => subgraph.id === 'researcher-workflow')!;
+  const childPositions = Object.fromEntries(
+    beforeMove.nodes
+      .filter((node) => node.parentId === 'researcher-workflow')
+      .map((node) => [node.id, node.position]),
+  );
+  const header = researcherSubgraph.locator('.subgraph-node-header');
+  const headerBounds = await header.boundingBox();
+  expect(headerBounds).not.toBeNull();
+  await app.mouse.move(headerBounds!.x + 80, headerBounds!.y + 20);
+  await app.mouse.down();
+  await app.mouse.move(headerBounds!.x + 120, headerBounds!.y + 44, { steps: 5 });
+  await app.mouse.up();
+  await expect.poll(async () => (
+    await readGraph(app)
+  ).subgraphs.find((subgraph) => subgraph.id === 'researcher-workflow')?.position).not.toEqual(beforeResearcher.position);
+  const afterMove = await readGraph(app);
+  expect(Object.fromEntries(
+    afterMove.nodes
+      .filter((node) => node.parentId === 'researcher-workflow')
+      .map((node) => [node.id, node.position]),
+  )).toEqual(childPositions);
 
   await openLibrary(app);
   await openEntry(app, 'Human-Approved Incident Response');
