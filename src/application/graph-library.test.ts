@@ -63,7 +63,7 @@ describe('graph library registry', () => {
     expect(voice.nodes.some((node) => node.kind === 'step' && node.retry !== undefined)).toBe(false);
   });
 
-  it('models hierarchical research with a movable canonical Researcher subgraph inside Supervisor', () => {
+  it('models source-backed hierarchical research with a bounded nested worker pool', () => {
     const entry = graphLibraryEntries.find((candidate) => candidate.id === 'hierarchical-deep-research')!;
     const supervisor = entry.graph.subgraphs.find((subgraph) => subgraph.id === 'research-cell')!;
     const researcherSubgraph = entry.graph.subgraphs.find(
@@ -77,17 +77,13 @@ describe('graph library registry', () => {
     const merge = entry.graph.nodes.find((node) => node.id === 'research-merge');
     const send = entry.graph.edges.find((edge) => edge.id === 'dispatch-send');
 
-    expect(supervisor).toMatchObject({
-      label: 'Research Supervisor',
-      collapsed: false,
-      position: { x: 1100, y: 100 },
-    });
+    expect(entry.graph.id).toBe('library-hierarchical-deep-research');
+    expect(supervisor).toMatchObject({ label: 'Research Supervisor', collapsed: false });
     expect(researcherSubgraph).toMatchObject({
       label: 'Researcher ×N',
       parentId: 'research-cell',
       collapsed: false,
-      position: { x: 88, y: 520 },
-      dimensions: { width: 1760, height: 430 },
+      dimensions: { width: 1500, height: 620 },
     });
     expect(entry.layout).toMatchObject({
       preserveGraphGeometry: true,
@@ -96,6 +92,7 @@ describe('graph library registry', () => {
     expect(supervisorMembers.map((node) => node.id)).toEqual(expect.arrayContaining([
       'research-cell-start',
       'frame-question',
+      'review-findings',
       'research-cell-end',
     ]));
     expect(researcherMembers.map((node) => node.id)).toEqual(expect.arrayContaining([
@@ -103,8 +100,6 @@ describe('graph library registry', () => {
       'dispatch-research',
       'researcher-agent',
       'research-merge',
-      'research-tools',
-      'compress-findings',
       'researcher-end',
     ]));
     expect(researcher).toMatchObject({ kind: 'step', executor: 'ai', label: 'Researcher Agent' });
@@ -125,33 +120,46 @@ describe('graph library registry', () => {
         multiplicity: 'dynamic',
         payloadLabel: 'research task',
         mergeNodeId: 'research-merge',
+        payloadSchemaRef: 'ConductResearch.research_topic',
+        templateAnatomy: {
+          canonicalTemplateNodeId: 'researcher-agent',
+          nodes: expect.arrayContaining([
+            expect.objectContaining({ id: 'researcher-worker-start', kind: 'start' }),
+            expect.objectContaining({ id: 'researcher-agent', kind: 'step', executor: 'ai' }),
+            expect.objectContaining({ id: 'research-tools', kind: 'step', executor: 'tool' }),
+            expect.objectContaining({ id: 'compress-findings', kind: 'step', executor: 'ai' }),
+            expect.objectContaining({ id: 'researcher-worker-end', kind: 'end' }),
+          ]),
+        },
       },
     });
     expect(entry.graph.edges.find((edge) => edge.id === 'researcher-supervisor-loop')).toMatchObject({
-      source: 'researcher-end',
+      source: 'review-findings',
       target: 'frame-question',
-      loopCap: 2,
+      label: 'research more',
+      loopCap: 5,
     });
-    expect(supervisor.dimensions).toEqual({ width: 1936, height: 1100 });
-    expect(researcher?.position).toEqual({ x: 500, y: 148 });
-    expect(Object.fromEntries(entry.graph.nodes.map((node) => [node.id, node.position]))).toEqual({
-      'research-start': { x: 80, y: 583 },
-      'clarify-request': { x: 372, y: 583 },
-      'awaiting-user-reply': { x: 760, y: 484 },
-      'write-brief': { x: 760, y: 682 },
-      'research-cell-start': { x: 76, y: 160 },
-      'frame-question': { x: 336, y: 160 },
-      'research-cell-end': { x: 1676, y: 160 },
-      'researcher-start': { x: 32, y: 148 },
-      'dispatch-research': { x: 260, y: 148 },
-      'researcher-agent': { x: 500, y: 148 },
-      'research-merge': { x: 740, y: 148 },
-      'research-tools': { x: 980, y: 148 },
-      'compress-findings': { x: 1220, y: 148 },
-      'researcher-end': { x: 1460, y: 148 },
-      'final-report': { x: 3156, y: 583 },
-      'research-complete': { x: 3492, y: 583 },
+    expect(entry.graph.edges.find((edge) => edge.id === 'frame-researcher')).toMatchObject({
+      source: 'frame-question',
+      target: 'researcher-start',
+      label: 'conduct research',
     });
+    expect(entry.graph.edges.find((edge) => edge.id === 'frame-complete')).toMatchObject({
+      source: 'review-findings',
+      target: 'research-cell-end',
+      label: 'research complete',
+    });
+    expect(entry.graph.edges.some((edge) => (
+      edge.source === 'frame-question' && edge.target === 'research-cell-end'
+    ))).toBe(false);
+    expect(entry.graph.edges.find((edge) => edge.id === 'merge-researcher-end')).toMatchObject({
+      source: 'research-merge',
+      target: 'researcher-end',
+    });
+    expect(entry.graph.edges.some((edge) => edge.id === 'merge-tools')).toBe(false);
+    expect(entry.graph.edges.some((edge) => edge.id === 'tools-compress')).toBe(false);
+    expect(supervisor.dimensions).toEqual({ width: 1930, height: 1080 });
+    expect(researcher?.position).toEqual({ x: 370, y: 302 });
   });
 
   it('rejects duplicate IDs, unsafe sources, and invalid graph inputs', () => {
