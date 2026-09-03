@@ -50,7 +50,7 @@ async function readGraph(page: Page) {
 }
 
 async function openLibrary(page: Page) {
-  await page.getByRole('button', { name: 'Graph library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
@@ -100,7 +100,7 @@ test('Graph Library exposes all ten normalized templates through search, domain 
 });
 
 test('Graph Library keeps keyboard focus, closes accessibly, and isolates GitHub source links', async ({ app }) => {
-  const trigger = app.getByRole('button', { name: 'Graph library, 10 templates' });
+  const trigger = app.getByRole('button', { name: 'Workflow library, 10 templates' });
   await trigger.focus();
   await trigger.press('Enter');
   const search = app.getByRole('searchbox', { name: 'Search graph library' });
@@ -257,7 +257,7 @@ test('Graph Library drawer remains reachable at compact and desktop breakpoints'
     { width: 1440, height: 900 },
   ]) {
     await app.setViewportSize(viewport);
-    const trigger = app.getByRole('button', { name: 'Graph library, 10 templates' });
+    const trigger = app.getByRole('button', { name: 'Workflow library, 10 templates' });
     await expect(trigger).toBeVisible();
     await trigger.click();
     const dialog = app.getByRole('dialog');

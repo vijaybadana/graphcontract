@@ -54,9 +54,10 @@ describe('WorkspaceHeader freeze control', () => {
       />,
     );
 
-    const button = screen.getByRole('button', { name: 'Graph library, 10 templates' });
+    const button = screen.getByRole('button', { name: 'Workflow library, 10 templates' });
     expect(button.getAttribute('aria-haspopup')).toBe('dialog');
     expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.getAttribute('title')).toBe('Browse workflow library');
     fireEvent.click(button);
     expect(onOpenLibrary).toHaveBeenCalledOnce();
   });
@@ -263,8 +264,8 @@ describe('WorkspaceHeader freeze control', () => {
     expect(screen.getByText('Cases').getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByText('Review').getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByText('Run').getAttribute('aria-hidden')).toBe('true');
-    const library = screen.getByRole('button', { name: 'Graph library, 10 templates' });
-    expect(library.querySelector('.workspace-library-label')?.textContent).toBe('Graph library');
+    const library = screen.getByRole('button', { name: 'Workflow library, 10 templates' });
+    expect(library.querySelector('.workspace-library-label')?.textContent).toBe('Library');
     expect(library.querySelector('.workspace-library-count')?.textContent).toBe('10');
 
     cleanup();

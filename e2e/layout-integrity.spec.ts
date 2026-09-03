@@ -85,7 +85,7 @@ async function readGraph(page: Page): Promise<LayoutGraph> {
 }
 
 async function openLibraryTemplate(page: Page, title: string) {
-  await page.getByRole('button', { name: 'Graph library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   page.once('dialog', async (dialog) => {
     expect(dialog.type()).toBe('confirm');

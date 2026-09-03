@@ -7,7 +7,7 @@ import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowsClockwise,
-  Books,
+  CardsThree,
   Copy,
   FrameCorners,
   GitBranch,
@@ -134,13 +134,14 @@ export function WorkspaceHeader({
         <button
           type="button"
           className={`workspace-library-button ${libraryOpen ? 'is-active' : ''}`}
-          aria-label={`Graph library, ${libraryEntryCount} templates`}
+          aria-label={`Workflow library, ${libraryEntryCount} templates`}
           aria-haspopup="dialog"
           aria-expanded={libraryOpen}
+          title="Browse workflow library"
           onClick={onOpenLibrary}
         >
-          <Books aria-hidden="true" size={15} weight="duotone" />
-          <span className="workspace-library-label">Graph library</span>
+          <CardsThree aria-hidden="true" size={17} weight="duotone" />
+          <span className="workspace-library-label">Library</span>
           <strong className="workspace-library-count" aria-hidden="true">{libraryEntryCount}</strong>
         </button>
         <div className="workspace-command-divider workspace-library-command-divider" />

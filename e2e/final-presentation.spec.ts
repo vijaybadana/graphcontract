@@ -105,7 +105,7 @@ async function loadParallelResearchDemo(page: Page) {
 }
 
 async function loadHierarchicalResearch(page: Page) {
-  await page.getByRole('button', { name: 'Graph library, 10 templates' }).click();
+  await page.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   page.once('dialog', async (dialog) => {
     expect(dialog.type()).toBe('confirm');

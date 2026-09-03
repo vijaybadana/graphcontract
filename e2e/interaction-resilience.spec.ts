@@ -103,7 +103,7 @@ test('repeated mode, viewport, panel, and selection controls preserve accepted t
 });
 
 test('portal dialogs establish focus and restore it to their invoking controls', async ({ app }) => {
-  const libraryTrigger = app.getByRole('button', { name: 'Graph library, 10 templates' });
+  const libraryTrigger = app.getByRole('button', { name: 'Workflow library, 10 templates' });
   await libraryTrigger.focus();
   await libraryTrigger.press('Enter');
   const libraryDialog = app.getByRole('dialog', { name: 'Graph library' });

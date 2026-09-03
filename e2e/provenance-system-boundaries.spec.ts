@@ -271,7 +271,7 @@ test('relationship add, update, and removal previews are projection-only and rej
 
 test('selected scenarios preserve collapsed native proxies and dim unrelated non-native relationships', async ({ app }) => {
   const canvas = app.getByRole('application');
-  await app.getByRole('button', { name: 'Graph library, 10 templates' }).click();
+  await app.getByRole('button', { name: 'Workflow library, 10 templates' }).click();
   await expect(app.getByRole('dialog')).toBeVisible();
   app.once('dialog', async (dialog) => {
     expect(dialog.type()).toBe('confirm');
