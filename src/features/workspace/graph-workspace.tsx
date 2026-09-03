@@ -36,6 +36,7 @@ import type { GraphLibraryEntry } from '@/src/application/graph-library-contract
 import { graphLibraryEntries } from '@/src/application/graph-library';
 import { deriveProposalComparison } from '@/src/application/proposal-comparison';
 import { subgraphResizeLimits } from '@/src/application/subgraph-resize';
+import { dynamicWorkerGroupResizeLimits } from '@/src/application/dynamic-worker-layout';
 import { validateGraph } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
@@ -153,6 +154,8 @@ export function GraphWorkspace() {
   const addNode = useGraphStore((state) => state.addNode);
   const createSubgraph = useGraphStore((state) => state.createSubgraph);
   const moveCanvasElements = useGraphStore((state) => state.moveCanvasElements);
+  const moveDynamicWorkerGroup = useGraphStore((state) => state.moveDynamicWorkerGroup);
+  const resizeDynamicWorkerGroup = useGraphStore((state) => state.resizeDynamicWorkerGroup);
   const setSubgraphCollapsed = useGraphStore((state) => state.setSubgraphCollapsed);
   const updateSubgraph = useGraphStore((state) => state.updateSubgraph);
   const addEdge = useGraphStore((state) => state.addEdge);
@@ -486,6 +489,12 @@ export function GraphWorkspace() {
             data: {
               ...node.data,
               onActivate: activateDynamicWorkerTemplate,
+              layoutEditable: canvasEditable,
+              active: selection.nodeIds.includes(node.data.templateNodeId),
+              resizeLimits: canvasEditable
+                ? dynamicWorkerGroupResizeLimits(graph, node.data.sendEdgeId)
+                : undefined,
+              onResize: canvasEditable ? resizeDynamicWorkerGroup : undefined,
             },
           };
         }
@@ -576,8 +585,24 @@ export function GraphWorkspace() {
     evidenceMarkerByTarget,
     evidenceOverlayVisible,
     proposalCanvasFocus,
+    resizeDynamicWorkerGroup,
+    selection.nodeIds,
     selectSystemRelationship,
   ]);
+  const commitCanvasPositions = useCallback(
+    (positions: Record<string, { x: number; y: number }>) => {
+      const canonicalPositions = { ...positions };
+      for (const node of canvas.nodes) {
+        if (node.type !== 'dynamicWorkerGroup' || !positions[node.id]) continue;
+        moveDynamicWorkerGroup(node.data.sendEdgeId, positions[node.id]);
+        delete canonicalPositions[node.id];
+      }
+      if (Object.keys(canonicalPositions).length > 0) {
+        moveCanvasElements(canonicalPositions);
+      }
+    },
+    [canvas.nodes, moveCanvasElements, moveDynamicWorkerGroup],
+  );
   const canvasInteractions = useCanvasInteractions({
     projectedNodes: canvas.nodes,
     projectedEdges: canvas.edges,
@@ -586,7 +611,7 @@ export function GraphWorkspace() {
       : [...selection.nodeIds, ...selection.subgraphIds],
     selectedEdgeIds: proposalCanvasFocus ? proposalCanvasFocus.edgeIds : selection.edgeIds,
     editable: canvasEditable,
-    onCommitPositions: moveCanvasElements,
+    onCommitPositions: commitCanvasPositions,
     renderedSelectionRequest,
   });
   const { clearRenderedSelection } = canvasInteractions;
@@ -690,16 +715,22 @@ export function GraphWorkspace() {
   });
 
   useEffect(() => {
-    if (!inspectorVisible || selection.primary?.type !== 'subgraph') return;
-    const selectedSubgraph = graph.subgraphs.find(
-      (subgraph) => subgraph.id === selection.primary?.id,
-    );
-    if (!selectedSubgraph || selectedSubgraph.collapsed) return;
+    if (!inspectorVisible || !selection.primary) return;
+    const selectedSubgraph = selection.primary.type === 'subgraph'
+      ? graph.subgraphs.find((subgraph) => subgraph.id === selection.primary?.id)
+      : undefined;
+    const selectedDynamicWorker = selection.primary.type === 'node'
+      ? canvas.nodes.find((node) => (
+          node.type === 'dynamicWorkerGroup' &&
+          node.data.templateNodeId === selection.primary?.id
+        ))
+      : undefined;
+    if ((!selectedSubgraph || selectedSubgraph.collapsed) && !selectedDynamicWorker) return;
     // Expanded frames can be wider than the canvas area that remains after
     // the contextual inspector opens. Refit that one frame through the same
     // asymmetric panel padding so its header and resize handle stay reachable.
-    fitNodes([selectedSubgraph.id]);
-  }, [fitNodes, graph.subgraphs, inspectorVisible, selection.primary]);
+    fitNodes([selectedDynamicWorker?.id ?? selectedSubgraph!.id]);
+  }, [canvas.nodes, fitNodes, graph.subgraphs, inspectorVisible, selection.primary]);
 
   useEffect(() => {
     const focus = activeViewMode === 'proposal' ? proposalCanvasFocus : null;

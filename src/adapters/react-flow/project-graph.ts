@@ -16,6 +16,7 @@ import type {
   ProposalComparisonEntry,
   ProposalReview,
 } from '@/src/application/proposal-comparison';
+import { dynamicWorkerGroupLayout } from '@/src/application/dynamic-worker-layout';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
 import {
   CANVAS_INPUT_PORT_ID,
@@ -41,10 +42,6 @@ const SUBGRAPH_HEADER_HEIGHT = 56;
 const RUNTIME_INSTANCE_WIDTH = canvasNodeRenderer('runtimeInstance').dimensions.width;
 const RUNTIME_INSTANCE_HEIGHT = canvasNodeRenderer('runtimeInstance').dimensions.height;
 const RUNTIME_INSTANCE_VERTICAL_GAP = 20;
-const DYNAMIC_WORKER_GROUP_MIN_WIDTH = canvasNodeRenderer('dynamicWorkerGroup').dimensions.width;
-const DYNAMIC_WORKER_GROUP_MIN_HEIGHT = canvasNodeRenderer('dynamicWorkerGroup').dimensions.height;
-const DYNAMIC_WORKER_GROUP_INSET_X = 34;
-const DYNAMIC_WORKER_GROUP_INSET_Y = 76;
 
 export type CanvasEdgeData = {
   edge: GraphEdge;
@@ -774,12 +771,14 @@ function dynamicWorkerGroupNodes(
     const source = graph.nodes.find((node) => node.id === edge.source);
     const template = graph.nodes.find((node) => node.id === edge.target);
     const merge = graph.nodes.find((node) => node.id === edge.send!.mergeNodeId);
+    const layout = dynamicWorkerGroupLayout(graph, edge.id);
     const parentId = template?.parentId;
     const parent = parentId ? subgraphsById.get(parentId) : undefined;
     if (
       !source ||
       !template ||
       !merge ||
+      !layout ||
       !parent ||
       source.parentId !== parentId ||
       merge.parentId !== parentId
@@ -788,22 +787,11 @@ function dynamicWorkerGroupNodes(
     }
 
     const anatomy = edge.send.templateAnatomy;
-    const canonicalAnatomyNode = anatomy?.nodes.find(
-      (candidate) => candidate.id === anatomy.canonicalTemplateNodeId,
-    );
     const memberNodeIds = anatomy?.nodes.map((candidate) => candidate.id) ?? [template.id];
     const memberEdgeIds = anatomy?.edges.map((candidate) => candidate.id) ?? [];
-    const width = anatomy?.dimensions.width ?? DYNAMIC_WORKER_GROUP_MIN_WIDTH;
-    const height = anatomy?.dimensions.height ?? DYNAMIC_WORKER_GROUP_MIN_HEIGHT;
-    const position = canonicalAnatomyNode
-      ? {
-          x: template.position.x - canonicalAnatomyNode.position.x,
-          y: template.position.y - canonicalAnatomyNode.position.y,
-        }
-      : {
-          x: template.position.x - DYNAMIC_WORKER_GROUP_INSET_X,
-          y: template.position.y - DYNAMIC_WORKER_GROUP_INSET_Y,
-        };
+    const width = layout.dimensions.width;
+    const height = layout.dimensions.height;
+    const position = layout.position;
 
     return [{
       id: `dynamic-worker-group:${edge.id}`,
@@ -822,11 +810,16 @@ function dynamicWorkerGroupNodes(
       // parent subgraph; its explicit header opts back in from component CSS.
       style: { width, height, pointerEvents: 'none' },
       hidden: parent.collapsed || runtimeHiddenNodeIds.has(template.id),
-      draggable: false,
+      draggable: true,
+      dragHandle: '.dynamic-worker-group-drag-surface',
       selectable: false,
       connectable: false,
       focusable: true,
-      zIndex: 0,
+      // The wrapper stays pointer-transparent, but its explicit header and
+      // resize handle must win hit testing over nearby canonical siblings.
+      // Raising this derived frame is safe because every other descendant
+      // remains pointer-events:none in the component stylesheet.
+      zIndex: 2,
       className: scenarioPresentationClassName(
         scenarioElementState(
           scenarioPresentation,

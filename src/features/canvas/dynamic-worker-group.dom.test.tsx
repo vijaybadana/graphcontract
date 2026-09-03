@@ -43,6 +43,17 @@ describe('DynamicWorkerGroup', () => {
                 { id: 'compress-end', source: 'compress', target: 'end' },
               ],
             },
+            layoutEditable: true,
+            active: true,
+            resizeLimits: {
+              current: { width: 900, height: 300 },
+              minWidth: 880,
+              minHeight: 220,
+              maxWidth: 1_200,
+              maxHeight: 500,
+              obstacles: [],
+            },
+            onResize: vi.fn(),
             onActivate,
           }}
         />
@@ -60,6 +71,9 @@ describe('DynamicWorkerGroup', () => {
     expect(document.querySelector('.dynamic-worker-template-node .contract-node-shell[data-display-kind="task"]')).toBeTruthy();
     expect(screen.getByText('Compress Findings')).toBeTruthy();
     expect(document.querySelectorAll('.dynamic-worker-template-edge')).toHaveLength(4);
+    expect(document.querySelector('.dynamic-worker-group-resize-control')).not.toBeNull();
+    expect(button.classList.contains('dynamic-worker-group-drag-surface')).toBe(true);
+    expect(button.classList.contains('nodrag')).toBe(false);
     fireEvent.click(button);
     expect(onActivate).toHaveBeenCalledWith('researcher-template');
   });

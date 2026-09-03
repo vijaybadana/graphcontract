@@ -1,13 +1,24 @@
 'use client';
 
-import type { CSSProperties } from 'react';
-import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
+import { useCallback, type CSSProperties } from 'react';
+import {
+  Handle,
+  NodeResizeControl,
+  Position,
+  ResizeControlVariant,
+  type Node,
+  type NodeProps,
+} from '@xyflow/react';
 
 import type { GraphNode, SendTemplateAnatomy, SendTemplateAnatomyNode } from '@/src/domain';
 import {
   CANVAS_INPUT_PORT_ID,
   CANVAS_OUTPUT_PORT_ID,
 } from '@/src/application/layout-workflow';
+import {
+  constrainCanvasContainerDimensions,
+  type CanvasContainerResizeLimits,
+} from '@/src/application/subgraph-resize';
 
 import { useCanvasNodeReviewFocus } from './canvas-review-focus';
 import { ContractNodeCard } from './contract-node';
@@ -24,6 +35,10 @@ export type DynamicWorkerGroupData = {
   payloadLabel: string;
   templateAnatomy?: SendTemplateAnatomy;
   onActivate?: (templateNodeId: string) => void;
+  layoutEditable?: boolean;
+  active?: boolean;
+  resizeLimits?: CanvasContainerResizeLimits;
+  onResize?: (sendEdgeId: string, dimensions: { width: number; height: number }) => void;
 };
 
 export type DynamicWorkerGroupFlowNode = Node<DynamicWorkerGroupData, 'dynamicWorkerGroup'>;
@@ -44,18 +59,50 @@ function declaredTemplateGraphNode(node: SendTemplateAnatomyNode): GraphNode {
  * A render-only compound boundary derived from Send/map semantics. It is not
  * a canonical GraphSubgraph and never creates worker instances or persistence.
  */
-export function DynamicWorkerGroup({ data }: NodeProps<DynamicWorkerGroupFlowNode>) {
+export function DynamicWorkerGroup({ data, id }: NodeProps<DynamicWorkerGroupFlowNode>) {
   const reviewFocusState = useCanvasNodeReviewFocus(data.templateNodeId);
   const anatomy = data.templateAnatomy;
+  const resizeLimits = data.resizeLimits;
+  const onResize = data.onResize;
+  const sendEdgeId = data.sendEdgeId;
+  const finishResize = useCallback(
+    (_: unknown, dimensions: { width: number; height: number }) => {
+      if (!resizeLimits) return;
+      onResize?.(sendEdgeId, constrainCanvasContainerDimensions(dimensions, resizeLimits));
+    },
+    [onResize, resizeLimits, sendEdgeId],
+  );
+  const allowResize = useCallback(
+    (_: unknown, dimensions: { width: number; height: number }) => {
+      if (!resizeLimits) return false;
+      const constrained = constrainCanvasContainerDimensions(dimensions, resizeLimits);
+      return constrained.width === dimensions.width && constrained.height === dimensions.height;
+    },
+    [resizeLimits],
+  );
   const anatomyNodeById = new Map(anatomy?.nodes.map((node) => [node.id, node]) ?? []);
   const markerId = `dynamic-worker-arrow-${data.sendEdgeId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   return (
     <div
-      className={`dynamic-worker-group ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
+      className={`dynamic-worker-group ${data.active ? 'is-active' : ''} ${reviewFocusState ? `proposal-focus-${reviewFocusState}` : ''}`}
       data-send-edge-id={data.sendEdgeId}
       data-template-node-id={data.templateNodeId}
       data-member-count={data.memberNodeIds.length}
     >
+      {data.layoutEditable && data.active && resizeLimits && (
+        <NodeResizeControl
+          nodeId={id}
+          position="bottom-right"
+          variant={ResizeControlVariant.Handle}
+          minWidth={resizeLimits.minWidth}
+          minHeight={resizeLimits.minHeight}
+          maxWidth={resizeLimits.maxWidth}
+          maxHeight={resizeLimits.maxHeight}
+          shouldResize={allowResize}
+          onResizeEnd={finishResize}
+          className="dynamic-worker-group-resize-control nodrag nopan"
+        />
+      )}
       <Handle id={CANVAS_INPUT_PORT_ID} type="target" position={Position.Left} className="dynamic-worker-group-port dynamic-worker-group-port--input" />
       <Handle id={CANVAS_OUTPUT_PORT_ID} type="source" position={Position.Right} className="dynamic-worker-group-port dynamic-worker-group-port--output" />
       <span className="dynamic-worker-group-copy dynamic-worker-group-copy--back" aria-hidden="true" />
@@ -114,7 +161,7 @@ export function DynamicWorkerGroup({ data }: NodeProps<DynamicWorkerGroupFlowNod
       )}
       <button
         type="button"
-        className="dynamic-worker-group-header nodrag nopan"
+        className="dynamic-worker-group-header dynamic-worker-group-drag-surface nopan"
         aria-label={`${data.label}, declared dynamic subgraph template ×N with ${data.memberNodeIds.length} steps and ${data.memberEdgeIds.length} connections. Focus canonical worker template.`}
         onClick={(event) => {
           event.stopPropagation();

@@ -218,6 +218,10 @@ describe('projectGraphToCanvas', () => {
     });
     expect(design.nodes.find((node) => node.type === 'dynamicWorkerGroup')).toMatchObject({
       parentId: 'researcher-workflow',
+      draggable: true,
+      selectable: false,
+      dragHandle: '.dynamic-worker-group-drag-surface',
+      zIndex: 2,
       data: {
         templateNodeId: 'researcher-agent',
         mergeNodeId: 'research-merge',

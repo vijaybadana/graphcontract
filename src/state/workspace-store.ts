@@ -62,6 +62,8 @@ type WorkspaceStore = WorkspaceCore & {
   moveNode: (id: string, position: { x: number; y: number }) => void;
   moveNodes: (positions: Record<string, { x: number; y: number }>) => void;
   moveSubgraph: (id: string, position: GraphPosition) => void;
+  moveDynamicWorkerGroup: (edgeId: string, position: GraphPosition) => void;
+  resizeDynamicWorkerGroup: (edgeId: string, dimensions: GraphSubgraph['dimensions']) => void;
   moveCanvasElements: (positions: Record<string, GraphPosition>) => void;
   updateNode: (id: string, patch: GraphNodePatch) => void;
   updateGraphCapabilities: (patch: Partial<GraphCapabilities>) => void;
@@ -386,6 +388,10 @@ export const useGraphStore = create<WorkspaceStore>()(
         moveNodes: (positions) => commit(workspace.moveNodes(currentCore(), positions)),
         moveSubgraph: (id, position) =>
           commit(workspace.moveSubgraph(currentCore(), id, position)),
+        moveDynamicWorkerGroup: (edgeId, position) =>
+          commit(workspace.moveDynamicWorkerGroup(currentCore(), edgeId, position)),
+        resizeDynamicWorkerGroup: (edgeId, dimensions) =>
+          commit(workspace.resizeDynamicWorkerGroup(currentCore(), edgeId, dimensions)),
         moveCanvasElements: (positions) =>
           commitWithLayout(workspace.moveCanvasElements(currentCore(), positions)),
         updateNode: (id, patch) => commit(workspace.updateNode(currentCore(), id, patch)),

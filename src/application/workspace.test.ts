@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { researchSupervisorGraph, validateGraph, workflowGraphSchema } from '@/src/domain';
+import { graphLibraryEntries } from '@/src/application/graph-library';
 import {
   buildGraphContractDownload,
   buildGraphScenariosDownload,
 } from '@/src/adapters/exports/downloads';
 import { createWorkspaceService } from './workspace';
+import { dynamicWorkerGroupLayout } from './dynamic-worker-layout';
 
 const service = createWorkspaceService({
   now: () => '2026-08-28T12:00:00.000Z',
@@ -928,5 +930,38 @@ describe('workspace application service', () => {
     const billing = dissolved.state.graph.nodes.find((node) => node.id === 'billing');
     expect(billing?.position).toEqual({ x: 480, y: 60 });
     expect(billing).not.toHaveProperty('parentId');
+  });
+
+  it('persists dynamic worker movement and size through the canonical Send template owner', () => {
+    const libraryGraph = structuredClone(
+      graphLibraryEntries.find((entry) => entry.id === 'hierarchical-deep-research')!.graph,
+    );
+    const initial = service.createInitial();
+    const state = { ...initial, graph: libraryGraph };
+    const before = dynamicWorkerGroupLayout(state.graph, 'dispatch-send')!;
+
+    const moved = service.moveDynamicWorkerGroup(state, 'dispatch-send', {
+      x: before.position.x + 24,
+      y: before.position.y - 18,
+    });
+    expect(dynamicWorkerGroupLayout(moved.state.graph, 'dispatch-send')?.position).toEqual({
+      x: before.position.x + 24,
+      y: before.position.y - 18,
+    });
+    expect(moved.state.graph.edges.find((edge) => edge.id === 'dispatch-send')?.send)
+      .toMatchObject({ templateAnatomy: { dimensions: before.dimensions } });
+
+    const resized = service.resizeDynamicWorkerGroup(moved.state, 'dispatch-send', {
+      width: before.dimensions.width + 18,
+      height: before.dimensions.height,
+    });
+    expect(dynamicWorkerGroupLayout(resized.state.graph, 'dispatch-send')?.dimensions).toEqual({
+      width: before.dimensions.width + 18,
+      height: before.dimensions.height,
+    });
+
+    const frozen = { ...resized.state, graph: { ...resized.state.graph, status: 'frozen' as const } };
+    expect(service.moveDynamicWorkerGroup(frozen, 'dispatch-send', { x: 0, y: 0 }).changed).toBe(false);
+    expect(service.resizeDynamicWorkerGroup(frozen, 'dispatch-send', { width: 400, height: 300 }).changed).toBe(false);
   });
 });

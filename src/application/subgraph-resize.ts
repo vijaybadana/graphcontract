@@ -14,7 +14,7 @@ export type SubgraphResizeObstacle = {
   height: number;
 };
 
-export type SubgraphResizeLimits = {
+export type CanvasContainerResizeLimits = {
   current: GraphSubgraph['dimensions'];
   minWidth: number;
   minHeight: number;
@@ -22,6 +22,8 @@ export type SubgraphResizeLimits = {
   maxHeight: number;
   obstacles: SubgraphResizeObstacle[];
 };
+
+export type SubgraphResizeLimits = CanvasContainerResizeLimits;
 
 const overlaps = (start: number, size: number, otherStart: number, otherSize: number) =>
   start < otherStart + otherSize && start + size > otherStart;
@@ -90,9 +92,9 @@ export function subgraphResizeLimits(
 }
 
 /** Clamps a bottom-right resize without moving the container or its children. */
-export function constrainSubgraphDimensions(
+export function constrainCanvasContainerDimensions(
   requested: GraphSubgraph['dimensions'],
-  limits: SubgraphResizeLimits,
+  limits: CanvasContainerResizeLimits,
 ): GraphSubgraph['dimensions'] {
   let width = Math.min(Math.max(requested.width, limits.minWidth), limits.maxWidth);
   let height = Math.min(Math.max(requested.height, limits.minHeight), limits.maxHeight);
@@ -116,3 +118,6 @@ export function constrainSubgraphDimensions(
 
   return { width, height };
 }
+
+/** Backwards-compatible semantic name for first-class Subgraph callers. */
+export const constrainSubgraphDimensions = constrainCanvasContainerDimensions;

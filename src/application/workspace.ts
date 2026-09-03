@@ -34,6 +34,10 @@ import {
   constrainSubgraphDimensions,
   subgraphResizeLimits,
 } from './subgraph-resize';
+import {
+  constrainDynamicWorkerGroupDimensions,
+  dynamicWorkerGroupLayout,
+} from './dynamic-worker-layout';
 
 export type WorkspaceCore = {
   graph: WorkflowGraph;
@@ -602,6 +606,61 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           subgraph.id === subgraphId ? { ...subgraph, position } : subgraph,
         ),
       }));
+    },
+
+    moveDynamicWorkerGroup(
+      state: WorkspaceCore,
+      edgeId: string,
+      position: GraphNode['position'],
+    ) {
+      const layout = dynamicWorkerGroupLayout(state.graph, edgeId);
+      if (!layout) return { state, changed: false };
+      const edge = state.graph.edges.find((candidate) => candidate.id === edgeId);
+      const canonicalAnatomyNode = edge?.send?.templateAnatomy?.nodes.find(
+        (node) => node.id === edge.send?.templateAnatomy?.canonicalTemplateNodeId,
+      );
+      if (!canonicalAnatomyNode) return { state, changed: false };
+
+      return changeGraph(state, (graph) => ({
+        ...graph,
+        nodes: graph.nodes.map((node) => node.id === layout.templateNodeId
+          ? {
+              ...node,
+              position: {
+                x: position.x + canonicalAnatomyNode.position.x,
+                y: position.y + canonicalAnatomyNode.position.y,
+              },
+            }
+          : node),
+      }), 'Dynamic worker template movement saved.');
+    },
+
+    resizeDynamicWorkerGroup(
+      state: WorkspaceCore,
+      edgeId: string,
+      dimensions: GraphSubgraph['dimensions'],
+    ) {
+      if (!dynamicWorkerGroupLayout(state.graph, edgeId)) return { state, changed: false };
+      return changeGraph(state, (graph) => {
+        const constrained = constrainDynamicWorkerGroupDimensions(graph, edgeId, dimensions);
+        return {
+          ...graph,
+          edges: graph.edges.map((edge) => (
+            edge.id === edgeId && edge.mode === 'send' && edge.send?.templateAnatomy
+              ? {
+                  ...edge,
+                  send: {
+                    ...edge.send,
+                    templateAnatomy: {
+                      ...edge.send.templateAnatomy,
+                      dimensions: constrained,
+                    },
+                  },
+                }
+              : edge
+          )),
+        };
+      }, 'Dynamic worker template size saved.');
     },
 
     setSubgraphCollapsed(state: WorkspaceCore, subgraphId: string, collapsed: boolean) {
