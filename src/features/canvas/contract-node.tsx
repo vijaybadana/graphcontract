@@ -5,7 +5,6 @@ import {
   ArrowsClockwiseIcon,
   CubeIcon,
   DatabaseIcon,
-  HandIcon,
   LockSimpleIcon,
   PauseCircleIcon,
   RobotIcon,
@@ -228,7 +227,7 @@ function ModifierIcon({ modifier }: { modifier: StepModifierPresentation }) {
     case 'executor':
       if (modifier.tone === 'ai') return <RobotIcon {...iconProps} />;
       if (modifier.tone === 'tool') return <WrenchIcon {...iconProps} />;
-      return <HandIcon {...iconProps} />;
+      return <NodeVisualIcon kind="human" size={12} weight="bold" />;
     case 'internalTools': return <WrenchIcon {...iconProps} />;
     case 'hitl': return <PauseCircleIcon {...iconProps} />;
     case 'guardrail': return <ShieldCheckIcon {...iconProps} />;

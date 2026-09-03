@@ -1,8 +1,8 @@
 import {
   ArrowsInIcon,
   FlagCheckeredIcon,
-  HandIcon,
   LightningIcon,
+  PersonSimpleIcon,
   PlayCircleIcon,
   RobotIcon,
   StackIcon,
@@ -60,7 +60,7 @@ export function NodeVisualIcon({
     case 'task': return <LightningIcon {...props} />;
     case 'agent': return <RobotIcon {...props} />;
     case 'tool': return <WrenchIcon {...props} />;
-    case 'human': return <HandIcon {...props} />;
+    case 'human': return <PersonSimpleIcon {...props} />;
     case 'subgraph': return <StackIcon {...props} />;
   }
 }
