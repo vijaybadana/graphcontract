@@ -214,6 +214,7 @@ describe('projectGraphToCanvas', () => {
       parentId: 'researcher-workflow',
       type: 'contractNode',
       position: { x: 370, y: 302 },
+      zIndex: 3,
       hidden: false,
     });
     expect(design.nodes.find((node) => node.type === 'dynamicWorkerGroup')).toMatchObject({
@@ -1031,7 +1032,7 @@ describe('projectGraphToCanvas', () => {
       position: { x: 60, y: 120 },
       extent: 'parent',
       expandParent: false,
-      zIndex: 1,
+      zIndex: 3,
       hidden: false,
     });
   });

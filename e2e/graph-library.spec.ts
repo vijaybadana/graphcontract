@@ -251,19 +251,24 @@ test('library loads representative subgraph, HITL, and Send/Merge workflows onto
   const beforeTemplatePosition = beforeDynamicMove.nodes.find(
     (node) => node.id === 'researcher-agent',
   )!.position;
-  const dynamicHeader = dynamicWorkerGroup.locator('.dynamic-worker-group-header');
-  const dynamicHeaderBounds = await dynamicHeader.boundingBox();
-  expect(dynamicHeaderBounds).not.toBeNull();
-  const dynamicHeaderX = dynamicHeaderBounds!.x + dynamicHeaderBounds!.width / 2;
-  const dynamicHeaderY = dynamicHeaderBounds!.y + dynamicHeaderBounds!.height / 2;
-  await app.mouse.move(dynamicHeaderX, dynamicHeaderY);
+  const dynamicBody = dynamicWorkerGroup.locator('.dynamic-worker-group-body-drag-surface');
+  const dynamicBodyBounds = await dynamicBody.boundingBox();
+  expect(dynamicBodyBounds).not.toBeNull();
+  const dynamicDragX = dynamicBodyBounds!.x + dynamicBodyBounds!.width / 2;
+  const dynamicDragY = dynamicBodyBounds!.y + dynamicBodyBounds!.height * 0.85;
+  await app.mouse.move(dynamicDragX, dynamicDragY);
   await app.mouse.down();
-  await app.mouse.move(dynamicHeaderX + 18, dynamicHeaderY + 10, { steps: 5 });
+  await app.mouse.move(dynamicDragX + 18, dynamicDragY + 10, { steps: 5 });
   await app.mouse.up();
   await expect.poll(async () => (
     await readGraph(app)
   ).nodes.find((node) => node.id === 'researcher-agent')?.position).not.toEqual(beforeTemplatePosition);
 
+  // The frame's broad drag surface must not cover real canonical members.
+  await researcherAgent.click();
+  await expect(app.getByRole('heading', { name: 'Researcher Agent' })).toBeVisible();
+
+  const dynamicHeader = dynamicWorkerGroup.locator('.dynamic-worker-group-header');
   await dynamicHeader.click();
   await expect(dynamicWorkerGroup.locator('.dynamic-worker-group')).toHaveClass(/is-active/);
   const beforeDynamicResize = await readGraph(app);

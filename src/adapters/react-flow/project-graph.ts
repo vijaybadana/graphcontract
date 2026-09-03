@@ -858,7 +858,9 @@ function projectDomainNode(
         parentId: node.parentId,
         extent: 'parent' as const,
         expandParent: false,
-        zIndex: 1,
+        // Canonical members must remain interactive above any derived
+        // dynamic-worker frame rendered within the same parent.
+        zIndex: 3,
       }
     : {};
   const invalid = isNodeInvalid(node.id, preview, validationIssues);

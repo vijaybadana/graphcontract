@@ -89,6 +89,10 @@ export function DynamicWorkerGroup({ data, id }: NodeProps<DynamicWorkerGroupFlo
       data-template-node-id={data.templateNodeId}
       data-member-count={data.memberNodeIds.length}
     >
+      <div
+        className="dynamic-worker-group-body-drag-surface dynamic-worker-group-drag-surface nopan"
+        aria-hidden="true"
+      />
       {data.layoutEditable && data.active && resizeLimits && (
         <NodeResizeControl
           nodeId={id}

@@ -21,6 +21,17 @@
 .dynamic-worker-group-copy--middle { inset: .35rem -.35rem -.35rem .35rem; opacity: .78; }
 .dynamic-worker-group-copy--back { inset: .7rem -.7rem -.7rem .7rem; opacity: .48; }
 
+.dynamic-worker-group-body-drag-surface {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border-radius: inherit;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.dynamic-worker-group-body-drag-surface:active { cursor: grabbing; }
+
 .dynamic-worker-group-port {
   z-index: 4;
   width: .62rem !important;
@@ -41,7 +52,7 @@
   pointer-events: none;
 }
 
-.dynamic-worker-template-edge-layer { z-index: 0; overflow: visible; }
+.dynamic-worker-template-edge-layer { z-index: 1; overflow: visible; }
 .dynamic-worker-template-edge {
   fill: none;
   stroke: color-mix(in srgb, var(--gc-ink-muted) 72%, var(--gc-surface));
@@ -52,7 +63,7 @@
 
 .dynamic-worker-template-node {
   position: absolute;
-  z-index: 1;
+  z-index: 2;
   pointer-events: none;
 }
 .dynamic-worker-template-node .contract-node-shell {
@@ -63,7 +74,7 @@
 
 .dynamic-worker-group-header {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   display: flex;
   width: calc(100% - 1.5rem);
   min-height: 2.35rem;
