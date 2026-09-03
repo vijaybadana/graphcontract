@@ -8,6 +8,7 @@ import {
   LightningIcon,
   PlayCircleIcon,
   RobotIcon,
+  ShareNetworkIcon,
   StackIcon,
   WrenchIcon,
 } from '@phosphor-icons/react';
@@ -26,33 +27,65 @@ export type PalettePayloadKind = PaletteKind | 'human_input';
 export type PaletteItem = {
   kind: PaletteKind;
   label: string;
-  group: 'Flow' | 'Work' | 'Structure' | 'Human';
+  group: 'Flow' | 'Execution' | 'Structure';
+};
+
+export type ConnectionReference = {
+  id: 'edge' | 'conditional' | 'command' | 'fallback' | 'send' | 'loop';
+  label: string;
+  explanation: string;
+  derived?: boolean;
 };
 
 export const paletteItems: readonly PaletteItem[] = [
   { kind: 'start', label: 'Start', group: 'Flow' },
   { kind: 'merge', label: 'Merge', group: 'Flow' },
   { kind: 'end', label: 'End', group: 'Flow' },
+  { kind: 'step', label: 'Task', group: 'Execution' },
+  { kind: 'agent', label: 'Agent', group: 'Execution' },
+  { kind: 'tool', label: 'Tool', group: 'Execution' },
+  { kind: 'humanReview', label: 'Human', group: 'Execution' },
   { kind: 'subgraph', label: 'Subgraph', group: 'Structure' },
-  { kind: 'step', label: 'Step', group: 'Work' },
-  { kind: 'agent', label: 'Agent', group: 'Work' },
-  { kind: 'action', label: 'Action', group: 'Work' },
-  { kind: 'tool', label: 'Tool', group: 'Work' },
-  { kind: 'humanReview', label: 'Human review', group: 'Human' },
+];
+
+export const connectionReferences: readonly ConnectionReference[] = [
+  { id: 'edge', label: 'Edge', explanation: 'A standard directed connection between two nodes.' },
+  { id: 'conditional', label: 'Conditional', explanation: 'Follows this route when its condition matches.' },
+  { id: 'command', label: 'Command', explanation: 'An agent-directed jump or handoff to another node.' },
+  { id: 'fallback', label: 'Fallback', explanation: 'Used when the primary route cannot continue.' },
+  { id: 'send', label: 'Send ×N', explanation: 'Dynamically fans work out to one template and rejoins at Merge.' },
+  {
+    id: 'loop',
+    label: 'Loop ↺',
+    explanation: 'Derived when a connection creates a cycle to an upstream node; an optional loop cap limits repetitions.',
+    derived: true,
+  },
 ];
 
 /** One boundary for palette clicks and drag payloads. The palette retains its
- * authored payload, while every work alias converges on a canonical preset. */
+ * authored payload, while every work alias converges on a canonical preset.
+ * Action remains accepted for historical/internal drag payloads even though it
+ * is intentionally no longer a visible inventory item. */
+const acceptedPalettePresets: readonly PaletteKind[] = [
+  ...paletteItems.map((item) => item.kind),
+  'action',
+];
+
 export function normalizePalettePreset(payload: string): PaletteKind | null {
   const kind = payload === 'human_input' ? 'humanReview' : payload;
-  return paletteItems.some((item) => item.kind === kind) ? (kind as PaletteKind) : null;
+  return acceptedPalettePresets.includes(kind as PaletteKind) ? (kind as PaletteKind) : null;
 }
 
-const groups: PaletteItem['group'][] = ['Flow', 'Structure', 'Work', 'Human'];
+const groups: PaletteItem['group'][] = ['Flow', 'Execution', 'Structure'];
 
 export function filterPaletteItems(query: string): PaletteItem[] {
   const normalizedQuery = query.trim().toLowerCase();
   return paletteItems.filter((item) => item.label.toLowerCase().includes(normalizedQuery));
+}
+
+export function filterConnectionReferences(query: string): ConnectionReference[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  return connectionReferences.filter((reference) => reference.label.toLowerCase().includes(normalizedQuery));
 }
 
 /** The outer workflow keeps its singleton Start/End rule. Once a container is
@@ -83,30 +116,12 @@ function PaletteIcon({ kind }: { kind: PaletteKind }) {
   }
 }
 
-export function getContractHealthLabel(
-  graph: WorkflowGraph,
-  proposal: GraphProposal | null,
-  validationIssueCount: number,
-) {
-  if (proposal?.status === 'pending') return 'Valid — proposal awaiting review.';
-  if (proposal) return 'Proposal needs changes.';
-  if (validationIssueCount) {
-    return `${validationIssueCount} issue${validationIssueCount === 1 ? '' : 's'}`;
-  }
-  return graph.status === 'frozen' ? 'Frozen' : 'Ready to freeze';
-}
-
 type NodePaletteProps = {
   graph: WorkflowGraph;
   disabled: boolean;
   readOnlyReason?: string;
-  validationIssueCount: number;
   proposal: GraphProposal | null;
   onAdd: (kind: PaletteKind) => void;
-  onLoadResearchSupervisorDemo: () => void;
-  onLoadResearchIntakeRoutingDemo: () => void;
-  onLoadHumanControlHitlDemo: () => void;
-  onLoadDynamicParallelismDemo: () => void;
   onCollapse: () => void;
 };
 
@@ -120,92 +135,43 @@ function NodePaletteContents({
   graph,
   disabled,
   readOnlyReason,
-  validationIssueCount,
   proposal,
   onAdd,
-  onLoadResearchSupervisorDemo,
-  onLoadResearchIntakeRoutingDemo,
-  onLoadHumanControlHitlDemo,
-  onLoadDynamicParallelismDemo,
   onCollapse,
 }: NodePaletteProps) {
   const [query, setQuery] = useState('');
 
   const visiblePalette = useMemo(() => filterPaletteItems(query), [query]);
+  const visibleReferences = useMemo(() => filterConnectionReferences(query), [query]);
+  const lockedMessage = readOnlyReason ?? (proposal
+    ? 'Palette locked while a proposal awaits review. Approve or reject it to continue editing.'
+    : graph.status === 'frozen'
+      ? 'Palette locked while the contract is frozen.'
+      : null);
 
   const onDragStart = (event: DragEvent<HTMLButtonElement>, kind: PaletteKind) => {
     event.dataTransfer.setData('application/graphcontract-node', kind);
     event.dataTransfer.effectAllowed = 'move';
   };
 
-  const loadResearchSupervisorDemo = () => {
-    if (
-      window.confirm(
-        'Replace the current canvas with the Research Supervisor demo? This replaces the current workflow; one Undo restores it.',
-      )
-    ) {
-      onLoadResearchSupervisorDemo();
-    }
-  };
-
-  const loadResearchIntakeRoutingDemo = () => {
-    if (
-      window.confirm(
-        'Replace the current canvas with Research Intake Routing? This replaces the current workflow; one Undo restores it.',
-      )
-    ) {
-      onLoadResearchIntakeRoutingDemo();
-    }
-  };
-
-  const loadHumanControlHitlDemo = () => {
-    if (
-      window.confirm(
-        'Replace the current canvas with the Human Control & HITL demo? This replaces the current workflow; one Undo restores it.',
-      )
-    ) {
-      onLoadHumanControlHitlDemo();
-    }
-  };
-
-  const loadDynamicParallelismDemo = () => {
-    if (
-      window.confirm(
-        'Replace the current canvas with the Parallel research Send ×N demo? This replaces the current workflow; one Undo restores it.',
-      )
-    ) {
-      onLoadDynamicParallelismDemo();
-    }
-  };
-
   return (
     <aside className="workspace-panel node-palette absolute left-3 top-3 z-30 max-h-[calc(100%-1.5rem)] w-[232px] overflow-y-auto p-3">
-      <div className="node-palette__header">
-        <div>
-          <p className="eyebrow">Node inventory</p>
-          <p className="node-palette__count">{paletteItems.length} components</p>
+      <div className="node-palette__toolbar">
+        <div className="node-palette__search">
+          <label className="sr-only" htmlFor="node-palette-search">Search components</label>
+          <input id="node-palette-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search components" autoComplete="off" />
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`health-dot ${proposal?.status === 'pending' || !validationIssueCount ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-          <PanelCollapseButton
-            side="left"
-            onCollapse={onCollapse}
-            label="Collapse node palette"
-          />
-        </div>
+        <PanelCollapseButton
+          side="left"
+          onCollapse={onCollapse}
+          label="Collapse node palette"
+        />
       </div>
-      <p className="node-palette__hint">
-        {readOnlyReason ?? (proposal
-          ? 'Palette locked while a proposal awaits review. Approve or reject it to continue editing.'
-          : graph.status === 'frozen'
-            ? 'Palette locked while the contract is frozen.'
-            : 'Drag onto the canvas or click to add.')}
+      {lockedMessage && <p className="node-palette__lock-notice" role="status">{lockedMessage}</p>}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {visiblePalette.length} {visiblePalette.length === 1 ? 'component' : 'components'} and{' '}
+        {visibleReferences.length} {visibleReferences.length === 1 ? 'reference' : 'references'} shown
       </p>
-      <div className="node-palette__search">
-        <label className="sr-only" htmlFor="node-palette-search">Search components</label>
-        <input id="node-palette-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search components" autoComplete="off" />
-      </div>
-      <p className="sr-only" aria-live="polite" aria-atomic="true">{visiblePalette.length} of {paletteItems.length} components shown</p>
       <div className="node-palette__groups">
         {groups.map((group) => {
           const items = visiblePalette.filter((item) => item.group === group);
@@ -217,9 +183,9 @@ function NodePaletteContents({
                 {items.map((item) => {
                   const singletonExists = isPaletteItemSingletonDisabled(graph, item);
                   return (
-                    <button key={item.kind} type="button" draggable={!disabled && !singletonExists} disabled={disabled || singletonExists} onDragStart={(event) => onDragStart(event, item.kind)} onClick={() => onAdd(item.kind)} className="node-palette__row">
-                      <span className={`node-palette__icon node-palette__icon--${item.kind}`}><PaletteIcon kind={item.kind} /></span>
-                      <span>{item.label}</span>
+                    <button key={item.kind} type="button" draggable={!disabled && !singletonExists} disabled={disabled || singletonExists} onDragStart={(event) => onDragStart(event, item.kind)} onClick={() => onAdd(item.kind)} className="node-palette__item-row node-palette__row">
+                      <span className={`node-palette__item-icon node-palette__icon node-palette__icon--${item.kind}`}><PaletteIcon kind={item.kind} /></span>
+                      <span className="node-palette__item-label">{item.label}</span>
                     </button>
                   );
                 })}
@@ -227,55 +193,33 @@ function NodePaletteContents({
             </section>
           );
         })}
-        {!visiblePalette.length && <p className="node-palette__empty" role="status">No components match “{query.trim()}”.</p>}
+        {!!visibleReferences.length && (
+          <section className="node-palette__group node-palette__reference" aria-label="Connections reference">
+            <p className="node-palette__group-label">Connections</p>
+            <ul className="node-palette__rows node-palette__reference-rows">
+              {visibleReferences.map((reference) => (
+                <li
+                  key={reference.id}
+                  className="node-palette__item-row node-palette__reference-row"
+                  tabIndex={0}
+                  aria-label={reference.label}
+                  aria-describedby={`connection-reference-${reference.id}-description`}
+                  title={reference.explanation}
+                >
+                  <span className={`node-palette__item-icon node-palette__reference-icon node-palette__reference-icon--${reference.id}`} aria-hidden="true">
+                    {reference.id === 'send'
+                      ? <ShareNetworkIcon size={16} weight="bold" aria-hidden="true" />
+                      : <span className={`node-palette__connection-cue node-palette__connection-cue--${reference.id}`} aria-hidden="true" />}
+                  </span>
+                  <span className="node-palette__item-label">{reference.label}</span>
+                  <span id={`connection-reference-${reference.id}-description`} className="node-palette__reference-explanation">{reference.explanation}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {!visiblePalette.length && !visibleReferences.length && <p className="node-palette__empty" role="status">No components or references match “{query.trim()}”.</p>}
       </div>
-      <div className="node-palette__health">
-        <p>Contract health</p>
-        <strong>{getContractHealthLabel(graph, proposal, validationIssueCount)}</strong>
-      </div>
-      <div className="node-palette__demo">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={loadDynamicParallelismDemo}
-          className="node-palette__demo-button"
-        >
-          <ArrowsInIcon aria-hidden="true" size={15} weight="duotone" />
-          Load Parallel research · Send ×N
-        </button>
-        <p>Includes one worker template, a Merge reducer, and a validated read-only runtime fixture.</p>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={loadHumanControlHitlDemo}
-          className="node-palette__demo-button"
-        >
-          <HandIcon aria-hidden="true" size={15} weight="duotone" />
-          Load Human Control &amp; HITL demo
-        </button>
-        <p>Includes canonical approve, request-changes, and reject outcomes. One Undo restores your workflow.</p>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={loadResearchIntakeRoutingDemo}
-          className="node-palette__demo-button"
-        >
-          <RobotIcon aria-hidden="true" size={15} weight="duotone" />
-          Load Research Intake Routing
-        </button>
-        <p>Requires confirmation and replaces this canvas. One Undo restores your workflow.</p>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={loadResearchSupervisorDemo}
-          className="node-palette__demo-button"
-        >
-          <RobotIcon aria-hidden="true" size={15} weight="duotone" />
-          Load Research Supervisor demo
-        </button>
-        <p>Requires confirmation and replaces this canvas. One Undo restores your workflow.</p>
-      </div>
-      <p className="node-palette__keys">Keys: ⌘/Ctrl Z undo · D duplicate · Delete remove</p>
     </aside>
   );
 }

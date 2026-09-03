@@ -21,6 +21,7 @@ import { type Ref, useId, useRef, useState } from 'react';
 
 import { GraphNode } from '@/src/domain';
 import './contract-node.css';
+import './node-boundary.css';
 
 export type StepModifierInspectorSection =
   | 'executor'

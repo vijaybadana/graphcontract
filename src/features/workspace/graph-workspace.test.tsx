@@ -141,15 +141,14 @@ describe('GraphWorkspace subgraph creation', () => {
     });
   }, 30_000);
 
-  it('creates all five work presets as canonical Steps from the mounted palette', async () => {
+  it('creates all four visible work presets as canonical Steps from the mounted palette', async () => {
     renderWorkspace(false);
 
     const expectedExecutors = {
-      Step: 'deterministic',
+      Task: 'deterministic',
       Agent: 'ai',
-      Action: 'deterministic',
       Tool: 'tool',
-      'Human review': 'human',
+      Human: 'human',
     } as const;
     for (const [label, executor] of Object.entries(expectedExecutors)) {
       const existingNodeIds = new Set(useGraphStore.getState().graph.nodes.map((node) => node.id));
@@ -164,10 +163,10 @@ describe('GraphWorkspace subgraph creation', () => {
     await screen.findByRole('button', { name: 'Agent' });
     const canvas = document.querySelector('.react-flow')!;
     const presets = [
+      { label: 'Task', payload: 'step' },
       { label: 'Agent', payload: 'agent' },
-      { label: 'Action', payload: 'action' },
       { label: 'Tool', payload: 'tool' },
-      { label: 'Human review', payload: 'human_input' },
+      { label: 'Human', payload: 'humanReview' },
     ] as const;
     const stepSemantics = (node: ReturnType<typeof useGraphStore.getState>['graph']['nodes'][number]) => {
       if (node.kind !== 'step') throw new Error('Expected every work palette payload to create a Step.');

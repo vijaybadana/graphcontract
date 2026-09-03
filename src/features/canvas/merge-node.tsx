@@ -4,6 +4,7 @@ import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import { ArrowsInIcon, ClockCountdownIcon, LockSimpleIcon, WarningCircleIcon } from '@phosphor-icons/react';
 
 import './merge-node.css';
+import './node-boundary.css';
 import type { Provenance } from '@/src/domain';
 
 /**

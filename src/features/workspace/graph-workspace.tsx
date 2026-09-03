@@ -977,12 +977,7 @@ export function GraphWorkspace() {
                   ? 'Runtime projection is read-only. Switch to Design view to add or edit contract elements.'
                   : undefined
               }
-              validationIssueCount={validationIssues.length}
               onAdd={addAtCenter}
-              onLoadResearchSupervisorDemo={() => replaceWithDemo(loadResearchSupervisorDemo)}
-              onLoadResearchIntakeRoutingDemo={() => replaceWithDemo(loadResearchIntakeRoutingDemo)}
-              onLoadHumanControlHitlDemo={() => replaceWithDemo(loadHumanControlHitlDemo)}
-              onLoadDynamicParallelismDemo={() => replaceWithDemo(loadDynamicParallelismDemo)}
               onCollapse={closePalette}
             />
             <PanelResizer

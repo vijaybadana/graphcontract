@@ -1,0 +1,51 @@
+/*
+ * Shared node-shell boundary hierarchy. This layer intentionally changes only
+ * paint, never measured dimensions, so React Flow handles and routing stay put.
+ */
+.contract-node-shell,
+.merge-node-shell {
+  --node-shell-boundary: var(--gc-border-strong, #94a3b8);
+  box-sizing: border-box;
+  border-width: 1px;
+  border-color: var(--node-shell-boundary);
+  box-shadow:
+    inset 0 0 0 .5px var(--node-shell-boundary),
+    var(--gc-shadow-node, 0 3px 12px rgb(15 23 42 / 10%));
+}
+
+.contract-node-shell {
+  --node-shell-boundary: color-mix(
+    in srgb,
+    var(--node-accent) 48%,
+    var(--gc-surface, white)
+  );
+}
+
+.contract-node-shell:hover:not(.is-invalid):not(.is-selected) {
+  --node-shell-boundary: color-mix(
+    in srgb,
+    var(--node-accent) 68%,
+    var(--gc-surface, white)
+  );
+}
+
+.merge-node-shell:hover:not(.is-invalid):not(.is-selected) {
+  --node-shell-boundary: var(--gc-ink-muted, #475569);
+}
+
+.contract-node-shell.is-invalid:not(.is-selected),
+.merge-node-shell.is-invalid:not(.is-selected) {
+  --node-shell-boundary: var(--gc-danger-strong, #dc2626);
+  border-style: solid;
+  outline: none;
+}
+
+.contract-node-shell.is-selected,
+.merge-node-shell.is-selected {
+  --node-shell-boundary: var(--gc-focus, #2563eb);
+  border-style: solid;
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--node-shell-boundary),
+    var(--gc-shadow-node, 0 3px 12px rgb(15 23 42 / 10%));
+}
