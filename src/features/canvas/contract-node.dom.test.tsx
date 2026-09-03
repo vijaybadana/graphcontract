@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ReactFlow, ReactFlowProvider } from '@xyflow/react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CanvasFlowNode } from './canvas-node';
@@ -81,7 +81,10 @@ describe('ContractNode Step anatomy', () => {
 
     const shell = (await screen.findByText('Portfolio decision')).closest('.contract-node-shell')!;
     expect(shell.getAttribute('data-kind')).toBe('step');
+    expect(shell.getAttribute('data-display-kind')).toBe('agent');
     expect(shell.getAttribute('data-executor')).toBe('ai');
+    expect(shell.querySelector('[data-node-visual="agent"]')).not.toBeNull();
+    expect(screen.getByText('Agent')).toBeTruthy();
     expect(shell.classList.contains('is-selected')).toBe(true);
     expect(shell.querySelectorAll('.react-flow__handle.target')).toHaveLength(1);
     expect(shell.querySelectorAll('.react-flow__handle.source')).toHaveLength(1);
@@ -125,6 +128,9 @@ describe('ContractNode Step anatomy', () => {
 
     const shell = (await screen.findByText('Write report')).closest('.contract-node-shell')!;
     expect(shell.getAttribute('data-executor')).toBe('deterministic');
+    expect(shell.getAttribute('data-display-kind')).toBe('task');
+    expect(shell.querySelector('[data-node-visual="task"]')).not.toBeNull();
+    expect(screen.getByText('Task')).toBeTruthy();
     expect(shell.classList.contains('is-invalid')).toBe(true);
     expect(shell.classList.contains('is-frozen')).toBe(true);
     expect(shell.classList.contains('is-proposed-added')).toBe(true);
@@ -133,6 +139,25 @@ describe('ContractNode Step anatomy', () => {
     expect(screen.getByText('Invalid')).toBeTruthy();
     expect(screen.getByText('Frozen')).toBeTruthy();
     expect(screen.getByText('Proposed added')).toBeTruthy();
+  });
+
+  it('uses the shared Human presentation for human-owned canvas nodes', async () => {
+    render(
+      <MountedContractNode
+        data={{
+          id: 'human-review',
+          kind: 'step',
+          executor: 'human',
+          label: 'Review response',
+          position: { x: 160, y: 100 },
+        }}
+      />,
+    );
+
+    const shell = (await screen.findByText('Review response')).closest('.contract-node-shell')!;
+    expect(shell.getAttribute('data-display-kind')).toBe('human');
+    expect(shell.querySelector('[data-node-visual="human"]')).not.toBeNull();
+    expect(within(shell as HTMLElement).getByText('Human', { selector: '.contract-node-kind' })).toBeTruthy();
   });
 
   it('renders before, inside, and after gates at distinct accessible node boundaries', async () => {
@@ -153,6 +178,10 @@ describe('ContractNode Step anatomy', () => {
           }}
         />,
       );
+      const shell = (await screen.findByText(`${timing} gate`)).closest('.contract-node-shell')!;
+      expect(shell.getAttribute('data-display-kind')).toBe('tool');
+      expect(shell.querySelector('[data-node-visual="tool"]')).not.toBeNull();
+      expect(within(shell as HTMLElement).getByText('Tool', { selector: '.contract-node-kind' })).toBeTruthy();
       const marker = document.querySelector<HTMLButtonElement>(`[data-hitl-timing="${timing}"]`)!;
       expect(marker.getAttribute('aria-label')).toBe(
         `Human-in-the-loop gate, ${timing} execution. Focus human input in the inspector.`,

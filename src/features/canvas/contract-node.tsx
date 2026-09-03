@@ -3,23 +3,20 @@
 import { Handle, Node, NodeProps, Position } from '@xyflow/react';
 import {
   ArrowsClockwiseIcon,
-  ArrowsInIcon,
   CubeIcon,
   DatabaseIcon,
-  FlagCheckeredIcon,
+  HandIcon,
   LockSimpleIcon,
   PauseCircleIcon,
-  PersonSimpleIcon,
-  PlayCircleIcon,
   RobotIcon,
   ShieldCheckIcon,
-  SquaresFourIcon,
   WarningCircleIcon,
   WrenchIcon,
 } from '@phosphor-icons/react';
 import { type Ref, useId, useRef, useState } from 'react';
 
 import { GraphNode } from '@/src/domain';
+import { graphNodeVisualKind, NodeVisualIcon, nodeVisualLabels } from './node-visual-taxonomy';
 import './contract-node.css';
 import './node-boundary.css';
 
@@ -90,13 +87,6 @@ export type ContractNodeData = GraphNode & {
 };
 
 export type ContractFlowNode = Node<ContractNodeData, 'contractNode'>;
-
-const kindLabel: Record<GraphNode['kind'], string> = {
-  start: 'Start',
-  step: 'Step',
-  merge: 'Merge',
-  end: 'End',
-};
 
 function executorPresentation(
   node: Extract<GraphNode, { kind: 'step' }>,
@@ -232,27 +222,13 @@ export function stepModifierPresentations(
   return modifiers;
 }
 
-function NodeKindIcon({ node }: { node: GraphNode }) {
-  const iconProps = { 'aria-hidden': true, size: 18, weight: 'bold' as const };
-  if (node.kind === 'start') return <PlayCircleIcon {...iconProps} />;
-  if (node.kind === 'end') return <FlagCheckeredIcon {...iconProps} />;
-  if (node.kind === 'merge') return <ArrowsInIcon {...iconProps} />;
-
-  switch (node.executor) {
-    case 'ai': return <RobotIcon {...iconProps} />;
-    case 'tool': return <WrenchIcon {...iconProps} />;
-    case 'human': return <PersonSimpleIcon {...iconProps} />;
-    case 'deterministic': return <SquaresFourIcon {...iconProps} />;
-  }
-}
-
 function ModifierIcon({ modifier }: { modifier: StepModifierPresentation }) {
   const iconProps = { 'aria-hidden': true, size: 12, weight: 'bold' as const };
   switch (modifier.id) {
     case 'executor':
       if (modifier.tone === 'ai') return <RobotIcon {...iconProps} />;
       if (modifier.tone === 'tool') return <WrenchIcon {...iconProps} />;
-      return <PersonSimpleIcon {...iconProps} />;
+      return <HandIcon {...iconProps} />;
     case 'internalTools': return <WrenchIcon {...iconProps} />;
     case 'hitl': return <PauseCircleIcon {...iconProps} />;
     case 'guardrail': return <ShieldCheckIcon {...iconProps} />;
@@ -390,6 +366,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
   const rendersTargetHandle = data.kind !== 'start' || Boolean(data.parentId);
   const rendersSourceHandle = data.kind !== 'end' || Boolean(data.parentId);
   const modifierData = data.kind === 'step' ? data : null;
+  const visualKind = graphNodeVisualKind(data);
   const sendTemplate = modifierData ? data.sendTemplate : undefined;
   const provenance = data.provenance?.representation ?? 'declared';
   const readiness = modifierData?.readiness?.state ?? modifierData?.modifiers?.readiness ?? 'ready';
@@ -403,6 +380,7 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
   return (
     <div
       data-kind={data.kind}
+      data-display-kind={visualKind}
       data-executor={modifierData?.executor}
       data-invalid={invalid || undefined}
       data-frozen={frozen || undefined}
@@ -429,11 +407,11 @@ export function ContractNode({ data, selected }: NodeProps<ContractFlowNode>) {
         <Handle type="target" position={Position.Left} className="contract-node-handle" />
       )}
       <div className="contract-node-heading">
-        <span className="contract-node-icon-slot">
-          <NodeKindIcon node={data} />
+        <span className="contract-node-icon-slot" data-node-visual={visualKind}>
+          <NodeVisualIcon kind={visualKind} size={18} weight="bold" />
         </span>
         <div className="contract-node-title-group">
-          <p className="contract-node-kind">{kindLabel[data.kind]}</p>
+          <p className="contract-node-kind">{nodeVisualLabels[visualKind]}</p>
           <p className="contract-node-title">{data.label}</p>
           {data.description && <p className="contract-node-description">{data.description}</p>}
         </div>

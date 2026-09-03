@@ -33,6 +33,8 @@ describe('NodePalette inventory', () => {
     }
     const task = screen.getByRole('button', { name: 'Task' });
     const human = screen.getByRole('button', { name: 'Human' });
+    expect(task.querySelector('[data-node-visual="task"]')).not.toBeNull();
+    expect(human.querySelector('[data-node-visual="human"]')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Action' })).toBeNull();
     expect(screen.getByText('8 components and 6 references shown')).toBeTruthy();
     expect(screen.getByRole('searchbox', { name: 'Search components' })).toBeTruthy();
@@ -64,7 +66,9 @@ describe('NodePalette inventory', () => {
     expect(sendReference.getAttribute('tabindex')).toBe('0');
     expect(sendReference.getAttribute('title')).toBeNull();
     fireEvent.focus(sendReference);
-    expect(screen.getByRole('tooltip').textContent).toBe('Dynamically fans work out to one template and rejoins at Merge.');
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip.textContent).toBe('Dynamically fans work out to one template and rejoins at Merge.');
+    expect(sendReference.contains(tooltip)).toBe(false);
     expect(screen.getByText('0 components and 1 reference shown')).toBeTruthy();
   });
 

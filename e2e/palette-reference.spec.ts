@@ -13,12 +13,18 @@ test('connection taxonomy stays a focusable reference instead of a graph mutatio
   const edge = references.filter({ hasText: /^Edge/ });
   await expect(edge).not.toHaveAttribute('title');
   await edge.hover();
-  await expect(edge.getByRole('tooltip')).toBeVisible({ timeout: 500 });
+  const tooltip = app.getByRole('tooltip');
+  await expect(tooltip).toBeVisible({ timeout: 500 });
+  const edgeBox = await edge.boundingBox();
+  const tooltipBox = await tooltip.boundingBox();
+  expect(edgeBox).not.toBeNull();
+  expect(tooltipBox).not.toBeNull();
+  expect(tooltipBox!.x).toBeGreaterThan(edgeBox!.x + edgeBox!.width);
 
   const send = references.filter({ hasText: /^Send ×N/ });
   await send.focus();
   await expect(send).toBeFocused();
-  await expect(send.getByText('Dynamically fans work out to one template and rejoins at Merge.')).toBeVisible();
+  await expect(app.getByRole('tooltip')).toHaveText('Dynamically fans work out to one template and rejoins at Merge.');
 
   await expect(app.getByText('Reference', { exact: true })).toHaveCount(0);
   await expect(app.getByText('Derived', { exact: true })).toHaveCount(0);

@@ -1,21 +1,13 @@
 'use client';
 
-import { DragEvent, useMemo, useState } from 'react';
-import {
-  ArrowsInIcon,
-  FlagCheckeredIcon,
-  HandIcon,
-  LightningIcon,
-  PlayCircleIcon,
-  RobotIcon,
-  ShareNetworkIcon,
-  StackIcon,
-  WrenchIcon,
-} from '@phosphor-icons/react';
+import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { ShareNetworkIcon } from '@phosphor-icons/react';
 
 import type { NodeCreationPreset } from '@/src/application/workspace';
 import { GraphProposal, WorkflowGraph } from '@/src/domain';
 import { PanelCollapseButton } from '@/src/features/workspace/panel-collapse-control';
+import { NodeVisualIcon, type NodeVisualKind } from './node-visual-taxonomy';
 
 import './node-palette.css';
 
@@ -101,19 +93,80 @@ export function isPaletteItemSingletonDisabled(
   );
 }
 
-function PaletteIcon({ kind }: { kind: PaletteKind }) {
-  const props = { 'aria-hidden': true, size: 16, weight: 'duotone' as const };
+function paletteVisualKind(kind: PaletteKind): NodeVisualKind {
   switch (kind) {
-    case 'start': return <PlayCircleIcon {...props} />;
-    case 'merge': return <ArrowsInIcon {...props} />;
-    case 'end': return <FlagCheckeredIcon {...props} />;
-    case 'subgraph': return <StackIcon {...props} />;
-    case 'step': return <LightningIcon {...props} />;
-    case 'agent': return <RobotIcon {...props} />;
-    case 'action': return <LightningIcon {...props} />;
-    case 'tool': return <WrenchIcon {...props} />;
-    case 'humanReview': return <HandIcon {...props} />;
+    case 'start': return 'start';
+    case 'merge': return 'merge';
+    case 'end': return 'end';
+    case 'subgraph': return 'subgraph';
+    case 'step':
+    case 'action': return 'task';
+    case 'agent': return 'agent';
+    case 'tool': return 'tool';
+    case 'humanReview': return 'human';
   }
+}
+
+function ConnectionReferenceRow({ reference }: { reference: ConnectionReference }) {
+  const rowRef = useRef<HTMLLIElement>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ left: number; top: number } | null>(null);
+  const tooltipId = `connection-reference-${reference.id}-description`;
+
+  const positionTooltip = useCallback(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const bounds = row.getBoundingClientRect();
+    const tooltipWidth = 224;
+    const gap = 8;
+    const left = bounds.right + gap + tooltipWidth <= window.innerWidth - gap
+      ? bounds.right + gap
+      : Math.max(gap, bounds.left - tooltipWidth - gap);
+    setTooltipPosition({ left, top: bounds.top + bounds.height / 2 });
+  }, []);
+
+  useEffect(() => {
+    if (!tooltipPosition) return;
+    window.addEventListener('resize', positionTooltip);
+    window.addEventListener('scroll', positionTooltip, true);
+    return () => {
+      window.removeEventListener('resize', positionTooltip);
+      window.removeEventListener('scroll', positionTooltip, true);
+    };
+  }, [positionTooltip, tooltipPosition]);
+
+  return (
+    <>
+      <li
+        ref={rowRef}
+        className="node-palette__item-row node-palette__reference-row"
+        tabIndex={0}
+        aria-label={reference.label}
+        aria-describedby={tooltipPosition ? tooltipId : undefined}
+        onMouseEnter={positionTooltip}
+        onMouseLeave={() => setTooltipPosition(null)}
+        onFocus={positionTooltip}
+        onBlur={() => setTooltipPosition(null)}
+      >
+        <span className={`node-palette__item-icon node-palette__reference-icon node-palette__reference-icon--${reference.id}`} aria-hidden="true">
+          {reference.id === 'send'
+            ? <ShareNetworkIcon size={16} weight="bold" aria-hidden="true" />
+            : <span className={`node-palette__connection-cue node-palette__connection-cue--${reference.id}`} aria-hidden="true" />}
+        </span>
+        <span className="node-palette__item-label">{reference.label}</span>
+      </li>
+      {tooltipPosition && typeof document !== 'undefined' && createPortal(
+        <span
+          id={tooltipId}
+          role="tooltip"
+          className="node-palette__reference-tooltip"
+          style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
+        >
+          {reference.explanation}
+        </span>,
+        document.body,
+      )}
+    </>
+  );
 }
 
 type NodePaletteProps = {
@@ -182,9 +235,10 @@ function NodePaletteContents({
               <div className="node-palette__rows">
                 {items.map((item) => {
                   const singletonExists = isPaletteItemSingletonDisabled(graph, item);
+                  const visualKind = paletteVisualKind(item.kind);
                   return (
                     <button key={item.kind} type="button" draggable={!disabled && !singletonExists} disabled={disabled || singletonExists} onDragStart={(event) => onDragStart(event, item.kind)} onClick={() => onAdd(item.kind)} className="node-palette__item-row node-palette__row">
-                      <span className={`node-palette__item-icon node-palette__icon node-palette__icon--${item.kind}`}><PaletteIcon kind={item.kind} /></span>
+                      <span className={`node-palette__item-icon node-palette__icon node-palette__icon--${item.kind}`} data-node-visual={visualKind}><NodeVisualIcon kind={visualKind} /></span>
                       <span className="node-palette__item-label">{item.label}</span>
                     </button>
                   );
@@ -197,23 +251,7 @@ function NodePaletteContents({
           <section className="node-palette__group node-palette__reference" aria-label="Connections reference">
             <p className="node-palette__group-label">Connections</p>
             <ul className="node-palette__rows node-palette__reference-rows">
-              {visibleReferences.map((reference) => (
-                <li
-                  key={reference.id}
-                  className="node-palette__item-row node-palette__reference-row"
-                  tabIndex={0}
-                  aria-label={reference.label}
-                  aria-describedby={`connection-reference-${reference.id}-description`}
-                >
-                  <span className={`node-palette__item-icon node-palette__reference-icon node-palette__reference-icon--${reference.id}`} aria-hidden="true">
-                    {reference.id === 'send'
-                      ? <ShareNetworkIcon size={16} weight="bold" aria-hidden="true" />
-                      : <span className={`node-palette__connection-cue node-palette__connection-cue--${reference.id}`} aria-hidden="true" />}
-                  </span>
-                  <span className="node-palette__item-label">{reference.label}</span>
-                  <span id={`connection-reference-${reference.id}-description`} role="tooltip" className="node-palette__reference-explanation">{reference.explanation}</span>
-                </li>
-              ))}
+              {visibleReferences.map((reference) => <ConnectionReferenceRow key={reference.id} reference={reference} />)}
             </ul>
           </section>
         )}
