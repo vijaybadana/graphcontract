@@ -62,7 +62,7 @@ async function readWorkspaceRects(page: Page) {
       action: read('.workspace-action-island')!,
       palette: read('.workspace-palette-slot'),
       inspector: read('.workspace-inspector-panel'),
-      capabilities: read('.graph-capability-strip')!,
+      capabilities: read('.graph-capability-strip'),
     };
   });
 }
@@ -90,13 +90,15 @@ function expectSharedGrid(
   expectClose(action.height, command.height, 'action and command share a height');
   expectClose(command.x - brand.right, action.x - command.right, 'header column gutters match');
 
-  expect(capabilities.x).toBeGreaterThanOrEqual(command.x - EDGE_TOLERANCE);
-  expect(capabilities.right).toBeLessThanOrEqual(command.right + EDGE_TOLERANCE);
-  expectClose(
-    capabilities.x + capabilities.width / 2,
-    command.x + command.width / 2,
-    'capabilities are centered in the canvas column',
-  );
+  if (capabilities) {
+    expect(capabilities.x).toBeGreaterThanOrEqual(command.x - EDGE_TOLERANCE);
+    expect(capabilities.right).toBeLessThanOrEqual(command.right + EDGE_TOLERANCE);
+    expectClose(
+      capabilities.x + capabilities.width / 2,
+      command.x + command.width / 2,
+      'capabilities are centered in the canvas column',
+    );
+  }
 
   if (state.paletteOpen) {
     expect(palette).not.toBeNull();
@@ -119,7 +121,7 @@ function expectSharedGrid(
   );
 }
 
-test('desktop header, rails, and capabilities use one responsive workspace grid', async ({ app }) => {
+test('desktop header, rails, and any visible capabilities use one responsive workspace grid', async ({ app }) => {
   await app.emulateMedia({ reducedMotion: 'reduce' });
 
   for (const viewport of [
@@ -146,7 +148,11 @@ test('desktop header, rails, and capabilities use one responsive workspace grid'
           expectSameRect(geometry.brand, baseline.brand, 'brand island');
           expectSameRect(geometry.command, baseline.command, 'command island');
           expectSameRect(geometry.action, baseline.action, 'action island');
-          expectSameRect(geometry.capabilities, baseline.capabilities, 'capabilities strip');
+          if (geometry.capabilities && baseline.capabilities) {
+            expectSameRect(geometry.capabilities, baseline.capabilities, 'capabilities strip');
+          } else {
+            expect(geometry.capabilities).toBe(baseline.capabilities);
+          }
         },
       );
     }

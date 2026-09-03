@@ -19,7 +19,9 @@ test('demo replacement is confirmation-protected and exposes the routing invento
   await expect(app.locator('[aria-label="Fallback edge, route fallback"]')).toHaveCount(1);
   await expect(app.locator('[aria-label="Loop normal edge, route continue"]')).toHaveCount(1);
 
-  await app.getByTestId('rf__edge-clarify-write-brief').click();
+  const route = app.getByTestId('rf__edge-clarify-write-brief');
+  await route.focus();
+  await route.press('Enter');
   await app.getByRole('button', { name: 'Routing mode' }).click();
   await expect(app.getByRole('option', { name: 'Edge', exact: true })).toBeVisible();
   await expect(app.getByRole('option', { name: 'Conditional edge' })).toBeVisible();

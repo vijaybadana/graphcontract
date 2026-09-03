@@ -29,6 +29,7 @@ beforeEach(() => {
     past: [],
     future: [],
     notice: null,
+    layoutPending: false,
     fitViewRevision: 0,
   });
 });
@@ -135,6 +136,115 @@ describe('workspace subgraph actions', () => {
       x: 5000,
       y: 5000,
     });
+  });
+
+  it('coalesces structural layouts and never lets an older result overwrite a newer edit', async () => {
+    const revision = useGraphStore.getState().fitViewRevision;
+    useGraphStore.getState().addNode('agent', { x: 5000, y: 5000 });
+    const firstId = useGraphStore.getState().selection.primary?.id;
+    useGraphStore.getState().addNode('tool', { x: 6000, y: 6000 });
+    const secondId = useGraphStore.getState().selection.primary?.id;
+
+    await vi.waitFor(() => {
+      expect(useGraphStore.getState().fitViewRevision).toBe(revision + 1);
+    });
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === firstId)?.position.x).toBeLessThan(5000);
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === secondId)?.position.x).toBeLessThan(6000);
+    expect(useGraphStore.getState().past).toHaveLength(2);
+  });
+
+  it('keeps proposal submission and freeze behind the accepted-layout boundary', async () => {
+    useGraphStore.getState().addNode('agent', { x: 5000, y: 5000 });
+    expect(useGraphStore.getState().layoutPending).toBe(true);
+
+    const proposal = useGraphStore.getState().submitProposal({
+      rationale: 'Do not derive a proposal from transient geometry.',
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing review' } }],
+    });
+    expect(proposal).toMatchObject({ ok: false, error: { code: 'LAYOUT_PENDING' } });
+    expect(useGraphStore.getState().proposal).toBeNull();
+    expect(useGraphStore.getState().freezeGraph()).toMatchObject({
+      ok: false,
+      issues: [{ code: 'LAYOUT_PENDING' }],
+    });
+
+    await vi.waitFor(() => expect(useGraphStore.getState().layoutPending).toBe(false));
+  });
+
+  it('lays out an unresolved rapid-edit snapshot when Undo restores it', async () => {
+    useGraphStore.getState().addNode('agent', { x: 5000, y: 5000 });
+    const firstId = useGraphStore.getState().selection.primary?.id;
+    useGraphStore.getState().addNode('tool', { x: 6000, y: 6000 });
+
+    await vi.waitFor(() => expect(useGraphStore.getState().layoutPending).toBe(false));
+    useGraphStore.getState().undo();
+    expect(useGraphStore.getState().graph.nodes.some((node) => node.id === firstId)).toBe(true);
+
+    await vi.waitFor(() => expect(useGraphStore.getState().layoutPending).toBe(false));
+    expect(useGraphStore.getState().graph.nodes.find((node) => node.id === firstId)?.position.x).toBeLessThan(5000);
+  });
+
+  it('lays out proposal candidates ephemerally without mutating the accepted graph', async () => {
+    const accepted = structuredClone(useGraphStore.getState().graph);
+    const result = useGraphStore.getState().submitProposal({
+      rationale: 'Insert a reviewed fraud check.',
+      operations: [
+        { type: 'remove_edge', edgeId: 'billing-refund' },
+        {
+          type: 'add_node',
+          node: {
+            id: 'fraud-check',
+            kind: 'step',
+            executor: 'deterministic',
+            label: 'Fraud check',
+            position: { x: 5000, y: 5000 },
+          },
+        },
+        { type: 'add_edge', edge: { id: 'billing-fraud', source: 'billing', target: 'fraud-check', mode: 'normal' } },
+        { type: 'add_edge', edge: { id: 'fraud-refund', source: 'fraud-check', target: 'refund', mode: 'normal' } },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    await vi.waitFor(() => {
+      expect(useGraphStore.getState().proposalPreviewGraph).not.toBeNull();
+    });
+    expect(useGraphStore.getState().graph).toEqual(accepted);
+    expect(useGraphStore.getState().proposalPreviewGraph?.nodes.find(
+      (node) => node.id === 'fraud-check',
+    )?.position).not.toEqual({ x: 5000, y: 5000 });
+    useGraphStore.getState().rejectProposal();
+  });
+
+  it('restores deterministic expanded compound geometry after a compact collapse', async () => {
+    useGraphStore.getState().loadResearchSupervisorDemo();
+    useGraphStore.getState().autoLayout();
+    await vi.waitFor(() => {
+      expect(useGraphStore.getState().fitViewRevision).toBeGreaterThanOrEqual(2);
+    });
+    const before = structuredClone(useGraphStore.getState().graph);
+    const beforeSubgraph = before.subgraphs[0]!;
+    const beforeChildren = before.nodes.filter((node) => node.parentId === beforeSubgraph.id);
+    const collapseRevision = useGraphStore.getState().fitViewRevision;
+
+    useGraphStore.getState().setSubgraphCollapsed(beforeSubgraph.id, true);
+    await vi.waitFor(() => {
+      expect(useGraphStore.getState().fitViewRevision).toBe(collapseRevision + 1);
+    });
+    expect(useGraphStore.getState().graph.subgraphs[0]!.dimensions).toEqual(beforeSubgraph.dimensions);
+    expect(useGraphStore.getState().graph.nodes.filter(
+      (node) => node.parentId === beforeSubgraph.id,
+    ).map((node) => node.position)).toEqual(beforeChildren.map((node) => node.position));
+
+    const expandRevision = useGraphStore.getState().fitViewRevision;
+    useGraphStore.getState().setSubgraphCollapsed(beforeSubgraph.id, false);
+    await vi.waitFor(() => {
+      expect(useGraphStore.getState().fitViewRevision).toBe(expandRevision + 1);
+    });
+    expect(useGraphStore.getState().graph.subgraphs[0]!.collapsed).toBe(false);
+    expect(useGraphStore.getState().graph.nodes.filter(
+      (node) => node.parentId === beforeSubgraph.id,
+    ).map((node) => node.position)).toEqual(beforeChildren.map((node) => node.position));
   });
 
   it('retains a surviving edge selection across undo and redo', () => {
@@ -332,7 +442,7 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().graph.id).toBe(previousGraphId);
   });
 
-  it('loads a library entry as one undoable edit and clears transient canvas state', () => {
+  it('loads a library entry as one undoable edit and clears transient canvas state', async () => {
     const previousGraphId = useGraphStore.getState().graph.id;
     useGraphStore.setState({
       runtimeProjectionFixture: {
@@ -352,6 +462,9 @@ describe('workspace subgraph actions', () => {
     const graph = { ...structuredClone(sampleGraph), id: 'library-entry-graph', name: 'Library entry' };
 
     expect(useGraphStore.getState().loadGraphLibraryEntry({ title: 'Library entry', graph })).toBe(true);
+    await vi.waitFor(() => {
+      expect(useGraphStore.getState().fitViewRevision).toBe(fitRevision + 1);
+    });
     expect(useGraphStore.getState()).toMatchObject({
       graph: { id: 'library-entry-graph', status: 'draft' },
       runtimeProjectionFixture: null,

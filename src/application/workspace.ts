@@ -27,7 +27,7 @@ import {
   ScenarioEnumerationBudget,
 } from '@/src/domain';
 import { dynamicParallelismDemoGraph } from './package-three-demo';
-import { layoutWorkflowGraph } from './layout-workflow';
+import { layoutWorkflowGraph, type WorkflowLayoutOptions } from './layout-workflow';
 import { createDraftEdge } from './connection-policy';
 import { CONTRACT_NODE_HEIGHT, CONTRACT_NODE_WIDTH } from './canvas-geometry';
 
@@ -70,6 +70,8 @@ export type WorkspaceTransition<Result = undefined> = {
   layoutApplied?: boolean;
   /** Geometry is asynchronous; callers commit it only if their source revision remains current. */
   layoutPromise?: Promise<WorkflowGraph>;
+  /** Candidate-only geometry for proposal projection; never accepted graph state. */
+  proposalLayoutPromise?: Promise<WorkflowGraph>;
 };
 
 export type WorkspaceDependencies = {
@@ -141,6 +143,23 @@ function createNodeFromPreset(
 }
 
 const clone = <T,>(value: T): T => structuredClone(value);
+
+/**
+ * Marks one accepted structural transition for a single asynchronous layout.
+ * The store owns stale-result protection and commits the resolved geometry
+ * without adding another history entry.
+ */
+export function withScheduledWorkflowLayout<Result>(
+  transition: WorkspaceTransition<Result>,
+  options: WorkflowLayoutOptions = {},
+): WorkspaceTransition<Result> {
+  if (!transition.changed) return transition;
+  return {
+    ...transition,
+    layoutApplied: true,
+    layoutPromise: layoutWorkflowGraph(clone(transition.state.graph), options),
+  };
+}
 const hasStepOnlyPatchFields = (patch: GraphNodePatch) =>
   ['executor', 'participation', 'storeAccess', 'retry', 'modifiers', 'hitl', 'sensitive'].some((field) => field in patch);
 const hasMergeOnlyPatchFields = (patch: GraphNodePatch) => 'merge' in patch;
@@ -258,17 +277,16 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
   return {
     createInitial,
 
-    /**
-     * Layout is an explicit, accepted-graph editing action. It deliberately
-     * does not run as a side effect of ordinary graph edits or restoration.
-     */
+    /** Explicit layout uses the same service as structural edit scheduling. */
     autoLayout(state: WorkspaceCore): WorkspaceTransition {
       if (!editable(state)) return blocked(state);
       return {
         state: { ...state, scenarios: [] },
         changed: true,
         notice: 'Workflow arrangement started.',
-        layoutPromise: layoutWorkflowGraph(clone(state.graph)).then((graph) => ({
+        layoutPromise: layoutWorkflowGraph(clone(state.graph), {
+          recomputeSubgraphDimensions: true,
+        }).then((graph) => ({
           ...graph,
           status: 'draft' as const,
           updatedAt: dependencies.now(),
@@ -291,7 +309,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         }),
         'Node added. Configure it in the inspector.',
       );
-      return { ...transition, result: { nodeId: node.id } };
+      return { ...withScheduledWorkflowLayout(transition), result: { nodeId: node.id } };
     },
 
     moveNode(state: WorkspaceCore, nodeId: string, position: GraphNode['position']) {
@@ -323,7 +341,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     ) {
       const movedIds = new Set(Object.keys(positions));
       if (movedIds.size === 0) return { state, changed: false };
-      return changeGraph(state, (graph) => {
+      const transition = changeGraph(state, (graph) => {
         const moved = {
           ...graph,
           nodes: graph.nodes.map((node) =>
@@ -356,6 +374,10 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           }),
         };
       }, 'Node movement saved. Dropped nodes join one unambiguous expanded subgraph.');
+      const membershipChanged = transition.changed && transition.state.graph.nodes.some((node) => (
+        node.parentId !== state.graph.nodes.find((candidate) => candidate.id === node.id)?.parentId
+      ));
+      return membershipChanged ? withScheduledWorkflowLayout(transition) : transition;
     },
 
     updateNode(
@@ -503,7 +525,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         }),
         'Subgraph added. Add its Start and End nodes to complete the workflow.',
       );
-      return { ...transition, result: { subgraphId } };
+      return { ...withScheduledWorkflowLayout(transition), result: { subgraphId } };
     },
 
     updateSubgraph(
@@ -546,12 +568,13 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       }
       // Collapse is view state on the canonical container; its edges are never
       // rewritten, hidden, or otherwise changed here.
-      return changeGraph(state, (graph) => ({
+      const transition = changeGraph(state, (graph) => ({
         ...graph,
         subgraphs: graph.subgraphs.map((subgraph) =>
           subgraph.id === subgraphId ? { ...subgraph, collapsed } : subgraph,
         ),
       }));
+      return withScheduledWorkflowLayout(transition);
     },
 
     assignNodesToSubgraph(state: WorkspaceCore, subgraphId: string, nodeIds: string[]) {
@@ -561,7 +584,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         (node) => requested.has(node.id) && node.parentId !== subgraphId,
       );
       if (!target || selected.length === 0) return { state, changed: false };
-      return changeGraph(
+      return withScheduledWorkflowLayout(changeGraph(
         state,
         (graph) => {
           const parent = graph.subgraphs.find((subgraph) => subgraph.id === subgraphId)!;
@@ -582,7 +605,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           };
         },
         'Nodes assigned to subgraph with relative positions preserved.',
-      );
+      ));
     },
 
     assignNodeToSubgraph(state: WorkspaceCore, subgraphId: string, nodeId: string) {
@@ -591,7 +614,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         (candidate) => candidate.id === nodeId && candidate.parentId !== subgraphId,
       );
       if (!target || !node) return { state, changed: false };
-      return changeGraph(
+      return withScheduledWorkflowLayout(changeGraph(
         state,
         (graph) => {
           const parent = graph.subgraphs.find((subgraph) => subgraph.id === subgraphId)!;
@@ -614,14 +637,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           };
         },
         'Node assigned to subgraph with its relative position preserved.',
-      );
+      ));
     },
 
     removeNodesFromSubgraph(state: WorkspaceCore, nodeIds: string[]) {
       const requested = new Set(nodeIds);
       const selected = state.graph.nodes.filter((node) => requested.has(node.id) && node.parentId);
       if (selected.length === 0) return { state, changed: false };
-      return changeGraph(
+      return withScheduledWorkflowLayout(changeGraph(
         state,
         (graph) => ({
           ...graph,
@@ -632,13 +655,13 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           ),
         }),
         'Nodes removed from subgraph with absolute positions preserved.',
-      );
+      ));
     },
 
     removeNodeFromSubgraph(state: WorkspaceCore, nodeId: string) {
       const node = state.graph.nodes.find((candidate) => candidate.id === nodeId && candidate.parentId);
       if (!node) return { state, changed: false };
-      return changeGraph(
+      return withScheduledWorkflowLayout(changeGraph(
         state,
         (graph) => ({
           ...graph,
@@ -649,14 +672,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           ),
         }),
         'Node removed from subgraph with its absolute position preserved.',
-      );
+      ));
     },
 
-    dissolveSubgraph(state: WorkspaceCore, subgraphId: string) {
+    dissolveSubgraph(state: WorkspaceCore, subgraphId: string, scheduleLayout = true) {
       if (!state.graph.subgraphs.some((subgraph) => subgraph.id === subgraphId)) {
         return { state, changed: false };
       }
-      return changeGraph(
+      const transition = changeGraph(
         state,
         (graph) => ({
           ...graph,
@@ -669,10 +692,11 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         }),
         'Subgraph dissolved. Its child nodes remain at their absolute positions.',
       );
+      return scheduleLayout ? withScheduledWorkflowLayout(transition) : transition;
     },
 
     removeNode(state: WorkspaceCore, nodeId: string) {
-      return changeGraph(
+      return withScheduledWorkflowLayout(changeGraph(
         state,
         (graph) => ({
           ...graph,
@@ -680,7 +704,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           edges: graph.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
         }),
         'Node and connected edges removed.',
-      );
+      ));
     },
 
     addEdge(state: WorkspaceCore, source: string, target: string) {
@@ -694,7 +718,10 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         }),
         'Edge added. Configure its routing in the inspector.',
       );
-      return { ...transition, result: transition.changed ? { edgeId } : undefined };
+      return {
+        ...withScheduledWorkflowLayout(transition),
+        result: transition.changed ? { edgeId } : undefined,
+      };
     },
 
     updateEdge(
@@ -702,24 +729,32 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       edgeId: string,
       patch: GraphEdgePatch,
     ) {
-      return changeGraph(state, (graph) => ({
+      const transition = changeGraph(state, (graph) => ({
         ...graph,
         edges: graph.edges.map((edge) => (edge.id === edgeId ? { ...edge, ...patch } : edge)),
       }));
+      return ('source' in patch || 'target' in patch)
+        ? withScheduledWorkflowLayout(transition)
+        : transition;
     },
 
     removeEdge(state: WorkspaceCore, edgeId: string) {
-      return changeGraph(
+      return withScheduledWorkflowLayout(changeGraph(
         state,
         (graph) => ({ ...graph, edges: graph.edges.filter((edge) => edge.id !== edgeId) }),
         'Edge removed.',
-      );
+      ));
     },
 
-    deleteElements(state: WorkspaceCore, nodeIds: string[], edgeIds: string[]) {
+    deleteElements(
+      state: WorkspaceCore,
+      nodeIds: string[],
+      edgeIds: string[],
+      scheduleLayout = true,
+    ) {
       const removedNodes = new Set(nodeIds);
       const removedEdges = new Set(edgeIds);
-      return changeGraph(
+      const transition = changeGraph(
         state,
         (graph) => ({
           ...graph,
@@ -733,6 +768,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         }),
         'Selected elements removed.',
       );
+      return scheduleLayout ? withScheduledWorkflowLayout(transition) : transition;
     },
 
     duplicateNodes(state: WorkspaceCore, nodeIds: string[], offset = { x: 36, y: 36 }) {
@@ -763,7 +799,10 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         }),
         `${copies.length} node${copies.length === 1 ? '' : 's'} duplicated.`,
       );
-      return { ...transition, result: { nodeIds: copies.map((node) => node.id) } };
+      return {
+        ...withScheduledWorkflowLayout(transition),
+        result: { nodeIds: copies.map((node) => node.id) },
+      };
     },
 
     submitProposal(state: WorkspaceCore, input: unknown): WorkspaceTransition<ProposalResult> {
@@ -798,6 +837,9 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         };
         return { state, changed: false, result: { ok: false, error } };
       }
+      const proposalLayoutPromise = result.proposal.operations.some(isLayoutAffectingProposalOperation)
+        ? layoutWorkflowGraph(applyGraphOperations(state.graph, result.proposal.operations).graph)
+        : undefined;
       return {
         state: {
           ...state,
@@ -813,6 +855,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
             ? 'A new agent proposal is ready for human review.'
             : 'The agent proposal is invalid. Review its validation issues.',
         result: { ok: true, proposal: result.proposal },
+        ...(proposalLayoutPromise ? { proposalLayoutPromise } : {}),
       };
     },
 
@@ -1001,7 +1044,14 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
 
     loadGraphLibraryEntry(
       state: WorkspaceCore,
-      entry: { title: string; graph: WorkflowGraph },
+      entry: {
+        title: string;
+        graph: WorkflowGraph;
+        layout?: {
+          authoredSubgraphIds?: readonly string[];
+          preserveGraphGeometry?: boolean;
+        };
+      },
     ): WorkspaceTransition {
       if (!editable(state)) return blocked(state);
       const issues = validateGraph(entry.graph);
@@ -1012,14 +1062,19 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           notice: `“${entry.title}” cannot be opened because its template is invalid.`,
         };
       }
-      return {
-        ...changeGraph(
-          state,
-          () => clone(entry.graph),
-          `“${entry.title}” opened from the Graph Library. One Undo restores your previous workflow.`,
-        ),
-        layoutApplied: true,
-      };
+      const transition = changeGraph(
+        state,
+        () => clone(entry.graph),
+        `“${entry.title}” opened from the Graph Library. One Undo restores your previous workflow.`,
+      );
+      if (entry.layout?.preserveGraphGeometry) {
+        return { ...transition, layoutApplied: true };
+      }
+      return withScheduledWorkflowLayout(transition, {
+        authoredSubgraphIds: entry.layout?.authoredSubgraphIds
+          ? new Set(entry.layout.authoredSubgraphIds)
+          : undefined,
+      });
     },
 
     loadResearchSupervisorDemo(state: WorkspaceCore): WorkspaceTransition {

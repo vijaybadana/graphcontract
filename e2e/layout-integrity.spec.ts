@@ -302,7 +302,12 @@ async function expectRouteVisible(
       document.querySelector<HTMLElement>('.react-flow');
     if (!path || !canvas) return null;
     const markerReference = path.getAttribute('marker-end') ?? '';
-    const markerId = markerReference.match(/#([^'\")]+)/)?.[1] ?? '';
+    // React Flow includes the semantic CSS color token in its marker ID. The
+    // token itself contains parentheses, so parse the complete quoted URL
+    // fragment instead of stopping at the first `)` in `var(...)`.
+    const markerId = markerReference
+      .replace(/^url\(['"]?#/, '')
+      .replace(/['"]?\)$/, '');
     const marker = markerId ? document.getElementById(markerId) : null;
     const markerShape = marker?.querySelector<SVGGraphicsElement>('path, polygon, polyline') ?? null;
     let markerShapeBounds: { width: number; height: number } | null = null;
@@ -782,9 +787,16 @@ test('L06 collapse and expand preserve a looped parallel subgraph geometry', asy
   const collapsedParent = app.getByTestId('rf__node-parallel-loop-cell');
   const hiddenChild = app.getByTestId('rf__node-reflect-on-answer');
   await expect(collapsedParent.locator('.subgraph-node-shell')).toHaveClass(/is-selected/);
-  await expect(app.getByRole('heading', { name: 'Subgraph details' })).toBeVisible();
-  await expect(app.getByRole('heading', { name: 'Node details' })).toHaveCount(0);
-  await expect(app.getByLabel('Label', { exact: true })).toHaveValue('Parallel reflection cell');
+  const subgraphInspector = app.getByRole('region', {
+    name: 'Parallel reflection cell inspector',
+  });
+  await expect(subgraphInspector).toBeVisible();
+  await expect(subgraphInspector.getByRole('heading', {
+    name: 'Parallel reflection cell',
+  })).toBeVisible();
+  await expect(subgraphInspector.getByLabel('Name', { exact: true })).toHaveValue(
+    'Parallel reflection cell',
+  );
   await expect(hiddenChild).toHaveCount(0);
   await expect(app.getByTestId('rf__edge-questions-send')).toHaveCount(0);
   await expect(app.getByTestId('rf__edge-reflect-refine')).toHaveCount(0);

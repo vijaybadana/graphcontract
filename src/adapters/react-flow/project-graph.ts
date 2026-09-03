@@ -269,8 +269,21 @@ type ProjectedDomainEdge = {
   target: string;
 };
 
-const proxyEdgeId = (source: string, target: string) =>
-  `subgraph-proxy:${encodeURIComponent(source)}:${encodeURIComponent(target)}`;
+const proxyEdgeId = (source: string, target: string, semanticKey?: string) =>
+  `subgraph-proxy:${encodeURIComponent(source)}:${encodeURIComponent(target)}${
+    semanticKey ? `:${encodeURIComponent(semanticKey)}` : ''
+  }`;
+
+function proxyEdgeSemanticKey(
+  edge: GraphEdge,
+  loopEdgeIds: ReadonlySet<string>,
+): string {
+  return [
+    edge.mode,
+    loopEdgeIds.has(edge.id) ? 'loop' : 'route',
+    edge.provenance?.representation ?? 'declared',
+  ].join(':');
+}
 
 export function domainEdgeIdsForCanvasEdge(edge: CanvasFlowEdge): string[] {
   // React Flow permits an edge without data even when the projected edge type
@@ -434,12 +447,13 @@ function projectEdge(
     aggregate: 'unchanged',
     byDomainEdgeId: {},
   },
+  proxySemanticKey?: string,
 ): CanvasNativeEdge {
   const rendered = resolveRoutingEdgePresentation(presentation);
   return {
     id:
       projection === 'subgraph-proxy'
-        ? proxyEdgeId(source, target)
+        ? proxyEdgeId(source, target, proxySemanticKey)
         : projection === 'runtime-instance'
           ? `runtime-projection:${encodeURIComponent(edge.id)}:${encodeURIComponent(source)}:${encodeURIComponent(target)}`
           : edge.id,
@@ -939,7 +953,11 @@ export function projectGraphToCanvas(
     };
   });
 
-  const proxyEdges = new Map<string, ProjectedDomainEdge[]>();
+  const proxyEdges = new Map<string, {
+    endpointKey: string;
+    semanticKey: string;
+    edges: ProjectedDomainEdge[];
+  }>();
   const edges: CanvasFlowEdge[] = [];
   const canvasEdgesReconnectable = accepted.status === 'draft' && !reviewProjection;
   const edgePresentation = (
@@ -1000,11 +1018,36 @@ export function projectGraphToCanvas(
       continue;
     }
 
-    const key = `${domainEdge.source}\u0000${domainEdge.target}`;
-    proxyEdges.set(key, [...(proxyEdges.get(key) ?? []), domainEdge]);
+    const endpointKey = `${domainEdge.source}\u0000${domainEdge.target}`;
+    const semanticKey = proxyEdgeSemanticKey(domainEdge.edge, loopEdgeIds);
+    const key = `${endpointKey}\u0000${semanticKey}`;
+    const existing = proxyEdges.get(key);
+    proxyEdges.set(key, {
+      endpointKey,
+      semanticKey,
+      edges: [...(existing?.edges ?? []), domainEdge],
+    });
   }
 
-  for (const groupedEdges of proxyEdges.values()) {
+  const proxyGroups = [...proxyEdges.values()]
+    .map((group) => ({
+      ...group,
+      edges: [...group.edges].sort((left, right) => left.edge.id.localeCompare(right.edge.id)),
+    }))
+    .sort((left, right) =>
+      left.edges[0].edge.id.localeCompare(right.edges[0].edge.id) ||
+      left.endpointKey.localeCompare(right.endpointKey) ||
+      left.semanticKey.localeCompare(right.semanticKey),
+    );
+  const semanticGroupCountByEndpoint = new Map<string, number>();
+  for (const group of proxyGroups) {
+    semanticGroupCountByEndpoint.set(
+      group.endpointKey,
+      (semanticGroupCountByEndpoint.get(group.endpointKey) ?? 0) + 1,
+    );
+  }
+
+  for (const { endpointKey, semanticKey, edges: groupedEdges } of proxyGroups) {
     const [first] = groupedEdges;
     const group = groupedEdges.map(({ edge }) => edge);
     const review = reviewProjectionForEdges(group, edgeReviewStates);
@@ -1016,6 +1059,7 @@ export function projectGraphToCanvas(
         'subgraph-proxy',
         edgePresentation(first.edge, group, review),
         review,
+        semanticGroupCountByEndpoint.get(endpointKey) === 1 ? undefined : semanticKey,
       ),
     );
   }

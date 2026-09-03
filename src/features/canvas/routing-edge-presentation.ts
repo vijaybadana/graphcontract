@@ -16,7 +16,8 @@ const halo = (color: string, amount = 28) =>
 /**
  * Phase one resolves canonical route semantics. Phase two adds transient
  * overlays: invalid may replace ink; proposal changes width/ghost opacity;
- * scenario/review focus stay CSS wrapper overlays. Frozen is read-only only.
+ * scenario/review focus and provenance stay secondary wrapper/label overlays.
+ * Frozen is read-only only.
  */
 export function resolveRoutingEdgePresentation(
   presentation: CanvasEdgePresentation,
@@ -28,12 +29,6 @@ export function resolveRoutingEdgePresentation(
     // A loop is derived from topology and remains the primary routing cue,
     // independent of how that edge's provenance was established.
     semantic = { color: 'var(--gc-route-loop)', haloColor: halo('var(--gc-route-loop)'), strokeWidth: 1.8, opacity: 1, animated: false };
-  } else if (presentation.provenance === 'runtime-generated') {
-    semantic = { color: 'var(--gc-focus)', haloColor: halo('var(--gc-focus)'), dasharray: '2 5', strokeWidth: 1.8, opacity: 1, animated: false };
-  } else if (presentation.provenance === 'derived-semantic') {
-    semantic = { color: 'var(--gc-route-conditional)', haloColor: halo('var(--gc-route-conditional)'), dasharray: '11 4 2 4', strokeWidth: 1.8, opacity: 1, animated: false };
-  } else if (presentation.provenance === 'external-orchestration') {
-    semantic = { color: 'var(--gc-route-proxy)', haloColor: halo('var(--gc-route-proxy)'), dasharray: '7 5', strokeWidth: 1.8, opacity: 1, animated: false };
   } else if (presentation.mode === 'command') {
     semantic = { color: 'var(--gc-route-command)', haloColor: halo('var(--gc-route-command)'), dasharray: '7 5', strokeWidth: 1.8, opacity: 1, animated: false };
   } else if (presentation.mode === 'conditional') {

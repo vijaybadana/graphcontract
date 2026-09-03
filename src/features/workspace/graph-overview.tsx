@@ -26,6 +26,8 @@ const overviewOffsetScale = 5;
 
 type Rect = { x: number; y: number; width: number; height: number };
 
+const finiteOr = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback;
+
 function unionRects(first: Rect, second: Rect): Rect {
   const x = Math.min(first.x, second.x);
   const y = Math.min(first.y, second.y);
@@ -61,15 +63,19 @@ export function GraphOverviewNode({
   color,
   selected,
 }: MiniMapNodeProps) {
-  const markWidth = Math.max(80, Math.min(width, 180));
-  const markHeight = Math.max(40, Math.min(height, 90));
+  const safeX = finiteOr(x, 0);
+  const safeY = finiteOr(y, 0);
+  const safeWidth = Math.max(0, finiteOr(width, 0));
+  const safeHeight = Math.max(0, finiteOr(height, 0));
+  const markWidth = Math.max(80, Math.min(safeWidth, 180));
+  const markHeight = Math.max(40, Math.min(safeHeight, 90));
 
   return (
     <rect
       className={`graph-overview-node${selected ? ' is-selected' : ''}`}
       data-overview-node-id={id}
-      x={x + (width - markWidth) / 2}
-      y={y + (height - markHeight) / 2}
+      x={safeX + (safeWidth - markWidth) / 2}
+      y={safeY + (safeHeight - markHeight) / 2}
       width={markWidth}
       height={markHeight}
       rx={8}
@@ -95,16 +101,26 @@ function GraphOverviewViewport() {
   const { getNodesBounds } = useReactFlow<CanvasFlowNode>();
 
   const geometry = useMemo(() => {
+    // React Flow can expose a zero zoom and unmeasured dimensions for one
+    // render while a compact canvas mounts. Keep SVG geometry finite so that
+    // the overview never emits invalid coordinates during that transition.
+    const zoom = Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
     const view = {
-      x: -viewport.x / viewport.zoom,
-      y: -viewport.y / viewport.zoom,
-      width: flowWidth / viewport.zoom,
-      height: flowHeight / viewport.zoom,
+      x: -finiteOr(viewport.x, 0) / zoom,
+      y: -finiteOr(viewport.y, 0) / zoom,
+      width: finiteOr(flowWidth, 0) / zoom,
+      height: finiteOr(flowHeight, 0) / zoom,
     };
     const visibleNodes = nodes.filter((node) => !node.hidden);
-    const graphBounds = visibleNodes.length > 0 ? getNodesBounds(visibleNodes) : view;
+    const measuredBounds = visibleNodes.length > 0 ? getNodesBounds(visibleNodes) : view;
+    const graphBounds = {
+      x: finiteOr(measuredBounds.x, view.x),
+      y: finiteOr(measuredBounds.y, view.y),
+      width: finiteOr(measuredBounds.width, view.width),
+      height: finiteOr(measuredBounds.height, view.height),
+    };
     const bounds = unionRects(graphBounds, view);
-    const viewScale = Math.max(
+    const viewScale = Math.max(1,
       bounds.width / overviewWidth,
       bounds.height / overviewHeight,
     );

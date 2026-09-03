@@ -38,8 +38,10 @@ async function loadHumanControlDemo(app: Parameters<typeof callWebMcpTool>[0]) {
 }
 
 async function selectNode(app: Parameters<typeof callWebMcpTool>[0], id: string) {
-  await app.getByTestId(`rf__node-${id}`).click();
-  await expect(app.getByRole('heading', { name: 'Node details' })).toBeVisible();
+  const node = app.getByTestId(`rf__node-${id}`);
+  await node.focus();
+  await node.press('Enter');
+  await expect(app.getByRole('region', { name: / inspector$/ })).toBeVisible();
 }
 
 test('gate timing remains visibly and accessibly distinct while executor ownership stays orthogonal', async ({ app }) => {
@@ -56,7 +58,13 @@ test('gate timing remains visibly and accessibly distinct while executor ownersh
   );
 
   await selectNode(app, 'revise-change-plan');
-  await app.getByRole('checkbox', { name: 'HITL enabled' }).check();
+  await app.getByText('Add modifier', { exact: true }).click();
+  await app.getByRole('menuitem', { name: 'Human input gate' }).click();
+  const hitlEnabled = app.getByRole('checkbox', { name: 'HITL enabled' });
+  await expect(hitlEnabled).not.toBeChecked();
+  await hitlEnabled.focus();
+  await hitlEnabled.press('Space');
+  await expect(hitlEnabled).toBeChecked();
   await app.getByRole('button', { name: 'HITL timing' }).click();
   await app.getByRole('option', { name: 'Inside', exact: true }).click();
   const revise = app.getByTestId('rf__node-revise-change-plan');
@@ -112,7 +120,11 @@ test('approval-required Sensitive policy is invalid without its explicit before 
   await loadHumanControlDemo(app);
   await selectNode(app, 'deploy-change');
 
-  await app.getByRole('checkbox', { name: 'HITL enabled' }).uncheck();
+  const hitlEnabled = app.getByRole('checkbox', { name: 'HITL enabled' });
+  await expect(hitlEnabled).toBeChecked();
+  await hitlEnabled.focus();
+  await hitlEnabled.press('Space');
+  await expect(hitlEnabled).toHaveCount(0);
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
 
   const invalid = await callWebMcpTool<GraphRead>(app, 'get_graph', {});

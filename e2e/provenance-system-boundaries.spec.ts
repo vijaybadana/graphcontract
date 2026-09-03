@@ -146,18 +146,18 @@ test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationshi
   await expect(canvas.getByTestId('rf__node-classifier').getByLabel(/Degraded readiness/)).toBeVisible();
   await expect(canvas.getByLabel('External system Dispatch system. Projection-only boundary tile.')).toBeVisible();
 
-  await app.getByRole('button', { name: /^Evidence: Hidden, Projection-only overlay/ }).click();
-  await expect(app.getByLabel('Evidence overlay legend')).toBeVisible();
-  await app.getByRole('button', { name: /Evidence marker \d+ for Dispatch system/ }).click();
-  await expect(app.getByRole('heading', { name: /Evidence details/ })).toBeVisible();
-  await expect(app.getByText('https://example.test/contracts/dispatch-system', { exact: true })).toBeVisible();
-  await expect(app.getByRole('status').filter({ hasText: 'Native control edge: no.' })).toBeVisible();
+  await app.getByRole('button', { name: 'Review added classifier-dispatch', exact: true }).click();
+  await expect(app.getByRole('heading', { name: 'classifier-dispatch', exact: true })).toBeVisible();
+  await expect(app.getByLabel('Added: https://example.test/contracts/dispatch-system', { exact: true })).toBeVisible();
+  await expect(app.getByLabel('Added: external-contract', { exact: true })).toBeVisible();
+  await expect(app.getByLabel('Added: medium', { exact: true })).toBeVisible();
+  await app.getByRole('button', { name: 'Back to proposal', exact: true }).click();
 
   await app.getByRole('button', { name: /External orchestration: Dispatch system\. Proposed added\. Not a native control edge/ }).click();
-  await expect(app.getByRole('heading', { name: 'External orchestration' })).toBeVisible();
-  await expect(app.getByRole('status').filter({ hasText: 'Not a native control edge.' })).toBeVisible();
+  await expect(app.getByRole('heading', { name: 'classifier-dispatch', exact: true })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Agent', exact: true })).toBeDisabled();
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
+  await app.getByRole('button', { name: 'Back to proposal', exact: true }).click();
 
   const secondProposal = await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
     expectedGraphUpdatedAt: accepted.graph.updatedAt,
@@ -174,6 +174,11 @@ test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationshi
     opaque: { factoryLabel: 'create_support_classifier', inputPorts: [{ name: 'request' }], outputPorts: [{ name: 'route' }] },
   });
   expect(approved.graph.nodes.find((node) => node.id === 'end')?.outcome).toEqual({ kind: 'completed' });
+
+  await app.getByRole('button', { name: /External orchestration: Dispatch system\..*Not a native control edge/ }).click();
+  await expect(app.getByRole('heading', { name: 'Dispatch system', exact: true })).toBeVisible();
+  await expect(app.getByRole('status').filter({ hasText: 'External relationship · read-only' })).toBeVisible();
+  await expect(app.getByRole('status').filter({ hasText: 'Not a native control edge.' })).toBeVisible();
 
   await canvas.getByTestId('rf__node-classifier').click();
   await expect(app.getByText('Opaque / prebuilt Step', { exact: true })).toBeVisible();
@@ -201,7 +206,12 @@ test('schema-v6 provenance, opaque/readiness/outcome, and a boundary relationshi
     ]));
   }
 
-  await app.getByRole('tab', { name: /^Scenarios/ }).click();
+  const projection = app.getByRole('radiogroup', { name: 'Canvas projection' });
+  await expect(projection.getByRole('radio', { name: 'Scenario', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await expect(app.getByRole('region', { name: 'Scenarios panel' })).toBeVisible();
   const graphDownload = JSON.parse(await downloadText(app, 'graph-contract.json')) as { relationships: Relationship[] };
   const scenarioDownload = JSON.parse(await downloadText(app, 'graph-test-scenarios.json')) as {
     graphRelationships: Relationship[];
@@ -357,7 +367,7 @@ test('selected scenarios preserve collapsed native proxies and dim unrelated non
   await expect(activeBoundary).toHaveClass(/scenario-state--active/);
   await expect(activeBoundary).toHaveCSS('opacity', '1');
   await expect(dimmedBoundary).toHaveClass(/scenario-state--dimmed/);
-  await expect(dimmedBoundary).toHaveCSS('opacity', '0.22');
+  await expect(dimmedBoundary).toHaveCSS('opacity', '0.18');
   await expect(canvas.getByTestId('rf__node-external-system:review-boundary')).toHaveClass(/scenario-state--active/);
   await expect(canvas.getByTestId('rf__node-external-system:archive-boundary')).toHaveClass(/scenario-state--dimmed/);
   await expect(app.getByRole('button', { name: /External orchestration: Review boundary.*Not a native control edge/ })).toBeVisible();

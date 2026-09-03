@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { Download, Page } from '@playwright/test';
+import type { Download, Locator, Page } from '@playwright/test';
 
 import {
   callWebMcpTool,
@@ -94,6 +94,42 @@ async function expectEdgeLabelOnPath(page: Page, edgeId: string) {
   expect(distance).toBeLessThan(2.5);
 }
 
+async function settledPathHitPoint(path: Locator) {
+  return path.evaluate(async (element) => {
+    const readPoint = (position: number) => {
+      const svgPath = element as SVGPathElement;
+      const point = svgPath.getPointAtLength(svgPath.getTotalLength() * position);
+      const matrix = svgPath.getScreenCTM();
+      if (!matrix) throw new Error('Edge interaction path has no screen transform');
+      return {
+        x: point.x * matrix.a + point.y * matrix.c + matrix.e,
+        y: point.x * matrix.b + point.y * matrix.d + matrix.f,
+      };
+    };
+
+    let previous = readPoint(0.5);
+    let stableFrames = 0;
+    for (let frame = 0; frame < 120; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const current = readPoint(0.5);
+      stableFrames = Math.hypot(current.x - previous.x, current.y - previous.y) < 0.25
+        ? stableFrames + 1
+        : 0;
+      if (stableFrames >= 12) break;
+      previous = current;
+    }
+    if (stableFrames < 12) throw new Error('Edge interaction path did not settle');
+
+    const edge = element.closest('.react-flow__edge');
+    for (const position of [0.5, 0.55, 0.45, 0.6, 0.4, 0.65, 0.35, 0.7, 0.3, 0.75, 0.25]) {
+      const point = readPoint(position);
+      const hit = document.elementFromPoint(point.x, point.y);
+      if (edge && hit && edge.contains(hit)) return point;
+    }
+    throw new Error('Edge interaction path has no uniquely hittable point near its midpoint');
+  });
+}
+
 test('manual Fit encloses the graph inside whichever desktop side rails are open', async ({ app }) => {
   await app.setViewportSize({ width: 1440, height: 900 });
   await loadGraphLibraryEntry(app, 'Hierarchical Deep Research', 'library-hierarchical-deep-research');
@@ -119,6 +155,11 @@ test('node and edge hover feedback stays visible without changing route patterns
   await app.setViewportSize({ width: 1440, height: 900 });
   await loadResearchIntake(app);
 
+  const edge = app.getByTestId('rf__edge-clarify-write-brief');
+  const interactionPath = edge.locator('.react-flow__edge-interaction');
+  await expect(app.getByRole('button', { name: 'Auto-layout graph' })).toBeEnabled();
+  await settledPathHitPoint(interactionPath);
+
   const node = app.getByTestId('rf__node-clarify-request');
   const shell = node.locator('.contract-node-shell');
   const restingShadow = await shell.evaluate((element) => getComputedStyle(element).boxShadow);
@@ -129,21 +170,10 @@ test('node and edge hover feedback stays visible without changing route patterns
   })).toEqual({ scale: 1.01, lift: -1 });
   expect(await shell.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe(restingShadow);
 
-  const edge = app.getByTestId('rf__edge-clarify-write-brief');
-  const interactionPath = edge.locator('.react-flow__edge-interaction');
   const visiblePath = edge.locator('.routing-edge__path');
   const hoverHalo = edge.locator('.routing-edge__hover-halo');
   const dashPattern = await visiblePath.evaluate((element) => getComputedStyle(element).strokeDasharray);
-  const midpoint = await interactionPath.evaluate((element) => {
-    const path = element as SVGPathElement;
-    const point = path.getPointAtLength(path.getTotalLength() / 2);
-    const matrix = path.getScreenCTM();
-    if (!matrix) throw new Error('Edge interaction path has no screen transform');
-    return {
-      x: point.x * matrix.a + point.y * matrix.c + matrix.e,
-      y: point.x * matrix.b + point.y * matrix.d + matrix.f,
-    };
-  });
+  const midpoint = await settledPathHitPoint(interactionPath);
   await app.mouse.move(midpoint.x, midpoint.y);
   await expect.poll(() => hoverHalo.evaluate((element) => Number(getComputedStyle(element).opacity)))
     .toBeGreaterThan(0.8);
@@ -175,16 +205,7 @@ test('node and edge hover feedback stays visible without changing route patterns
     return { scale: transform.a, lift: transform.f };
   })).toEqual({ scale: 1.01, lift: -1 });
 
-  const fittedMidpoint = await interactionPath.evaluate((element) => {
-    const path = element as SVGPathElement;
-    const point = path.getPointAtLength(path.getTotalLength() / 2);
-    const matrix = path.getScreenCTM();
-    if (!matrix) throw new Error('Edge interaction path has no screen transform');
-    return {
-      x: point.x * matrix.a + point.y * matrix.c + matrix.e,
-      y: point.x * matrix.b + point.y * matrix.d + matrix.f,
-    };
-  });
+  const fittedMidpoint = await settledPathHitPoint(interactionPath);
   await app.mouse.move(fittedMidpoint.x, fittedMidpoint.y);
   await expect.poll(() => hoverHalo.evaluate((element) => Number(getComputedStyle(element).opacity)))
     .toBeGreaterThan(0.8);

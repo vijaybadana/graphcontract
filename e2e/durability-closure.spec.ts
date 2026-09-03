@@ -51,10 +51,22 @@ test('State, Checkpoint, Store, and Runtime remain distinct capability controls'
     },
   ], 'E2E durability distinction.');
 
-  await expect(app.getByRole('button', { name: /State: Enabled, 1 field/ })).toBeVisible();
-  await expect(app.getByRole('button', { name: /Checkpoint: Enabled, Durable thread required/ })).toBeVisible();
-  await expect(app.getByRole('button', { name: /Store: Available, Direct Step R\/W available/ })).toBeVisible();
-  await expect(app.getByRole('button', { name: /Runtime: Text, Graph-level mode/ })).toBeVisible();
+  const settings = app.getByRole('tablist', { name: 'Durability settings' });
+  await expect(app.getByRole('checkbox', { name: 'State enabled' })).toBeChecked();
+  await expect(app.getByRole('textbox', { name: 'State fields' })).toHaveValue('messages');
+
+  await settings.getByRole('tab', { name: 'Checkpoint' }).click();
+  await expect(app.getByRole('checkbox', { name: 'Checkpoint enabled' })).toBeChecked();
+  await expect(app.getByRole('checkbox', { name: 'Durable thread required' })).toBeChecked();
+
+  await settings.getByRole('tab', { name: 'Store' }).click();
+  await expect(app.getByRole('checkbox', { name: 'Store available' })).toBeChecked();
+  await expect(app.getByRole('textbox', { name: 'Store namespace' })).toHaveValue('preferences');
+
+  await settings.getByRole('tab', { name: 'Runtime' }).click();
+  const runtimeSettings = app.getByRole('tabpanel', { name: 'runtime graph settings' });
+  await expect(runtimeSettings.getByRole('combobox', { name: 'Runtime mode' })).toHaveValue('text');
+  await expect(runtimeSettings.getByRole('status')).toContainText('Runtime mode applies at graph level');
 });
 
 test('a subgraph inherits capability scope until an explicit override replaces it', async ({ app }) => {
@@ -114,7 +126,7 @@ test('Retry remains internal metadata rather than creating a topology loop', asy
   expect(after.graph.edges.some((edge) => edge.loopCap !== undefined)).toBe(false);
   expect(after.graph.nodes.find((node) => node.id === 'billing')?.retry).toMatchObject({ maxAttempts: 3 });
   await expect(app.getByTestId('rf__node-billing').getByLabel('Internal retry policy')).toBeVisible();
-  await expect(app.locator('[aria-label^="Loop "]')).toHaveCount(0);
+  await expect(app.getByRole('application').locator('[aria-label^="Loop "]')).toHaveCount(0);
 });
 
 test('WebMCP remains exactly three review-only tools and cannot propose a frozen durability change', async ({ app }) => {

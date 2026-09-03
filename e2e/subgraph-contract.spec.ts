@@ -51,7 +51,7 @@ test('subgraph inspector resizes, assigns membership, and focuses the container'
     .getByTestId('rf__node-research-supervisor')
     .locator('.subgraph-node-header')
     .click({ position: { x: 24, y: 20 } });
-  await expect(app.getByRole('heading', { name: 'Subgraph details' })).toBeVisible();
+  await expect(app.getByRole('heading', { name: 'Research Supervisor', exact: true })).toBeVisible();
   await app.getByRole('spinbutton', { name: 'Width' }).fill('900');
   await app.getByRole('spinbutton', { name: 'Height' }).fill('420');
 
@@ -59,7 +59,7 @@ test('subgraph inspector resizes, assigns membership, and focuses the container'
   expect(graph.subgraphs[0].dimensions).toEqual({ width: 900, height: 420 });
 
   const transformBefore = await app.locator('.react-flow__viewport').getAttribute('style');
-  await app.getByRole('button', { name: 'Focus subgraph' }).click();
+  await app.getByRole('button', { name: 'Focus', exact: true }).click();
   await expect
     .poll(() => app.locator('.react-flow__viewport').getAttribute('style'))
     .not.toBe(transformBefore);
@@ -100,6 +100,6 @@ test('freezing a subgraph contract locks collapse, resize, membership, and node 
   await expect(app.getByRole('button', { name: /Add selected nodes/ })).toBeDisabled();
 
   await app.getByTestId('rf__node-research-supervisor-agent').click();
-  await expect(app.getByLabel('Label', { exact: true })).toBeDisabled();
+  await expect(app.getByLabel('Name', { exact: true })).toBeDisabled();
   expect((await readGraph(app)).status).toBe('frozen');
 });

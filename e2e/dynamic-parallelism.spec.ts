@@ -171,8 +171,10 @@ test('confirmed Send ×N demo keeps one template and one Merge in design while e
   await expect(app.getByLabel('Merge aggregate state')).toHaveValue('evidence');
   await expect(app.getByText('Waits for dynamic Send inputs. It is a structural junction, not a work Step.')).toBeVisible();
 
-  await app.getByTestId('rf__edge-parallel-send-search').click();
-  await expect(app.getByRole('heading', { name: 'Edge routing' })).toBeVisible();
+  const sendEdge = app.getByTestId('rf__edge-parallel-send-search');
+  await sendEdge.focus();
+  await sendEdge.press('Enter');
+  await expect(app.getByRole('heading', { name: 'Routing' })).toBeVisible();
   await expect(app.getByText('Send ×N · dynamic worker template')).toBeVisible();
   await expect(app.getByLabel('Send payload label')).toHaveValue('query');
   await expect(app.getByLabel('Send payload schema reference')).toHaveValue('ResearchQuery');
@@ -182,7 +184,9 @@ test('confirmed Send ×N demo keeps one template and one Merge in design while e
 test('invalid Send payload and Merge reducer stay visibly invalid and cannot freeze the design contract', async ({ app }) => {
   await loadParallelResearchDemo(app);
 
-  await app.getByTestId('rf__edge-parallel-send-search').click();
+  const sendEdge = app.getByTestId('rf__edge-parallel-send-search');
+  await sendEdge.focus();
+  await sendEdge.press('Enter');
   await app.getByLabel('Send payload label').fill('');
   await expect(app.locator('[data-edge-id="parallel-send-search"]')).toHaveAttribute('data-invalid', 'true');
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
@@ -217,11 +221,15 @@ test('Design, Runtime, Proposal, and Scenario remain read-only presentations ove
   await expect(app.locator('.canvas-instruction-strip')).toHaveCount(0);
   await expect(app.locator('.runtime-instance-node')).toHaveCount(3);
   await expect(app.locator('.runtime-instance-node[data-template-node-id="search-evidence"]')).toHaveCount(3);
-  await expect(app.getByText('Search evidence · query 1', { exact: true })).toBeVisible();
+  await expect(
+    app.getByTestId('rf__node-runtime:research-worker-1').getByText('Search evidence · query 1', { exact: true }),
+  ).toBeVisible();
   await expect(app.getByRole('button', { name: 'Agent', exact: true })).toBeDisabled();
 
-  await app.getByTestId('rf__node-runtime:research-worker-1').click();
-  await expect(app.getByText('Observed trace projection — read-only. This instance is not part of the accepted graph and cannot change the contract.')).toBeVisible();
+  const runtimePanel = app.locator('.workspace-inspector-panel');
+  await expect(runtimePanel.getByRole('button', { name: 'Search evidence · query 1' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(runtimePanel.getByRole('heading', { name: 'Selected instance' })).toBeVisible();
+  await expect(runtimePanel.getByText('None · projection only', { exact: true })).toBeVisible();
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(acceptedBefore);
 
   await mode('Design').click();
@@ -330,9 +338,9 @@ test('three review-only tools preserve P3 proposal authority and frozen Send sce
     scenario.traversedEdges.filter((edge) => edge.id === 'parallel-reflect-refine').length,
   ).sort()).toEqual([0, 1, 2]);
 
-  const showInspector = app.getByRole('button', { name: 'Show inspector' });
-  if (await showInspector.count()) await showInspector.click();
-  await app.getByRole('tab', { name: 'Scenarios (3)' }).click();
+  await expect(app.getByRole('radio', { name: 'Scenario', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(app.getByRole('heading', { name: 'Scenarios' })).toBeVisible();
+  await expect(app.getByRole('link', { name: 'Download graph-contract.json' })).toBeVisible();
   const graphDownload = JSON.parse(await downloadText(app, 'graph-contract.json')) as {
     nodes: Array<{ id: string }>;
     edges: Array<{ id: string; mode: string; loopCap?: number; send?: { multiplicity: string; payloadSchemaRef?: string } }>;

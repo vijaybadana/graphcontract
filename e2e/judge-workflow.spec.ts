@@ -191,8 +191,8 @@ test('J01 — read, propose, and reject leaves the accepted complex graph untouc
     name: flagship.title,
     status: 'draft',
   });
-  expect(accepted.graph.nodes).toHaveLength(7);
-  expect(accepted.graph.edges).toHaveLength(8);
+  expect(accepted.graph.nodes).toHaveLength(12);
+  expect(accepted.graph.edges).toHaveLength(12);
   expect(accepted.graph.subgraphs).toEqual([
     expect.objectContaining({ id: 'research-cell' }),
   ]);
@@ -217,13 +217,14 @@ test('J01 — read, propose, and reject leaves the accepted complex graph untouc
     'true',
   );
   await expect(app.getByRole('region', { name: 'Graph overview' })).toBeVisible();
-  const proposedOverviewCanvas = app
-    .getByRole('region', { name: 'Graph overview' })
-    .locator('.proposal-overview-graph')
-    .first()
-    .locator('.proposal-overview-canvas');
-  await expect(proposedOverviewCanvas).toContainText(candidateLabel);
-  await expect(app.getByTestId(`rf__node-${flagship.nodeId}`)).toContainText(flagship.acceptedLabel);
+  await app.getByRole('button', { name: `Review updated ${flagship.nodeId}` }).click();
+  const changedFields = app.getByLabel(`Changed fields for ${flagship.nodeId}`);
+  await expect(changedFields).toContainText(flagship.acceptedLabel);
+  await expect(changedFields).toContainText(candidateLabel);
+  await app.getByRole('button', { name: 'Back to proposal' }).click();
+  await expect(
+    app.locator('.workspace-canvas').getByTestId(`rf__node-${flagship.nodeId}`),
+  ).toContainText(candidateLabel);
   const pending = await readAcceptedGraph(app);
   expect(pending.graph).toEqual(accepted.graph);
   expect(pending.pendingProposal).toMatchObject({
@@ -257,12 +258,12 @@ test('J02 — corrected reproposal compares stable identity, approves once, and 
   await proposeFlagshipLabel(app, correctedLabel, 'J02 corrected agent proposal.');
   const comparison = app.getByRole('region', { name: 'Graph overview' });
   await expect(comparison.getByRole('heading', { name: 'Graph overview' })).toBeVisible();
-  const identityDiff = comparison.getByLabel(`Changed values for ${flagship.nodeId}`);
+  await comparison.getByRole('button', { name: `Review updated ${flagship.nodeId}` }).click();
+  const identityDiff = app.getByLabel(`Changed fields for ${flagship.nodeId}`);
   await expect(identityDiff).toContainText(flagship.acceptedLabel);
   await expect(identityDiff).toContainText(correctedLabel);
-  await expect(comparison.getByLabel('Proposal diff summary')).toContainText(
-    `updated ${flagship.nodeId} (label)`,
-  );
+  await app.getByRole('button', { name: 'Back to proposal' }).click();
+  await expect(comparison.getByLabel('Proposal diff summary')).toContainText(`updated ${flagship.nodeId} (label)`);
 
   const approve = app.getByRole('button', { name: 'Approve' });
   await expect(approve).toBeEnabled();
@@ -303,7 +304,7 @@ test('J03 — selected path emphasis and its artifact describe one accepted revi
   await expectExactScenarioEmphasis(app, frozen.graph, selected!);
   expect((await readAcceptedGraph(app)).graph).toEqual(frozen.graph);
 
-  const filename = `graph-test-${selected!.id}.json`;
+  const filename = 'graph-test-scenarios.json';
   const artifact = JSON.parse(await downloadText(app, filename)) as ScenarioArtifact;
   expect(artifact).toMatchObject({
     graphId: frozen.graph.id,
@@ -311,9 +312,8 @@ test('J03 — selected path emphasis and its artifact describe one accepted revi
     graphUpdatedAt: frozen.graph.updatedAt,
     graphSchemaVersion: '6',
   });
-  expect(artifact.scenarios).toEqual([selected]);
-  expect(artifact.scenarios[0]?.orderedPath).toEqual(selected!.orderedPath);
-  expect(artifact.scenarios[0]?.traversedEdges).toEqual(selected!.traversedEdges);
+  expect(artifact.scenarios).toEqual(scenarios);
+  expect(artifact.scenarios.find((scenario) => scenario.id === selected!.id)).toEqual(selected);
 });
 
 test('J04 — approved frozen truth, scenarios, and downloads stay consistent after reload', async ({ app }) => {
@@ -323,7 +323,7 @@ test('J04 — approved frozen truth, scenarios, and downloads stay consistent af
   );
   const selected = scenarios[0]!;
   await selectScenario(app, selected);
-  const filename = `graph-test-${selected.id}.json`;
+  const filename = 'graph-test-scenarios.json';
   const beforeReload = JSON.parse(await downloadText(app, filename)) as ScenarioArtifact;
 
   await app.reload();
@@ -359,14 +359,14 @@ test('J04 — approved frozen truth, scenarios, and downloads stay consistent af
     graphId: reloaded.graph.id,
     graphUpdatedAt: reloaded.graph.updatedAt,
   });
-  expect(afterReload.scenarios).toHaveLength(1);
-  expect(afterReload.scenarios[0]).toMatchObject({
+  expect(afterReload.scenarios).toEqual(scenarios);
+  expect(afterReload.scenarios.find((scenario) => scenario.id === selected.id)).toMatchObject({
     id: selected.id,
     name: selected.name,
     orderedPath: selected.orderedPath,
     expectedTerminalOutcome: selected.expectedTerminalOutcome,
   });
-  expect(afterReload.scenarios[0]?.traversedEdges.map((edge) => edge.id)).toEqual(
+  expect(afterReload.scenarios.find((scenario) => scenario.id === selected.id)?.traversedEdges.map((edge) => edge.id)).toEqual(
     selected.traversedEdges.map((edge) => edge.id),
   );
 

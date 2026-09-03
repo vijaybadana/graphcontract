@@ -142,7 +142,7 @@ describe('layoutWorkflowGraph', () => {
     expect(byId.get('worker')!.position.y).toBeGreaterThanOrEqual(0);
   });
 
-  it('uses a compact collapsed footprint without discarding expanded dimensions', async () => {
+  it('round-trips exact expanded dimensions through collapse and reopen unless recomputation is explicit', async () => {
     const expandedDimensions = { width: 980, height: 620 };
     const input = graph(
       [
@@ -154,10 +154,16 @@ describe('layoutWorkflowGraph', () => {
         { id: 'enter', source: 'start', target: 'inside', mode: 'normal' },
         { id: 'leave', source: 'inside', target: 'end', mode: 'normal' },
       ],
-      [{ id: 'cell', label: 'Cell', position: { x: 500, y: 500 }, dimensions: expandedDimensions, collapsed: true }],
+      [{ id: 'cell', label: 'Cell', position: { x: 500, y: 500 }, dimensions: expandedDimensions, collapsed: false }],
     );
 
-    const collapsed = await layoutWorkflowGraph(input);
+    const expanded = await layoutWorkflowGraph(input);
+    expect(expanded.subgraphs[0]!.dimensions).toEqual(expandedDimensions);
+
+    const collapsed = await layoutWorkflowGraph({
+      ...expanded,
+      subgraphs: expanded.subgraphs.map((subgraph) => ({ ...subgraph, collapsed: true })),
+    });
     const collapsedNodeById = new Map(collapsed.nodes.map((node) => [node.id, node]));
     expect(collapsedNodeById.get('start')!.position.x).toBeLessThan(collapsed.subgraphs[0]!.position.x);
     expect(collapsed.subgraphs[0]!.position.x).toBeLessThan(collapsedNodeById.get('end')!.position.x);
@@ -167,9 +173,12 @@ describe('layoutWorkflowGraph', () => {
       ...collapsed,
       subgraphs: collapsed.subgraphs.map((subgraph) => ({ ...subgraph, collapsed: false })),
     });
-    expect(reopened.subgraphs[0]!.dimensions.width).toBeGreaterThanOrEqual(CONTRACT_NODE_WIDTH + 72);
-    expect(reopened.subgraphs[0]!.dimensions.height).toBeGreaterThanOrEqual(CONTRACT_NODE_HEIGHT + 128);
+    expect(reopened.subgraphs[0]!.dimensions).toEqual(expandedDimensions);
     expect(reopened.nodes.find((node) => node.id === 'inside')!.parentId).toBe('cell');
+
+    const recomputed = await layoutWorkflowGraph(reopened, { recomputeSubgraphDimensions: true });
+    expect(recomputed.subgraphs[0]!.dimensions.width).toBeLessThan(expandedDimensions.width);
+    expect(recomputed.subgraphs[0]!.dimensions.height).toBeLessThan(expandedDimensions.height);
   });
 
   it('adapts recursive compounds with stable ports and parent-relative geometry', async () => {

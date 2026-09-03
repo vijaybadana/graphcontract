@@ -59,6 +59,8 @@ export type WorkflowLayoutOptions = {
   authoredSubgraphIds?: ReadonlySet<string>;
   /** Keep an authored fixture byte-for-byte, including all geometry. */
   preserveGraphGeometry?: boolean;
+  /** Deliberately replace stored expanded subgraph dimensions with computed bounds. */
+  recomputeSubgraphDimensions?: boolean;
 };
 
 const elk = new ELK();
@@ -372,6 +374,7 @@ function applyWorkflowGeometry(
   graph: WorkflowGraph,
   geometry: Map<string, CompoundLayoutGeometry>,
   authoredGeometry: ReadonlyMap<string, AuthoredSubgraphGeometry>,
+  options: WorkflowLayoutOptions,
 ): WorkflowGraph {
   return {
     ...graph,
@@ -386,14 +389,22 @@ function applyWorkflowGeometry(
     subgraphs: graph.subgraphs.map((subgraph) => {
       const authored = authoredGeometry.get(subgraph.id);
       const laidOut = geometry.get(subgraph.id);
+      const computedDimensions = authored?.dimensions ?? laidOut?.dimensions;
       return {
         ...subgraph,
         position: laidOut ? positionAtRoot(laidOut) : subgraph.position,
         // Closing a container changes only its projected footprint. Retain
-        // canonical expanded dimensions so reopening cannot destroy geometry.
+        // canonical expanded dimensions so structural layout and reopening
+        // cannot destroy authored or resized geometry. Explicit auto-layout
+        // can opt into replacing those dimensions with fresh computed bounds.
         dimensions: subgraph.collapsed
           ? subgraph.dimensions
-          : authored?.dimensions ?? laidOut?.dimensions ?? subgraph.dimensions,
+          : options.recomputeSubgraphDimensions
+            ? computedDimensions ?? subgraph.dimensions
+            : {
+                width: Math.max(subgraph.dimensions.width, computedDimensions?.width ?? 0),
+                height: Math.max(subgraph.dimensions.height, computedDimensions?.height ?? 0),
+              },
       };
     }),
   };
@@ -426,5 +437,5 @@ export async function layoutWorkflowGraph(
     }
   }
   const geometry = await geometryPromise;
-  return applyWorkflowGeometry(graph, geometry, input.authoredGeometry);
+  return applyWorkflowGeometry(graph, geometry, input.authoredGeometry, options);
 }

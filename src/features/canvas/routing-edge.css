@@ -97,8 +97,6 @@
 .routing-edge-label--fallback { color: var(--gc-route-fallback); }
 .routing-edge-label--loop { color: var(--gc-route-loop); }
 .routing-edge-label--invalid { color: var(--gc-route-invalid); }
-.routing-edge-label--frozen { color: var(--gc-route-proxy); }
-
 .routing-edge-label--frozen .routing-edge-label__surface {
   border-style: dashed;
   opacity: 1;

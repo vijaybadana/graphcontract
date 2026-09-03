@@ -409,7 +409,7 @@ describe('projectGraphToCanvas', () => {
       id: 'enter-approve',
       source: 'start',
       target: 'approve',
-      mode: 'conditional',
+      mode: 'normal',
       label: 'shortcut',
     });
     graph.relationships = [
@@ -448,7 +448,7 @@ describe('projectGraphToCanvas', () => {
       (edge) => isCanvasSystemRelationshipEdge(edge) && edge.data.relationship.id === 'unrelated-archive',
     )!;
 
-    expect(domainEdgeIdsForCanvasEdge(entryProxy)).toEqual(['enter-review', 'enter-approve']);
+    expect(domainEdgeIdsForCanvasEdge(entryProxy)).toEqual(['enter-approve', 'enter-review']);
     expect(entryProxy).toMatchObject({
       className: expect.stringContaining('scenario-state--active'),
       data: { presentation: { scenarioState: 'active' } },
@@ -583,6 +583,14 @@ describe('projectGraphToCanvas', () => {
 
   it('projects routing semantics into reusable edge presentation without storing loop mode', () => {
     const graph = structuredClone(researchIntakeRoutingGraph);
+    graph.edges.find((edge) => edge.id === 'clarify-write-brief')!.provenance = {
+      representation: 'runtime-generated',
+      evidence: {
+        source: 'Focused projection fixture',
+        evidenceClass: 'observed-route',
+        confidence: 'high',
+      },
+    };
     const canvas = projectGraphToCanvas(graph, null);
     const command = canvas.edges.find((edge) => edge.id === 'clarify-write-brief')!;
     const conditional = canvas.edges.find((edge) => edge.id === 'supervisor-final-report')!;
@@ -593,8 +601,20 @@ describe('projectGraphToCanvas', () => {
     expect(topologyDerivedLoopEdgeIds(graph)).toEqual(new Set(['researcher-continue']));
     expect(command).toMatchObject({
       type: 'routing',
-      markerEnd: { type: 'arrowclosed' },
-      data: { presentation: { mode: 'command', loop: false, invalid: false, frozen: false } },
+      markerEnd: { type: 'arrowclosed', color: 'var(--gc-route-command)' },
+      style: {
+        stroke: 'var(--gc-route-command)',
+        strokeDasharray: '7 5',
+      },
+      data: {
+        presentation: {
+          mode: 'command',
+          loop: false,
+          invalid: false,
+          frozen: false,
+          provenance: 'runtime-generated',
+        },
+      },
     });
     expect(conditional.data.presentation.mode).toBe('conditional');
     expect(fallback.data.presentation.mode).toBe('fallback');
@@ -1064,7 +1084,7 @@ describe('projectGraphToCanvas', () => {
     const graph = graphWithSubgraph(true);
     graph.edges = [
       ...graph.edges,
-      { id: 'enter-approve', source: 'start', target: 'approve', mode: 'conditional' },
+      { id: 'enter-approve', source: 'start', target: 'approve', mode: 'normal' },
     ];
 
     const canvas = projectGraphToCanvas(graph, null);
@@ -1073,10 +1093,79 @@ describe('projectGraphToCanvas', () => {
     );
 
     expect(incoming).toBeDefined();
-    expect(domainEdgeIdsForCanvasEdge(incoming!)).toEqual(['enter-review', 'enter-approve']);
+    expect(domainEdgeIdsForCanvasEdge(incoming!)).toEqual(['enter-approve', 'enter-review']);
     expect(canReconnectCanvasEdge(incoming!)).toBe(false);
     expect(isCanvasEdgeSelected(incoming!, ['enter-approve'])).toBe(true);
     expect(isCanvasEdgeSelected(incoming!, ['subgraph-proxy:start:review-group'])).toBe(false);
+
+    const reversed = projectGraphToCanvas(
+      { ...graph, edges: [...graph.edges].reverse() },
+      null,
+    ).edges.find(
+      (edge) => edge.source === 'start' && edge.target === 'review-group',
+    );
+    expect(reversed).toEqual(incoming);
+  });
+
+  it('projects distinct collapsed route semantics deterministically in either insertion order', () => {
+    const graph = graphWithSubgraph(true);
+    graph.status = 'frozen';
+    const enterReview = graph.edges.find((edge) => edge.id === 'enter-review')!;
+    enterReview.mode = 'command';
+    enterReview.label = 'review';
+    enterReview.provenance = { representation: 'runtime-generated' };
+    graph.edges.push({
+      id: 'enter-approve',
+      source: 'start',
+      target: 'approve',
+      mode: 'fallback',
+      provenance: { representation: 'external-orchestration' },
+    });
+
+    const projectIncoming = (candidate: WorkflowGraph) =>
+      projectGraphToCanvas(candidate, null).edges
+        .filter((edge) => isSubgraphProxyEdge(edge) && edge.source === 'start')
+        .map((edge) => ({
+          id: edge.id,
+          domainEdgeIds: domainEdgeIdsForCanvasEdge(edge),
+          presentation: edge.data.presentation,
+          style: edge.style,
+          markerEnd: edge.markerEnd,
+        }));
+    const projected = projectIncoming(graph);
+    const reversed = projectIncoming({ ...graph, edges: [...graph.edges].reverse() });
+
+    expect(reversed).toEqual(projected);
+    expect(projected).toEqual([
+      expect.objectContaining({
+        id: 'subgraph-proxy:start:review-group:fallback%3Aroute%3Aexternal-orchestration',
+        domainEdgeIds: ['enter-approve'],
+        presentation: expect.objectContaining({
+          mode: 'fallback',
+          provenance: 'external-orchestration',
+          frozen: true,
+        }),
+        style: expect.objectContaining({
+          stroke: 'var(--gc-route-fallback)',
+          strokeDasharray: '6 5',
+        }),
+        markerEnd: { type: 'arrowclosed', color: 'var(--gc-route-fallback)' },
+      }),
+      expect.objectContaining({
+        id: 'subgraph-proxy:start:review-group:command%3Aroute%3Aruntime-generated',
+        domainEdgeIds: ['enter-review'],
+        presentation: expect.objectContaining({
+          mode: 'command',
+          provenance: 'runtime-generated',
+          frozen: true,
+        }),
+        style: expect.objectContaining({
+          stroke: 'var(--gc-route-command)',
+          strokeDasharray: '7 5',
+        }),
+        markerEnd: { type: 'arrowclosed', color: 'var(--gc-route-command)' },
+      }),
+    ]);
   });
 
   it('retains per-domain-edge review states and exposes mixed state on a collapsed proxy', () => {
@@ -1085,7 +1174,7 @@ describe('projectGraphToCanvas', () => {
       id: 'enter-approve',
       source: 'start',
       target: 'approve',
-      mode: 'conditional',
+      mode: 'normal',
       label: 'approve',
     });
     const proposal = createProposal(graph, {
@@ -1103,7 +1192,7 @@ describe('projectGraphToCanvas', () => {
       (edge) => isSubgraphProxyEdge(edge) && edge.source === 'start',
     )!;
 
-    expect(domainEdgeIdsForCanvasEdge(incoming)).toEqual(['enter-review', 'enter-approve']);
+    expect(domainEdgeIdsForCanvasEdge(incoming)).toEqual(['enter-approve', 'enter-review']);
     expect(incoming.data.review).toEqual({
       aggregate: 'mixed',
       byDomainEdgeId: {

@@ -78,7 +78,7 @@ test('1024 compact workspace swaps palette and inspector instead of overlapping 
   await expect(projection.getByRole('radio', { name: 'Proposal', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(app.getByRole('heading', { name: 'Proposal' })).toBeVisible();
   await expect(app.getByRole('heading', { name: 'Graph overview' })).toBeVisible();
-  await expect(app.getByRole('button', { name: 'Collapse inspector' })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Collapse proposal panel' })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Open Palette' })).toBeVisible();
   await app.getByRole('button', { name: 'Reject' }).click();
   await expectNoHorizontalPageOverflow(app);
@@ -113,7 +113,10 @@ test('390 compact freeze and unfreeze retain accessible action names', async ({ 
   await expect(scenario).toBeVisible();
   await scenario.click();
   await expect(scenario).toHaveAttribute('aria-pressed', 'true');
-  await expect(app.getByLabel(/^Downloads for Path /)).toBeVisible();
+  await expect(scenario).toHaveAttribute('aria-expanded', 'true');
+  await expect(app.getByLabel('Path 1 details')).toBeVisible();
+  await expect(app.getByLabel('Contract downloads')).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Collapse scenarios panel' })).toBeVisible();
   await freeze.click();
   await expect(freeze).toHaveAccessibleName('Confirm and freeze contract; currently draft');
   await expectNoHorizontalPageOverflow(app);
@@ -210,15 +213,15 @@ test('keyboard duplicate, delete, undo, and redo keep graph counts truthful', as
 test('palette search filters components and announces a useful empty state', async ({ app }) => {
   const search = app.getByRole('searchbox', { name: 'Search components' });
   await search.fill('human');
-  await expect(app.getByRole('button', { name: 'Human' })).toBeVisible();
+  await expect(app.getByRole('button', { name: 'Human', exact: true })).toBeVisible();
   await expect(app.getByRole('button', { name: 'Agent', exact: true })).toHaveCount(0);
   await expect(app.getByText('1 component and 0 references shown', { exact: true })).toBeAttached();
 
   await search.fill('not-a-component');
   await expect(
-    app.getByRole('status').filter({ hasText: 'No components match “not-a-component”.' }),
+    app.getByRole('status').filter({ hasText: 'No components or references match “not-a-component”.' }),
   ).toBeVisible();
-  await expect(app.getByText('0 of 9 components shown', { exact: true })).toBeAttached();
+  await expect(app.getByText('0 components and 0 references shown', { exact: true })).toBeAttached();
 });
 
 test('node and edge focus targets expose semantic identity', async ({ app }) => {
@@ -267,7 +270,16 @@ test('frozen workspace removes canvas instructions and disables authoring contro
   await expect(app.getByRole('button', { name: 'Duplicate selection' })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Delete selection' })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Redo' })).toBeDisabled();
-  await expect(app.locator('.routing-edge-label[data-frozen="true"]')).toHaveCount(9);
+  const frozenEdges = app.getByRole('application').locator('.react-flow__edge[role="group"]');
+  await expect(frozenEdges).toHaveCount(9);
+  for (let index = 0; index < 9; index += 1) {
+    await expect(frozenEdges.nth(index)).toHaveAccessibleName(/^Edge from /);
+  }
+  const frozenRouteLabels = app.locator('.routing-edge-label');
+  await expect(frozenRouteLabels).toHaveCount(6);
+  for (let index = 0; index < 6; index += 1) {
+    await expect(frozenRouteLabels.nth(index)).toHaveAccessibleName(/edge/i);
+  }
   await expect(app.getByLabel('Graph status')).toContainText('5 scenarios');
   await expect(app.getByLabel('Graph status')).toContainText('Contract frozen');
 });
@@ -299,7 +311,7 @@ test('reduced-motion preference removes workspace animation and transitions', as
 test('status counts and global modes remain keyboard reachable', async ({ app }) => {
   await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
   await expect(app.getByLabel('Graph status')).toContainText('8 edges');
-  await expect(app.getByLabel('Graph status')).toContainText('0 scenarios');
+  await expect(app.getByLabel('Graph status')).toContainText('3 scenarios');
   await expect(app.getByLabel('Graph status')).toContainText('Ready to freeze');
 
   await app.getByTestId('rf__node-classifier').click();

@@ -184,7 +184,7 @@ test('R01 corrupt storage recovers to a truthful, usable default workspace', asy
   await expect(app.locator('.workspace-contract-state')).toHaveText('Valid draft');
   await expect(app.getByLabel('Graph status')).toContainText('7 nodes');
   await expect(app.getByLabel('Graph status')).toContainText('8 edges');
-  await expect(app.getByLabel('Graph status')).toContainText('0 scenarios');
+  await expect(app.getByLabel('Graph status')).toContainText('3 scenarios');
   await expect(app.getByLabel('Graph status')).toContainText('Ready to freeze');
   await expect(app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' })).toBeEnabled();
   await expect(app.getByTestId('rf__node-classifier')).toBeVisible();
@@ -241,10 +241,12 @@ test('R02 representative v4 workspace migrates, remains editable, and persists a
     state: { graph: { schemaVersion: '6', name: 'Recovered legacy workspace' }, proposal: null },
   });
 
-  await app.getByTestId('rf__node-classifier').click();
-  const label = app.getByLabel('Label', { exact: true });
-  await expect(label).toBeEnabled();
-  await label.fill('Edited migrated classifier');
+  const classifier = app.getByTestId('rf__node-classifier');
+  await classifier.focus();
+  await classifier.press('Enter');
+  const name = app.getByRole('textbox', { name: 'Name', exact: true });
+  await expect(name).toBeEnabled();
+  await name.fill('Edited migrated classifier');
   await expect.poll(async () =>
     (await readGraph(app)).graph.nodes.find((node) => node.id === 'classifier')?.label,
   ).toBe('Edited migrated classifier');
@@ -324,13 +326,17 @@ test('R04 interrupted pending proposal reloads locked, rejects cleanly, and rest
   await expect(app.getByText('Interrupted proposal recovery review.', { exact: true })).toBeVisible();
   const comparison = app.getByRole('region', { name: 'Graph overview' });
   await expect(comparison).toBeVisible();
-  await expect(comparison.getByLabel('Changed values for classifier', { exact: true })).toContainText(
-    'Interrupted candidate classifier',
-  );
+  await comparison.getByRole('button', { name: 'Review updated classifier' }).click();
+  const changedFields = app.getByLabel('Changed fields for classifier');
+  await expect(changedFields).toContainText('Classifier Agent');
+  await expect(changedFields).toContainText('Interrupted candidate classifier');
+  await app.getByRole('button', { name: 'Back to proposal' }).click();
   await expect(comparison.locator('.proposal-overview-canvas').last()).toContainText(
     'Interrupted candidate classifier',
   );
-  await expect(app.getByTestId('rf__node-classifier').getByText('Classifier Agent', { exact: true })).toBeVisible();
+  await expect(
+    app.locator('.workspace-canvas').getByTestId('rf__node-classifier'),
+  ).toContainText('Interrupted candidate classifier');
   await expect(app.getByRole('button', { name: 'Task', exact: true })).toBeDisabled();
   await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeDisabled();
   await expect(app.locator('.workspace-freeze-button')).toBeDisabled();
@@ -343,10 +349,12 @@ test('R04 interrupted pending proposal reloads locked, rejects cleanly, and rest
   await expect(app.getByRole('button', { name: 'Reset example graph' })).toBeEnabled();
   await expect(app.getByRole('button', { name: 'Confirm and freeze contract; currently draft' })).toBeEnabled();
 
-  await app.getByTestId('rf__node-classifier').click();
-  const label = app.getByLabel('Label', { exact: true });
-  await expect(label).toBeEnabled();
-  await label.fill('Recovered accepted classifier');
+  const classifier = app.getByTestId('rf__node-classifier');
+  await classifier.focus();
+  await classifier.press('Enter');
+  const name = app.getByRole('textbox', { name: 'Name', exact: true });
+  await expect(name).toBeEnabled();
+  await name.fill('Recovered accepted classifier');
   await expect.poll(async () =>
     (await readGraph(app)).graph.nodes.find((node) => node.id === 'classifier')?.label,
   ).toBe('Recovered accepted classifier');

@@ -12,6 +12,7 @@ import {
   RequestChangesResult,
   WorkspaceCore,
   WorkspaceTransition,
+  withScheduledWorkflowLayout,
 } from '@/src/application/workspace';
 import {
   GraphEdgePatch,
@@ -27,6 +28,7 @@ import {
 } from '@/src/domain';
 import { runtimeFixtureForLoadedDynamicParallelismDemo } from '@/src/application/package-three-demo';
 import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
+import { layoutWorkflowGraph } from '@/src/application/layout-workflow';
 
 export type WorkspaceSelection = {
   nodeIds: string[];
@@ -38,6 +40,10 @@ export type WorkspaceSelection = {
 type WorkspaceStore = WorkspaceCore & {
   /** Ephemeral evidence: deliberately absent from core history and persistence. */
   runtimeProjectionFixture: RuntimeProjectionFixture | null;
+  /** ELK geometry for the current proposal candidate; never accepted or persisted. */
+  proposalPreviewGraph: WorkflowGraph | null;
+  /** Ephemeral accepted-graph layout lifecycle; never persisted as contract data. */
+  layoutPending: boolean;
   selection: WorkspaceSelection;
   clipboardNodeIds: string[];
   past: WorkspaceCore[];
@@ -89,7 +95,7 @@ type WorkspaceStore = WorkspaceCore & {
   freezeGraph: () => FreezeResult;
   unfreezeGraph: () => void;
   resetGraph: () => void;
-  loadGraphLibraryEntry: (entry: Pick<GraphLibraryEntry, 'title' | 'graph'>) => boolean;
+  loadGraphLibraryEntry: (entry: Pick<GraphLibraryEntry, 'title' | 'graph' | 'layout'>) => boolean;
   loadResearchSupervisorDemo: () => void;
   loadResearchIntakeRoutingDemo: () => void;
   loadHumanControlHitlDemo: () => void;
@@ -222,44 +228,107 @@ const workspace = createWorkspaceService({ now: () => new Date().toISOString(), 
 export const useGraphStore = create<WorkspaceStore>()(
   persist(
     (set, get) => {
+      let graphMutationRevision = 0;
+      let layoutRequestRevision = 0;
+      let proposalLayoutRequestRevision = 0;
+      const unresolvedHistoryLayouts = new Set<string>();
+      const graphSignature = (graph: WorkflowGraph) => JSON.stringify(graph);
       const commit = <Result,>(
         transition: WorkspaceTransition<Result>,
         options: { history?: boolean; selection?: WorkspaceSelection } = {},
       ) => {
-        set((current) => ({
-          ...transition.state,
-          selection: options.selection ?? current.selection,
-          notice: transition.notice ?? current.notice,
-          past:
-            transition.changed && options.history !== false
-              ? [...current.past.slice(-49), coreOf(current)]
-              : current.past,
-          future:
-            transition.changed && options.history !== false ? [] : current.future,
-        }));
+        const acceptedGraphChanged = graphSignature(get().graph) !== graphSignature(transition.state.graph);
+        if (acceptedGraphChanged) graphMutationRevision += 1;
+        set((current) => {
+          const proposalChanged = current.proposal?.id !== transition.state.proposal?.id;
+          if (transition.changed && options.history !== false && current.layoutPending) {
+            unresolvedHistoryLayouts.add(graphSignature(current.graph));
+          }
+          return {
+            ...transition.state,
+            selection: options.selection ?? current.selection,
+            notice: transition.notice ?? current.notice,
+            proposalPreviewGraph:
+              proposalChanged || acceptedGraphChanged || !transition.state.proposal
+                ? null
+                : current.proposalPreviewGraph,
+            layoutPending: transition.layoutPromise
+              ? true
+              : acceptedGraphChanged
+                ? false
+                : current.layoutPending,
+            past:
+              transition.changed && options.history !== false
+                ? [...current.past.slice(-49), coreOf(current)]
+                : current.past,
+            future:
+              transition.changed && options.history !== false ? [] : current.future,
+          };
+        });
       };
 
       const currentCore = (): WorkspaceCore => coreOf(get());
       const applyAsyncLayout = (
         sourceGraph: WorkflowGraph,
         layoutPromise: Promise<WorkflowGraph>,
-        selection: WorkspaceSelection,
       ) => {
-        const sourceSignature = JSON.stringify(sourceGraph);
+        const sourceSignature = graphSignature(sourceGraph);
+        const sourceRevision = graphMutationRevision;
+        const requestRevision = ++layoutRequestRevision;
         void layoutPromise.then((graph) => {
           // Never let a completed worker result overwrite an intervening edit.
-          if (JSON.stringify(get().graph) !== sourceSignature) return;
+          if (
+            requestRevision !== layoutRequestRevision ||
+            sourceRevision !== graphMutationRevision ||
+            graphSignature(get().graph) !== sourceSignature
+          ) return;
           commit({
             state: { ...currentCore(), graph, scenarios: [] },
             changed: false,
             notice: 'Workflow arranged with deterministic left-to-right layout.',
             layoutApplied: true,
-          }, { history: false, selection });
+          }, { history: false, selection: selectionForGraph(graph, get().selection) });
+          set({ layoutPending: false });
           set((state) => ({ fitViewRevision: state.fitViewRevision + 1 }));
         }).catch(() => {
-          if (JSON.stringify(get().graph) === sourceSignature) {
-            set({ notice: 'Workflow arrangement could not complete.' });
+          if (requestRevision === layoutRequestRevision && graphSignature(get().graph) === sourceSignature) {
+            set({
+              layoutPending: false,
+              notice: 'Workflow arrangement could not complete.',
+            });
           }
+        });
+      };
+      const commitWithLayout = <Result,>(
+        transition: WorkspaceTransition<Result>,
+        options: { history?: boolean; selection?: WorkspaceSelection } = {},
+      ) => {
+        const selection = options.selection ?? get().selection;
+        commit(transition, { ...options, selection });
+        if (transition.layoutPromise) {
+          applyAsyncLayout(transition.state.graph, transition.layoutPromise);
+        }
+      };
+      const applyAsyncProposalLayout = (
+        proposalId: string,
+        acceptedGraph: WorkflowGraph,
+        layoutPromise: Promise<WorkflowGraph>,
+      ) => {
+        const acceptedUpdatedAt = acceptedGraph.updatedAt;
+        const acceptedGraphId = acceptedGraph.id;
+        const requestRevision = ++proposalLayoutRequestRevision;
+        void layoutPromise.then((candidate) => {
+          const current = get();
+          if (
+            requestRevision !== proposalLayoutRequestRevision ||
+            current.proposal?.id !== proposalId ||
+            current.graph.id !== acceptedGraphId ||
+            current.graph.updatedAt !== acceptedUpdatedAt
+          ) return;
+          set({ proposalPreviewGraph: candidate });
+        }).catch(() => {
+          // Proposal review remains usable with its authored positions if ELK
+          // cannot derive a candidate layout.
         });
       };
       const initial = workspace.createInitial();
@@ -267,6 +336,8 @@ export const useGraphStore = create<WorkspaceStore>()(
       return {
         ...initial,
         runtimeProjectionFixture: null,
+        proposalPreviewGraph: null,
+        layoutPending: false,
         selection: emptySelection(),
         clipboardNodeIds: [],
         past: [],
@@ -277,14 +348,13 @@ export const useGraphStore = create<WorkspaceStore>()(
         autoLayout: () => {
           const transition = workspace.autoLayout(currentCore());
           const selection = transition.changed ? emptySelection() : get().selection;
-          commit(transition, { selection });
-          if (transition.layoutPromise) applyAsyncLayout(transition.state.graph, transition.layoutPromise, selection);
+          commitWithLayout(transition, { selection });
         },
 
         addNode: (preset, position = { x: 360, y: 180 }) => {
           const transition = workspace.addNode(currentCore(), preset, position);
           const nodeId = transition.result?.nodeId;
-          commit(transition, {
+          commitWithLayout(transition, {
             selection: nodeId
               ? {
                   nodeIds: [nodeId],
@@ -299,7 +369,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         createSubgraph: (input) => {
           const transition = workspace.createSubgraph(currentCore(), input);
           const subgraphId = transition.result?.subgraphId;
-          commit(transition, {
+          commitWithLayout(transition, {
             selection: subgraphId
               ? {
                   nodeIds: [],
@@ -316,7 +386,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         moveSubgraph: (id, position) =>
           commit(workspace.moveSubgraph(currentCore(), id, position)),
         moveCanvasElements: (positions) =>
-          commit(workspace.moveCanvasElements(currentCore(), positions)),
+          commitWithLayout(workspace.moveCanvasElements(currentCore(), positions)),
         updateNode: (id, patch) => commit(workspace.updateNode(currentCore(), id, patch)),
         updateGraphCapabilities: (patch) =>
           commit(workspace.updateGraphCapabilities(currentCore(), patch)),
@@ -331,7 +401,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         setSubgraphCollapsed: (id, collapsed) => {
           const transition = workspace.setSubgraphCollapsed(currentCore(), id, collapsed);
           const selection = get().selection;
-          commit(transition, {
+          commitWithLayout(transition, {
             selection:
               transition.changed && collapsed
                 ? selectionForCollapsedSubgraph(transition.state.graph, selection, id)
@@ -339,20 +409,20 @@ export const useGraphStore = create<WorkspaceStore>()(
           });
         },
         assignNodesToSubgraph: (subgraphId, nodeIds) =>
-          commit(workspace.assignNodesToSubgraph(currentCore(), subgraphId, nodeIds)),
+          commitWithLayout(workspace.assignNodesToSubgraph(currentCore(), subgraphId, nodeIds)),
         removeNodeFromSubgraph: (nodeId) =>
-          commit(workspace.removeNodeFromSubgraph(currentCore(), nodeId)),
+          commitWithLayout(workspace.removeNodeFromSubgraph(currentCore(), nodeId)),
         dissolveSubgraph: (subgraphId) =>
-          commit(workspace.dissolveSubgraph(currentCore(), subgraphId), {
+          commitWithLayout(workspace.dissolveSubgraph(currentCore(), subgraphId), {
             selection: emptySelection(),
           }),
         removeNode: (id) =>
-          commit(workspace.removeNode(currentCore(), id), { selection: emptySelection() }),
+          commitWithLayout(workspace.removeNode(currentCore(), id), { selection: emptySelection() }),
 
         addEdge: (source, target) => {
           const transition = workspace.addEdge(currentCore(), source, target);
           const edgeId = transition.result?.edgeId;
-          commit(transition, {
+          commitWithLayout(transition, {
             selection: edgeId
               ? {
                   nodeIds: [],
@@ -364,9 +434,9 @@ export const useGraphStore = create<WorkspaceStore>()(
           });
         },
 
-        updateEdge: (id, patch) => commit(workspace.updateEdge(currentCore(), id, patch)),
+        updateEdge: (id, patch) => commitWithLayout(workspace.updateEdge(currentCore(), id, patch)),
         removeEdge: (id) =>
-          commit(workspace.removeEdge(currentCore(), id), { selection: emptySelection() }),
+          commitWithLayout(workspace.removeEdge(currentCore(), id), { selection: emptySelection() }),
 
         setSelection: (selection) =>
           set((state) => (sameSelection(state.selection, selection) ? state : { selection })),
@@ -396,7 +466,7 @@ export const useGraphStore = create<WorkspaceStore>()(
           let changed = false;
           let notice: string | undefined;
           for (const subgraphId of selectedSubgraphIds) {
-            const transition = workspace.dissolveSubgraph(state, subgraphId);
+            const transition = workspace.dissolveSubgraph(state, subgraphId, false);
             state = transition.state;
             changed ||= transition.changed;
             notice = transition.notice ?? notice;
@@ -405,12 +475,16 @@ export const useGraphStore = create<WorkspaceStore>()(
             state,
             selection.nodeIds.filter((nodeId) => !childIdsOfDeletedSubgraphs.has(nodeId)),
             deletableEdgeIds,
+            false,
           );
           state = transition.state;
           changed ||= transition.changed;
           notice = transition.notice ?? notice;
           if (changed) {
-            commit({ state, changed, notice }, { selection: emptySelection() });
+            commitWithLayout(
+              withScheduledWorkflowLayout({ state, changed, notice }),
+              { selection: emptySelection() },
+            );
           }
         },
 
@@ -419,7 +493,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         pasteSelection: () => {
           const transition = workspace.duplicateNodes(currentCore(), get().clipboardNodeIds);
           const nodeIds = transition.result?.nodeIds ?? [];
-          commit(transition, {
+          commitWithLayout(transition, {
             selection: nodeIds.length
               ? {
                   nodeIds,
@@ -434,7 +508,7 @@ export const useGraphStore = create<WorkspaceStore>()(
         duplicateSelection: () => {
           const transition = workspace.duplicateNodes(currentCore(), get().selection.nodeIds);
           const nodeIds = transition.result?.nodeIds ?? [];
-          commit(transition, {
+          commitWithLayout(transition, {
             selection: nodeIds.length
               ? {
                   nodeIds,
@@ -451,13 +525,23 @@ export const useGraphStore = create<WorkspaceStore>()(
           if (state.past.length === 0 || state.graph.status === 'frozen' || state.proposal) return;
           const previous = state.past[state.past.length - 1];
           const restored = coreOf(previous);
+          if (state.layoutPending) unresolvedHistoryLayouts.add(graphSignature(state.graph));
+          const restoredNeedsLayout = unresolvedHistoryLayouts.delete(graphSignature(restored.graph));
+          graphMutationRevision += 1;
+          layoutRequestRevision += 1;
+          proposalLayoutRequestRevision += 1;
           set({
             ...restored,
             past: state.past.slice(0, -1),
             future: [coreOf(state), ...state.future.slice(0, 49)],
             selection: selectionForGraph(restored.graph, state.selection),
             notice: 'Undid the last graph edit.',
+            proposalPreviewGraph: null,
+            layoutPending: restoredNeedsLayout,
           });
+          if (restoredNeedsLayout) {
+            applyAsyncLayout(restored.graph, layoutWorkflowGraph(structuredClone(restored.graph)));
+          }
         },
 
         redo: () => {
@@ -465,27 +549,50 @@ export const useGraphStore = create<WorkspaceStore>()(
           if (state.future.length === 0 || state.graph.status === 'frozen' || state.proposal) return;
           const next = state.future[0];
           const restored = coreOf(next);
+          if (state.layoutPending) unresolvedHistoryLayouts.add(graphSignature(state.graph));
+          const restoredNeedsLayout = unresolvedHistoryLayouts.delete(graphSignature(restored.graph));
+          graphMutationRevision += 1;
+          layoutRequestRevision += 1;
+          proposalLayoutRequestRevision += 1;
           set({
             ...restored,
             past: [...state.past.slice(-49), coreOf(state)],
             future: state.future.slice(1),
             selection: selectionForGraph(restored.graph, state.selection),
             notice: 'Redid the graph edit.',
+            proposalPreviewGraph: null,
+            layoutPending: restoredNeedsLayout,
           });
+          if (restoredNeedsLayout) {
+            applyAsyncLayout(restored.graph, layoutWorkflowGraph(structuredClone(restored.graph)));
+          }
         },
 
         submitProposal: (input) => {
+          if (get().layoutPending) {
+            return {
+              ok: false,
+              error: {
+                code: 'LAYOUT_PENDING',
+                message: 'Wait for the current graph arrangement to finish before proposing changes.',
+              },
+            };
+          }
           const transition = workspace.submitProposal(currentCore(), input);
           commit(transition, { history: false });
+          if (transition.proposalLayoutPromise && transition.result?.ok) {
+            applyAsyncProposalLayout(
+              transition.result.proposal.id,
+              transition.state.graph,
+              transition.proposalLayoutPromise,
+            );
+          }
           return transition.result!;
         },
 
         approveProposal: () => {
           const transition = workspace.approveProposal(currentCore());
-          commit(transition, { history: false, selection: emptySelection() });
-          if (transition.layoutPromise) {
-            applyAsyncLayout(transition.state.graph, transition.layoutPromise, emptySelection());
-          }
+          commitWithLayout(transition, { history: false, selection: emptySelection() });
           return transition.result!;
         },
 
@@ -499,6 +606,16 @@ export const useGraphStore = create<WorkspaceStore>()(
           commit(workspace.rejectProposal(currentCore()), { history: false }),
 
         freezeGraph: () => {
+          if (get().layoutPending) {
+            return {
+              ok: false,
+              issues: [{
+                code: 'LAYOUT_PENDING',
+                message: 'Wait for the current graph arrangement to finish before freezing.',
+                path: 'graph',
+              }],
+            };
+          }
           const transition = workspace.freezeGraph(currentCore());
           commit(transition, { history: false, selection: emptySelection() });
           return transition.result!;
@@ -514,9 +631,13 @@ export const useGraphStore = create<WorkspaceStore>()(
           const transition = workspace.resetGraph(currentCore());
           commit(transition, { selection: transition.changed ? emptySelection() : get().selection });
           if (transition.changed) {
+            layoutRequestRevision += 1;
+            proposalLayoutRequestRevision += 1;
+            unresolvedHistoryLayouts.clear();
             set((state) => ({
               runtimeProjectionFixture: null,
               clipboardNodeIds: [],
+              layoutPending: false,
               fitViewRevision: state.fitViewRevision + 1,
             }));
           }
@@ -524,14 +645,16 @@ export const useGraphStore = create<WorkspaceStore>()(
 
         loadGraphLibraryEntry: (entry) => {
           const transition = workspace.loadGraphLibraryEntry(currentCore(), entry);
-          commit(transition, {
+          commitWithLayout(transition, {
             selection: transition.changed ? emptySelection() : get().selection,
           });
           if (transition.changed) {
             set((state) => ({
               runtimeProjectionFixture: runtimeFixtureForLoadedDynamicParallelismDemo(get().graph),
               clipboardNodeIds: [],
-              fitViewRevision: state.fitViewRevision + 1,
+              fitViewRevision: transition.layoutPromise
+                ? state.fitViewRevision
+                : state.fitViewRevision + 1,
             }));
           }
           return transition.changed;

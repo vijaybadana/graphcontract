@@ -19,7 +19,7 @@ test('summary bar reports authoritative counts and every contextual contract sta
 
   await expect(summary).toContainText('7 nodes');
   await expect(summary).toContainText('8 edges');
-  await expect(summary).toContainText('0 scenarios');
+  await expect(summary).toContainText('3 scenarios');
   await expect(summary).toContainText('Ready to freeze');
   await expect(summary).not.toContainText('branches');
   await expect(summary).not.toContainText('paths');

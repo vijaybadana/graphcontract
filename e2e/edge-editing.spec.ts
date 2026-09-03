@@ -6,7 +6,9 @@ type GraphRead = {
 
 test('edge edits surface validation immediately and undo restores the accepted route', async ({ app }) => {
   await loadResearchIntake(app);
-  await app.getByTestId('rf__edge-clarify-write-brief').click();
+  const route = app.getByTestId('rf__edge-clarify-write-brief');
+  await route.focus();
+  await route.press('Enter');
 
   await expect(app.getByRole('button', { name: 'Routing mode' })).toContainText('Command');
   await expect(app.getByText('Canonical target: Write Research Brief · write-research-brief')).toBeVisible();

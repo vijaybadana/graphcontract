@@ -407,15 +407,19 @@ test('V02 — proposal overview reports every change family by stable identity a
   await expect(summary).toContainText('updated graph.provenance');
   await expect(summary).toContainText('updated graph.store');
 
-  const membership = summary.getByLabel('Changed values for billing', { exact: true });
+  await summary.getByRole('button', { name: 'Review updated billing' }).click();
+  const membership = app.getByLabel('Changed fields for billing');
   await expect(membership).toContainText('parentId');
   await expect(membership).toContainText('judge-review-zone');
-  await expect(
-    summary.getByLabel('Changed values for classifier', { exact: true }),
-  ).toContainText('Judge-routed classifier');
-  await expect(
-    summary.getByLabel('Changed values for judge-audit-boundary', { exact: true }),
-  ).toContainText('Judge audit boundary');
+  await app.getByRole('button', { name: 'Back to proposal' }).click();
+
+  await summary.getByRole('button', { name: 'Review updated classifier' }).click();
+  await expect(app.getByLabel('Changed fields for classifier')).toContainText('Judge-routed classifier');
+  await app.getByRole('button', { name: 'Back to proposal' }).click();
+
+  await summary.getByRole('button', { name: 'Review added judge-audit-boundary' }).click();
+  await expect(app.getByLabel('Changed fields for judge-audit-boundary')).toContainText('Judge audit boundary');
+  await app.getByRole('button', { name: 'Back to proposal' }).click();
 
   const box = await comparison.boundingBox();
   expect(box).not.toBeNull();
@@ -588,9 +592,9 @@ test('V04 — projection radios retain keyboard semantics and names at 390, 768,
         expect(rect!.y + rect!.height).toBeLessThanOrEqual(viewport.height);
       }
 
-      await design.click();
       await design.focus();
       await expect(design).toBeFocused();
+      await design.press('Enter');
       await design.press('ArrowRight');
       await expect(runtime).toBeFocused();
       await expect(runtime).toHaveAttribute('aria-checked', 'true');

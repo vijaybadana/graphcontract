@@ -138,6 +138,8 @@ export function reconcileProjectionSelection(
 export function GraphWorkspace() {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
+  const proposalPreviewGraph = useGraphStore((state) => state.proposalPreviewGraph);
+  const layoutPending = useGraphStore((state) => state.layoutPending);
   const reviewRequest = useGraphStore((state) => state.reviewRequest ?? null);
   const scenarios = useGraphStore((state) => state.scenarios);
   const selection = useGraphStore((state) => state.selection);
@@ -280,14 +282,18 @@ export function GraphWorkspace() {
     () => proposalCanvasFocusFor(
       proposalFocusEntry,
       proposalReview?.kind === 'comparable'
-        ? [proposalReview.base, proposalReview.candidate]
+        ? [proposalReview.base, proposalPreviewGraph ?? proposalReview.candidate]
         : [graph],
     ),
-    [graph, proposalFocusEntry, proposalReview],
+    [graph, proposalFocusEntry, proposalPreviewGraph, proposalReview],
   );
   const reviewProjection = useMemo(
-    () => proposalReviewToCanvasProjection(proposalReview),
-    [proposalReview],
+    () => {
+      const projection = proposalReviewToCanvasProjection(proposalReview);
+      if (projection?.kind !== 'comparable' || !proposalPreviewGraph) return projection;
+      return { ...projection, candidate: proposalPreviewGraph };
+    },
+    [proposalPreviewGraph, proposalReview],
   );
   const acceptedReviewGraph = reviewProjection?.accepted ?? graph;
   const relationshipPreviewGraph = useMemo(
@@ -1054,8 +1060,8 @@ export function GraphWorkspace() {
           canRedo={canvasEditable && future.length > 0}
           canDuplicate={canvasEditable && selection.nodeIds.length > 0}
           canDelete={canvasEditable && hasDeletableSelection}
-          canFreeze={validationIssues.length === 0 && !proposal}
-          canAutoLayout={editable}
+          canFreeze={validationIssues.length === 0 && !proposal && !layoutPending}
+          canAutoLayout={editable && !layoutPending}
           scenarioCount={scenarios.length}
           viewMode={activeViewMode}
           runtimeAvailable={runtimeAvailable}
