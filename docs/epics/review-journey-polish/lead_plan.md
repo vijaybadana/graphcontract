@@ -5,7 +5,7 @@ Candidate: `/Users/vijaybadana/graphcontract`, `main`, starting SHA `fc939bb049d
 Strategy: Extend the existing mode-panel, proposal-comparison, inspector, and scenario-projection seams with additive behavior only; the live portal and current full-screen baselines remain the sole visual authority.
 Dispatch waves: W1 proposal rail and scenario rail packages in parallel; W2 Lead-owned workspace/canvas integration after both component contracts are reviewed; W3 integrated verification and local owner handoff.
 Concurrency: Two non-overlapping shared-candidate packages own separate feature directories; the Lead alone owns `graph-workspace`, canvas projection reconciliation, Capabilities-strip removal, integration, and the named runtime.
-Scheduling: lead-scheduling; reason: two parallel feature packages feed one shared workspace/projection integration boundary and one acceptance closure.
+Scheduling: direct Lead fallback; reason: GasTown validation succeeded (`73bb57677ab50206`) but initialization could not complete because the shared supervisor reconcile queue remained busy; the user previously authorized direct embedded execution when GasTown is unavailable.
 Scenario coverage: proposal overview/detail/collapse/invalid/removal/direct-selection requirements → P1 + P3 → focused proposal DOM and browser journey; scenario semantics/playback/download/pagination requirements → P2 + P3 → focused scenario DOM and browser journey; hidden Capabilities strip and preserved authority/WebMCP requirements → P3 → workspace/browser and existing authority checks.
 Architecture conformance: model unchanged; no domain/schema or tool-surface expansion is authorized.
 
