@@ -752,8 +752,12 @@ export function GraphWorkspace() {
     if (!focus) return;
     const existingNodeIds = new Set(canvas.nodes.map((node) => node.id));
     const fitNodeIds = focus.fitNodeIds.filter((id) => existingNodeIds.has(id));
+    if (proposalFocusScenario) {
+      fitNodes(fitNodeIds);
+      return;
+    }
     fitFocus(fitNodeIds, focus.cameraMode === 'detail');
-  }, [activeViewMode, canvas.nodes, fitFocus, proposalCanvasFocus]);
+  }, [activeViewMode, canvas.nodes, fitFocus, fitNodes, proposalCanvasFocus, proposalFocusScenario]);
 
   useEffect(() => {
     if (!projectionFitRequest || projectionFitRequest.mode !== activeViewMode) return;
