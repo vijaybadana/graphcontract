@@ -82,7 +82,8 @@ describe('graph library registry', () => {
       label: 'Researcher ×N',
       parentId: 'research-cell',
       collapsed: false,
-      dimensions: { width: 1180, height: 500 },
+      position: { x: 962, y: 50 },
+      dimensions: { width: 1672, height: 477 },
     });
     expect(entry.layout).toMatchObject({
       preserveGraphGeometry: true,
@@ -149,8 +150,8 @@ describe('graph library registry', () => {
     expect(entry.graph.edges.some((edge) => edge.mode === 'send')).toBe(false);
     expect(entry.graph.nodes.some((node) => node.id === 'dispatch-research')).toBe(false);
     expect(entry.graph.nodes.some((node) => node.id === 'review-findings')).toBe(false);
-    expect(supervisor.dimensions).toEqual({ width: 1660, height: 1000 });
-    expect(researcher?.position).toEqual({ x: 260, y: 160 });
+    expect(supervisor.dimensions).toEqual({ width: 2908, height: 1144 });
+    expect(researcher?.position).toEqual({ x: 310, y: 103 });
   });
 
   it('rejects duplicate IDs, unsafe sources, and invalid graph inputs', () => {

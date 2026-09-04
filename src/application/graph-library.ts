@@ -158,12 +158,12 @@ const definitions: readonly GraphLibraryDefinition[] = [
       'library-hierarchical-deep-research',
       'Hierarchical Deep Research',
       [
-        start('research-start', 40, 360),
-        step('clarify-request', 'Clarify request', 'ai', 300, 360, {
+        start('research-start', -360, 408),
+        step('clarify-request', 'Clarify request', 'ai', -36, 408, {
           description: 'Resolve ambiguity before creating the research brief.',
         }),
-        end('awaiting-user-reply', 'Awaiting user reply', 580, 180),
-        step('write-brief', 'Write research brief', 'ai', 580, 540, {
+        end('awaiting-user-reply', 'Awaiting user reply', 374, 228),
+        step('write-brief', 'Write research brief', 'ai', 374, 588, {
           description: 'Convert the clarified request into a focused research brief.',
         }),
         start('research-cell-start', 50, 100, 'research-cell'),
@@ -173,7 +173,7 @@ const definitions: readonly GraphLibraryDefinition[] = [
           participation: { internalTools: true },
           config: { sourceNode: 'supervisor', maxResearcherIterations: 6 },
         }),
-        step('supervisor-tools', 'Supervisor Tools', 'tool', 600, 100, {
+        step('supervisor-tools', 'Supervisor Tools', 'tool', 410, 922, {
           parentId: 'research-cell',
           description: 'Execute reflection and research tool calls, then return their results to the Supervisor.',
           config: {
@@ -182,31 +182,31 @@ const definitions: readonly GraphLibraryDefinition[] = [
             maxConcurrentResearchUnits: 5,
           },
         }),
-        end('research-cell-end', 'Research complete', 1320, 100, 'research-cell'),
-        start('researcher-start', 40, 170, 'researcher-workflow'),
-        step('researcher-agent', 'Researcher Agent', 'ai', 260, 160, {
+        end('research-cell-end', 'Research complete', 1946, 922, 'research-cell'),
+        start('researcher-start', 24, 188, 'researcher-workflow'),
+        step('researcher-agent', 'Researcher Agent', 'ai', 310, 103, {
           parentId: 'researcher-workflow',
           description: 'Research one delegated topic using configured search, MCP, and reflection tools.',
           participation: { internalTools: true },
           retry: { maxAttempts: 3, backoff: { strategy: 'fixed', initialDelayMs: 0 } },
           config: { maxReactToolCalls: 10 },
         }),
-        step('researcher-tools', 'Researcher Tools', 'tool', 520, 160, {
+        step('researcher-tools', 'Researcher Tools', 'tool', 630, 307, {
           parentId: 'researcher-workflow',
           description: 'Execute configured research tools and either continue researching or compress the result.',
           config: { sourceNode: 'researcher_tools', maxReactToolCalls: 10 },
         }),
-        step('compress-research', 'Compress Research', 'ai', 780, 160, {
+        step('compress-research', 'Compress Research', 'ai', 1106, 142, {
           parentId: 'researcher-workflow',
           description: 'Compress one researcher run into a focused result and preserve its raw notes.',
           retry: { maxAttempts: 3, backoff: { strategy: 'fixed', initialDelayMs: 0 } },
         }),
-        end('researcher-end', 'Researcher complete', 1020, 170, 'researcher-workflow'),
-        step('final-report', 'Final report generation', 'ai', 2650, 360, {
+        end('researcher-end', 'Researcher complete', 1394, 142, 'researcher-workflow'),
+        step('final-report', 'Final report generation', 'ai', 4044, 555, {
           description: 'Synthesize the collected supervisor notes into the final cited report.',
           retry: { maxAttempts: 3, backoff: { strategy: 'fixed', initialDelayMs: 0 } },
         }),
-        end('research-complete', 'Report complete', 2930, 360),
+        end('research-complete', 'Report complete', 4444, 555),
       ],
       [
         { id: 'research-clarify', source: 'research-start', target: 'clarify-request', mode: 'normal' },
@@ -263,15 +263,15 @@ const definitions: readonly GraphLibraryDefinition[] = [
           id: 'research-cell',
           label: 'Research Supervisor',
           position: { x: 850, y: 50 },
-          dimensions: { width: 1660, height: 1000 },
+          dimensions: { width: 2908, height: 1144 },
           collapsed: false,
         },
         {
           id: 'researcher-workflow',
           label: 'Researcher ×N',
           parentId: 'research-cell',
-          position: { x: 250, y: 380 },
-          dimensions: { width: 1180, height: 500 },
+          position: { x: 962, y: 50 },
+          dimensions: { width: 1672, height: 477 },
           collapsed: false,
         },
       ],
