@@ -4,6 +4,7 @@ import {
   callWebMcpTool,
   expect,
   freezeResearchIntake,
+  loadGraphLibraryEntry,
   loadResearchIntake,
   test,
   webMcpToolMetadata,
@@ -17,8 +18,14 @@ type GraphRead = {
     name: string;
     status: 'draft' | 'frozen';
     updatedAt: string;
-    nodes: Array<{ id: string; label: string; position: { x: number; y: number } }>;
+    nodes: Array<{ id: string; label: string; parentId?: string; position: { x: number; y: number } }>;
     edges: Array<{ id: string; mode: string }>;
+    subgraphs: Array<{
+      id: string;
+      parentId?: string;
+      position: { x: number; y: number };
+      dimensions: { width: number; height: number };
+    }>;
   };
   validation: { validForFreeze: boolean; issues: unknown[] };
   pendingProposal?: { id: string; status: string; rationale: string; operations?: unknown[] };
@@ -96,6 +103,22 @@ async function expectNodesInsideUsableCanvas(page: Page, nodeIds: string[]) {
         center.y >= bounds.top && center.y <= bounds.bottom;
     });
   }, nodeIds)).toBe(true);
+}
+
+async function stableCanvasViewportTransform(page: Page) {
+  const viewport = page.locator('.workspace-canvas > .react-flow .react-flow__viewport');
+  let previous = '';
+  let stableSamples = 0;
+  await expect.poll(async () => {
+    const current = await viewport.evaluate((element) => getComputedStyle(element).transform);
+    if (current === previous) stableSamples += 1;
+    else {
+      previous = current;
+      stableSamples = 0;
+    }
+    return stableSamples >= 2;
+  }, { intervals: [80, 120, 160, 200] }).toBe(true);
+  return previous;
 }
 
 const translatedProposal = (accepted: GraphRead, offsetX: number, rationale: string) => ({
@@ -367,6 +390,59 @@ test('proposal projection transitions fit each candidate and restore the accepte
   );
   await expectNodesInsideUsableCanvas(app, endpointIds);
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(accepted.graph);
+});
+
+test('approval and Scenario preserve the exact reviewed hierarchical geometry and viewport', async ({ app }) => {
+  await loadGraphLibraryEntry(app, 'Hierarchical Deep Research', 'library-hierarchical-deep-research');
+  const accepted = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  const addedPosition = { x: 4780, y: 555 };
+
+  const proposal = await callWebMcpTool<ProposalResult>(app, 'propose_graph_changes', {
+    expectedGraphUpdatedAt: accepted.graph.updatedAt,
+    rationale: 'Refine research labels and append a reviewed delivery step.',
+    operations: [
+      { type: 'update_node', nodeId: 'supervisor-agent', patch: { label: 'Research Supervisor Agent' } },
+      { type: 'remove_edge', edgeId: 'brief-complete' },
+      {
+        type: 'add_node',
+        node: {
+          id: 'review-report',
+          kind: 'step',
+          executor: 'human',
+          label: 'Review report',
+          position: addedPosition,
+        },
+      },
+      { type: 'add_edge', edge: { id: 'brief-review', source: 'final-report', target: 'review-report', mode: 'normal' } },
+      { type: 'add_edge', edge: { id: 'review-complete', source: 'review-report', target: 'research-complete', mode: 'normal' } },
+    ],
+  });
+  expect(proposal).toMatchObject({ ok: true, proposal: { status: 'pending' } });
+  await expect(app.getByRole('radio', { name: 'Proposal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expectNodesInsideUsableCanvas(app, ['review-report']);
+  const reviewedViewport = await stableCanvasViewportTransform(app);
+
+  await app.getByRole('button', { name: 'Approve' }).click();
+  await expect(app.getByRole('radio', { name: 'Design', exact: true })).toHaveAttribute('aria-checked', 'true');
+  const approved = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  for (const node of accepted.graph.nodes) {
+    expect(approved.graph.nodes.find((candidate) => candidate.id === node.id)).toMatchObject({
+      position: node.position,
+      ...(node.parentId ? { parentId: node.parentId } : {}),
+    });
+  }
+  expect(approved.graph.nodes.find((node) => node.id === 'review-report')?.position).toEqual(addedPosition);
+  expect(approved.graph.subgraphs).toEqual(accepted.graph.subgraphs);
+  expect(await stableCanvasViewportTransform(app)).toBe(reviewedViewport);
+
+  await app.locator('.workspace-freeze-button').click();
+  await expect(app.getByRole('radio', { name: 'Scenario', exact: true })).toHaveAttribute('aria-checked', 'true');
+  const frozen = await callWebMcpTool<GraphRead>(app, 'get_graph', {});
+  expect(frozen.graph.nodes.map(({ id, position, parentId }) => ({ id, position, parentId }))).toEqual(
+    approved.graph.nodes.map(({ id, position, parentId }) => ({ id, position, parentId })),
+  );
+  expect(frozen.graph.subgraphs).toEqual(approved.graph.subgraphs);
+  expect(await stableCanvasViewportTransform(app)).toBe(reviewedViewport);
 });
 
 test('approval applies a multi-operation proposal atomically and persists after reload', async ({ app }) => {

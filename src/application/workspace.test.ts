@@ -344,7 +344,7 @@ describe('workspace application service', () => {
     }));
   });
 
-  it('approves a valid subgraph proposal through the human path and reflows its relative geometry', async () => {
+  it('approves a valid subgraph proposal through the human path without changing reviewed geometry', () => {
     let timestamp = '2026-08-28T12:00:00.000Z';
     const timestampedService = createWorkspaceService({
       now: () => timestamp,
@@ -369,10 +369,10 @@ describe('workspace application service', () => {
 
     expect(approved.result?.ok).toBe(true);
     expect(approved.state.graph.updatedAt).toBe('2026-08-28T12:01:00.000Z');
-    expect(approved.layoutApplied).toBe(true);
-    const laidOut = await approved.layoutPromise!;
-    expect(laidOut.subgraphs[0]?.position).not.toEqual({ x: 340, y: 180 });
-    expect(laidOut.nodes.find((node) => node.id === 'research-supervisor-agent')).toMatchObject({
+    expect(approved.layoutApplied).toBeUndefined();
+    expect(approved.layoutPromise).toBeUndefined();
+    expect(approved.state.graph.subgraphs[0]?.position).toEqual({ x: 340, y: 180 });
+    expect(approved.state.graph.nodes.find((node) => node.id === 'research-supervisor-agent')).toMatchObject({
       parentId: 'research-supervisor',
       position: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
     });
@@ -620,7 +620,7 @@ describe('workspace application service', () => {
     });
   });
 
-  it('lays out the accepted graph after approving structural operations', async () => {
+  it('commits proposal-authored geometry after approving structural operations', () => {
     const initial = service.createInitial();
     const proposed = service.submitProposal(initial, {
       rationale: 'Insert fraud screening into the billing path.',
@@ -647,14 +647,15 @@ describe('workspace application service', () => {
       ],
     });
     const approved = service.approveProposal(proposed.state);
-    const laidOut = await approved.layoutPromise!;
-
     expect(approved.result?.ok).toBe(true);
-    expect(Math.max(...laidOut.nodes.map((node) => node.position.x))).toBeLessThan(2000);
-    expect(laidOut.nodes.find((node) => node.id === 'fraud-check')?.position).not.toEqual({ x: 5000, y: 5000 });
+    expect(approved.layoutPromise).toBeUndefined();
+    expect(approved.state.graph.nodes.find((node) => node.id === 'fraud-check')?.position).toEqual({ x: 5000, y: 5000 });
+    for (const node of initial.graph.nodes) {
+      expect(approved.state.graph.nodes.find((candidate) => candidate.id === node.id)?.position).toEqual(node.position);
+    }
   });
 
-  it('lays out approved edge updates while preserving the accepted routing semantics', async () => {
+  it('preserves accepted geometry while applying approved edge updates', () => {
     const initial = service.createInitial();
     const proposed = service.submitProposal(initial, {
       rationale: 'Clarify the priority billing branch for review.',
@@ -666,23 +667,22 @@ describe('workspace application service', () => {
     });
 
     const approved = service.approveProposal(proposed.state);
-    const laidOut = await approved.layoutPromise!;
-    const updated = laidOut.edges.find((edge) => edge.id === 'classifier-billing');
+    const updated = approved.state.graph.edges.find((edge) => edge.id === 'classifier-billing');
 
     expect(approved.result?.ok).toBe(true);
-    expect(approved.layoutApplied).toBe(true);
+    expect(approved.layoutApplied).toBeUndefined();
     expect(updated).toMatchObject({
       source: 'classifier',
       target: 'billing',
       mode: 'conditional',
       label: 'priority billing',
     });
-    expect(laidOut.nodes.find((node) => node.id === 'start')?.position).not.toEqual(
-      initial.graph.nodes.find((node) => node.id === 'start')?.position,
+    expect(approved.state.graph.nodes.map(({ id, position }) => ({ id, position }))).toEqual(
+      initial.graph.nodes.map(({ id, position }) => ({ id, position })),
     );
   });
 
-  it('lays out approved subgraph geometry and membership replacements', async () => {
+  it('commits reviewed subgraph geometry and membership replacements exactly', () => {
     const initial = service.loadResearchSupervisorDemo(service.createInitial()).state;
     const proposed = service.submitProposal(initial, {
       rationale: 'Reposition the research team container for review.',
@@ -694,11 +694,9 @@ describe('workspace application service', () => {
     });
 
     const approved = service.approveProposal(proposed.state);
-    const laidOut = await approved.layoutPromise!;
-
     expect(approved.result?.ok).toBe(true);
-    expect(approved.layoutApplied).toBe(true);
-    expect(laidOut.subgraphs.find((subgraph) => subgraph.id === 'research-supervisor')?.position).not.toEqual({
+    expect(approved.layoutApplied).toBeUndefined();
+    expect(approved.state.graph.subgraphs.find((subgraph) => subgraph.id === 'research-supervisor')?.position).toEqual({
       x: 5000,
       y: 5000,
     });

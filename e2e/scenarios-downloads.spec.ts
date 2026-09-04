@@ -12,7 +12,8 @@ type Scenario = {
 test('all native downloads preserve graph, route, loop, and scenario truth', async ({ app }) => {
   await freezeResearchIntake(app);
   await app.getByRole('radio', { name: 'Scenario', exact: true }).click();
-  await expect(app.getByText('5 paths', { exact: true })).toBeVisible();
+  await expect(app.getByText('5 total', { exact: true })).toBeVisible();
+  await expect(app.getByText('Showing 1–5 · Page 1 of 1', { exact: true })).toBeVisible();
 
   const graph = JSON.parse(await downloadText(app, 'graph-contract.json')) as {
     status: string;

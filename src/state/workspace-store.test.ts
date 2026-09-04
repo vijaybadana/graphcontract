@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { enumerateScenarios, normalizeWorkflowGraph, sampleGraph, validateGraph } from '@/src/domain';
+import { graphLibraryEntries } from '@/src/application/graph-library';
 import type { WorkspaceSelection } from './workspace-store';
 
 const persisted = new Map<string, string>();
@@ -209,6 +210,51 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().graph).toEqual(accepted);
     expect(useGraphStore.getState().proposalPreviewGraph).toBeNull();
     useGraphStore.getState().rejectProposal();
+  });
+
+  it('keeps reviewed hierarchical geometry and viewport revision stable through approve and freeze', () => {
+    const entry = graphLibraryEntries.find((candidate) => candidate.id === 'hierarchical-deep-research')!;
+    useGraphStore.getState().loadGraphLibraryEntry(entry);
+    const acceptedBefore = structuredClone(useGraphStore.getState().graph);
+    const fitRevisionBefore = useGraphStore.getState().fitViewRevision;
+
+    expect(useGraphStore.getState().submitProposal({
+      rationale: 'Refine research labels and append a reviewed delivery step.',
+      operations: [
+        { type: 'update_node', nodeId: 'supervisor-agent', patch: { label: 'Research Supervisor Agent' } },
+        { type: 'remove_edge', edgeId: 'brief-complete' },
+        {
+          type: 'add_node',
+          node: {
+            id: 'review-report',
+            kind: 'step',
+            executor: 'human',
+            label: 'Review report',
+            position: { x: 4780, y: 555 },
+          },
+        },
+        { type: 'add_edge', edge: { id: 'brief-review', source: 'final-report', target: 'review-report', mode: 'normal' } },
+        { type: 'add_edge', edge: { id: 'review-complete', source: 'review-report', target: 'research-complete', mode: 'normal' } },
+      ],
+    }).ok).toBe(true);
+    expect(useGraphStore.getState().approveProposal().ok).toBe(true);
+
+    const approved = structuredClone(useGraphStore.getState().graph);
+    for (const node of acceptedBefore.nodes) {
+      expect(approved.nodes.find((candidate) => candidate.id === node.id)?.position, node.id).toEqual(node.position);
+      expect(approved.nodes.find((candidate) => candidate.id === node.id)?.parentId, node.id).toBe(node.parentId);
+    }
+    expect(approved.nodes.find((node) => node.id === 'review-report')?.position).toEqual({ x: 4780, y: 555 });
+    expect(approved.subgraphs).toEqual(acceptedBefore.subgraphs);
+    expect(useGraphStore.getState().fitViewRevision).toBe(fitRevisionBefore);
+
+    expect(useGraphStore.getState().freezeGraph().ok).toBe(true);
+    expect(useGraphStore.getState().graph.nodes.map(({ id, position, parentId }) => ({ id, position, parentId }))).toEqual(
+      approved.nodes.map(({ id, position, parentId }) => ({ id, position, parentId })),
+    );
+    expect(useGraphStore.getState().graph.subgraphs).toEqual(approved.subgraphs);
+    expect(useGraphStore.getState().fitViewRevision).toBe(fitRevisionBefore);
+    useGraphStore.getState().unfreezeGraph();
   });
 
   it('restores deterministic expanded compound geometry after a compact collapse', async () => {

@@ -125,7 +125,7 @@ export function ScenarioPanel({
       title="Scenarios"
       icon={<PathIcon size={16} weight="bold" />}
       tone="scenario"
-      badge={`${scenarios.length} paths`}
+      badge={`${scenarios.length} total`}
       onCollapse={onCollapse}
       footer={(
         <div className="scenario-panel__footer">
@@ -145,11 +145,11 @@ export function ScenarioPanel({
       {scenarios.length > 0 && (
         <p
           ref={pageStatusRef}
-          className="mode-panel__visually-hidden scenario-pagination__status"
+          className="scenario-pagination__status"
           tabIndex={-1}
           aria-live="polite"
         >
-          Showing {pageStart + 1}–{pageEnd} of {scenarios.length} scenarios. Page {pageIndex + 1} of {pageCount}.
+          Showing {pageStart + 1}–{pageEnd} · Page {pageIndex + 1} of {pageCount}
         </p>
       )}
       <div className="scenario-panel__list" role="list" aria-label="Generated scenarios">

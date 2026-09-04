@@ -118,8 +118,8 @@ describe('ScenarioPanel', () => {
     render(<ScenarioPanel graph={graph} scenarios={scenarios} />);
 
     expect(screen.getByRole('heading', { name: 'Scenarios' })).toBeTruthy();
-    expect(screen.getByText('143 paths')).toBeTruthy();
-    expect(screen.getByText('Showing 1–24 of 143 scenarios. Page 1 of 6.').classList.contains('mode-panel__visually-hidden')).toBe(true);
+    expect(screen.getByText('143 total')).toBeTruthy();
+    expect(screen.getByText('Showing 1–24 · Page 1 of 6').classList.contains('mode-panel__visually-hidden')).toBe(false);
     expect(screen.getByLabelText('Page 1 of 6').textContent).toBe('1 / 6');
     expect(document.querySelectorAll('.scenario-row')).toHaveLength(24);
     expect(document.querySelector('[data-scenario-id="scenario-24"]')).toBeTruthy();
@@ -134,7 +134,7 @@ describe('ScenarioPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next scenario page' }));
 
-    const pageStatus = screen.getByText('Showing 25–48 of 143 scenarios. Page 2 of 6.');
+    const pageStatus = screen.getByText('Showing 25–48 · Page 2 of 6');
     expect(document.activeElement).toBe(pageStatus);
     expect(document.querySelectorAll('.scenario-row')).toHaveLength(24);
     expect(document.querySelector('[data-scenario-id="scenario-25"]')).toBeTruthy();
@@ -143,7 +143,7 @@ describe('ScenarioPanel', () => {
     expect(createObjectUrl).toHaveBeenCalledTimes(3);
 
     fireEvent.click(screen.getByRole('button', { name: 'Previous scenario page' }));
-    expect(document.activeElement).toBe(screen.getByText('Showing 1–24 of 143 scenarios. Page 1 of 6.'));
+    expect(document.activeElement).toBe(screen.getByText('Showing 1–24 · Page 1 of 6'));
     expect(document.querySelector('[data-scenario-id="scenario-1"]')?.getAttribute('aria-pressed')).toBe('true');
   }, 10_000);
 

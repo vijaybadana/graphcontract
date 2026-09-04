@@ -53,7 +53,17 @@
 }
 
 .scenario-pagination__status {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  border-bottom: 1px solid var(--gc-border);
   border-radius: 4px;
+  background: var(--gc-surface-elevated);
+  padding: 8px 14px;
+  color: var(--gc-ink-muted);
+  font-size: 10px;
+  font-weight: 720;
 }
 
 .scenario-panel__footer { display: grid; gap: 8px; }

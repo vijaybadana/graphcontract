@@ -289,24 +289,6 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
     return { state: { ...state, graph, proposal: null, scenarios: [] }, changed: true, notice };
   };
 
-  const isLayoutAffectingProposalOperation = (operation: GraphProposal['operations'][number]) => {
-    switch (operation.type) {
-      case 'add_node':
-      case 'remove_node':
-      case 'add_edge':
-      case 'update_edge':
-      case 'remove_edge':
-      case 'add_subgraph':
-      case 'update_subgraph':
-      case 'assign_nodes_to_subgraph':
-      case 'remove_nodes_from_subgraph':
-      case 'dissolve_subgraph':
-        return true;
-      default:
-        return false;
-    }
-  };
-
   return {
     createInitial,
 
@@ -1022,17 +1004,12 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
           },
         };
       }
-      const hasStructuralChanges = proposal.operations.some(isLayoutAffectingProposalOperation);
       const graph = { ...applied.graph, status: 'draft' as const, updatedAt: dependencies.now() };
       return {
         state: { ...state, graph, proposal: null, reviewRequest: null, scenarios: [] },
         changed: true,
         notice: 'Proposal approved and applied to the accepted graph.',
         result: { ok: true, proposal: { ...proposal, status: 'approved' } },
-        ...(hasStructuralChanges ? {
-          layoutApplied: true,
-          layoutPromise: layoutWorkflowGraph(graph),
-        } : {}),
       };
     },
 
