@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { deriveProposalComparison } from '@/src/application/proposal-comparison';
-import { createProposal, sampleGraph, type WorkflowGraph } from '@/src/domain';
+import { createProposal, enumerateScenarios, sampleGraph, type WorkflowGraph } from '@/src/domain';
 import type { ProposalReviewEntry } from './proposal-overview';
-import { proposalCanvasFocusFor, proposalInitialCanvasFitNodeIds } from './proposal-canvas-focus';
+import { proposalCanvasFocusFor, proposalCanvasFocusForScenario, proposalInitialCanvasFitNodeIds } from './proposal-canvas-focus';
 
 const entry = (
   section: string,
@@ -86,5 +86,15 @@ describe('proposalCanvasFocusFor', () => {
     const review = deriveProposalComparison(sampleGraph, proposal);
 
     expect(proposalInitialCanvasFitNodeIds(review)).toEqual(['reviewed-check']);
+  });
+
+  it('focuses only the candidate path topology', () => {
+    const scenario = enumerateScenarios(sampleGraph)[0];
+    expect(proposalCanvasFocusForScenario(scenario)).toMatchObject({
+      nodeIds: [...new Set(scenario.orderedPath)],
+      edgeIds: [...new Set(scenario.traversedEdges.map((edge) => edge.id))],
+      fitNodeIds: [...new Set(scenario.orderedPath)],
+      cameraMode: 'context',
+    });
   });
 });

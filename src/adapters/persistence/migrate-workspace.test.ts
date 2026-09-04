@@ -54,6 +54,14 @@ describe('workspace persistence migration', () => {
       reviewedGraphId: sampleGraph.id,
       reviewedGraphUpdatedAt: sampleGraph.updatedAt,
       reviewedAt: '2026-09-01T10:00:00.000Z',
+      notes: [{
+        kind: 'change' as const,
+        targetKey: 'nodes:billing',
+        section: 'nodes',
+        elementId: 'billing',
+        changeState: 'updated' as const,
+        feedback: '  Keep the original name.  ',
+      }],
     };
     const migrated = migrateWorkspaceV6(
       { graph: structuredClone(sampleGraph), proposal: null, reviewRequest },
@@ -71,6 +79,7 @@ describe('workspace persistence migration', () => {
     expect(migrated.reviewRequest).toEqual({
       ...reviewRequest,
       feedback: 'Add a clearer fallback route.',
+      notes: [{ ...reviewRequest.notes[0], feedback: 'Keep the original name.' }],
     });
     expect(migrated.reviewRequest).not.toHaveProperty('candidateGraph');
     expect(malformed.reviewRequest).toBeNull();

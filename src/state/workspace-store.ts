@@ -14,6 +14,7 @@ import {
   WorkspaceTransition,
   withScheduledWorkflowLayout,
 } from '@/src/application/workspace';
+import type { ProposalReviewSubmission } from '@/src/application/proposal-review';
 import {
   GraphEdgePatch,
   GraphCapabilities,
@@ -93,7 +94,7 @@ type WorkspaceStore = WorkspaceCore & {
   redo: () => void;
   submitProposal: (input: unknown) => ProposalResult;
   approveProposal: () => ProposalResult;
-  requestProposalChanges: (feedback: string) => RequestChangesResult;
+  requestProposalChanges: (submission: string | ProposalReviewSubmission) => RequestChangesResult;
   rejectProposal: () => void;
   freezeGraph: () => FreezeResult;
   unfreezeGraph: () => void;
@@ -603,8 +604,8 @@ export const useGraphStore = create<WorkspaceStore>()(
           return transition.result!;
         },
 
-        requestProposalChanges: (feedback) => {
-          const transition = workspace.requestProposalChanges(currentCore(), feedback);
+        requestProposalChanges: (submission) => {
+          const transition = workspace.requestProposalChanges(currentCore(), submission);
           commit(transition, { history: false, selection: emptySelection() });
           return transition.result!;
         },

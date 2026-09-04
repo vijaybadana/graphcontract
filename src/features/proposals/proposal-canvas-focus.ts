@@ -1,5 +1,7 @@
 import type { ProposalReview } from '@/src/application/proposal-comparison';
 import type { GraphEdge, NonNativeRelationship, WorkflowGraph } from '@/src/domain';
+import type { BranchScenario } from '@/src/domain';
+import { proposalScenarioKey } from '@/src/application/proposal-review';
 import type { ProposalReviewEntry } from '@/src/features/proposals/proposal-overview';
 import { proposalReviewEntries } from '@/src/features/proposals/proposal-overview';
 
@@ -14,6 +16,21 @@ export type ProposalCanvasFocus = {
   /** Single-node review rows use a readable detail camera; topology rows fit context. */
   cameraMode: 'detail' | 'context';
 };
+
+/** Candidate scenario focus is presentation-only and cannot alter accepted state. */
+export function proposalCanvasFocusForScenario(scenario: BranchScenario | null): ProposalCanvasFocus | null {
+  if (!scenario) return null;
+  return {
+    key: proposalScenarioKey(scenario),
+    nodeIds: [...new Set(scenario.orderedPath)],
+    edgeIds: [...new Set(scenario.traversedEdges.map((edge) => edge.id))],
+    contextNodeIds: [],
+    contextEdgeIds: [],
+    relationshipId: null,
+    fitNodeIds: [...new Set(scenario.orderedPath)],
+    cameraMode: 'context',
+  };
+}
 
 const endpointId = (endpoint: NonNativeRelationship['source']) =>
   endpoint.kind === 'node'

@@ -10,6 +10,7 @@ import {
 } from '@/src/features/proposals/proposal-overview';
 
 import './proposal-change-inspector.css';
+import { ReviewNoteComposer } from './review-note-composer';
 
 const stateLabel = (state: ProposalReviewEntry['entry']['state']) =>
   state.charAt(0).toUpperCase() + state.slice(1);
@@ -20,12 +21,20 @@ export function ProposalChangeInspector({
   onBack,
   onPrevious,
   onNext,
+  note,
+  noteDisabled = false,
+  onNoteSave,
+  onNoteRemove,
 }: {
   reviewEntry: ProposalReviewEntry;
   totalChanges: number;
   onBack: () => void;
   onPrevious: () => void;
   onNext: () => void;
+  note?: string;
+  noteDisabled?: boolean;
+  onNoteSave?: (feedback: string) => void;
+  onNoteRemove?: () => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const { entry } = reviewEntry;
@@ -91,6 +100,17 @@ export function ProposalChangeInspector({
           <div><dt>After</dt><dd>{accessibleComparisonValue(entry.after)}</dd></div>
         </dl>
       </details>
+
+      {onNoteSave && onNoteRemove && (
+        <ReviewNoteComposer
+          label="Add change note"
+          placeholder="What should change for this item?"
+          value={note}
+          disabled={noteDisabled}
+          onSave={onNoteSave}
+          onRemove={onNoteRemove}
+        />
+      )}
     </section>
   );
 }

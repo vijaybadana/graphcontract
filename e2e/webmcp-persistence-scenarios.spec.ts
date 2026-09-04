@@ -45,6 +45,12 @@ type GraphRead = {
     reviewedGraphUpdatedAt: string;
     reviewedAt: string;
     contentTrust: 'untrusted-human-authored';
+    notes?: Array<{
+      kind: 'change' | 'path';
+      targetKey: string;
+      feedback: string;
+      orderedNodeIds?: string[];
+    }>;
   };
 };
 
@@ -246,13 +252,29 @@ test('human review feedback survives reload and is consumed only by a valid revi
   const reviewedProposalId = (await callWebMcpTool<GraphRead>(app, 'get_graph', {})).pendingProposal!.id;
   expect((await callWebMcpTool<GraphRead>(app, 'get_graph', {})).graph).toEqual(accepted.graph);
 
+  const proposalPanel = app.getByRole('region', { name: 'Proposal panel' });
+  await expect(proposalPanel.getByRole('tab', { name: /Changes 1/ })).toBeVisible();
+  const pathsTab = proposalPanel.getByRole('tab', { name: /Paths \d+/ });
+  await expect(pathsTab).toBeVisible();
+  await pathsTab.click();
+  const candidatePaths = proposalPanel.getByRole('list', { name: 'Candidate graph paths' });
+  await expect(candidatePaths).toBeVisible();
+  await candidatePaths.locator('.scenario-row__select').first().click();
+  await expect(app.locator('.workspace-canvas[data-proposal-focus-key^="path:"]')).toBeVisible();
+  await proposalPanel.getByRole('button', { name: 'Show details for path 1' }).click();
+  await proposalPanel.getByRole('textbox', { name: 'Add path note' }).fill(
+    'Require explicit review before this terminal outcome.',
+  );
+  await proposalPanel.getByRole('button', { name: 'Add note' }).click();
+  await expect(proposalPanel.getByText('Review notes')).toBeVisible();
+
   const requestChanges = app.getByRole('button', { name: 'Request changes' });
   await requestChanges.click();
   const dialog = app.getByRole('dialog', { name: 'Request proposal changes' });
   const feedback = dialog.getByLabel('Requested changes');
   await expect(dialog).toBeVisible();
   await expect(feedback).toBeFocused();
-  await expect(dialog.getByRole('button', { name: 'Submit request' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Submit request' })).toBeEnabled();
   await app.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(requestChanges).toBeFocused();
@@ -277,7 +299,14 @@ test('human review feedback survives reload and is consumed only by a valid revi
     reviewedGraphId: accepted.graph.id,
     reviewedGraphUpdatedAt: accepted.graph.updatedAt,
     contentTrust: 'untrusted-human-authored',
+    notes: [{
+      kind: 'path',
+      feedback: 'Require explicit review before this terminal outcome.',
+      orderedNodeIds: expect.any(Array),
+    }],
   });
+  expect(reviewed.reviewRequest?.notes?.[0].targetKey).toContain('path:');
+  await proposalPanel.getByRole('tab', { name: /Changes 1/ }).click();
   await app.getByRole('button', { name: 'Review updated classifier' }).click();
   await expect(app.getByTestId('rf__node-classifier').locator('.contract-node-shell'))
     .toHaveClass(/proposal-focus-active/);

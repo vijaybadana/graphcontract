@@ -35,9 +35,10 @@ import { evaluateConnection } from '@/src/application/connection-policy';
 import type { GraphLibraryEntry } from '@/src/application/graph-library-contract';
 import { graphLibraryEntries } from '@/src/application/graph-library';
 import { deriveProposalComparison } from '@/src/application/proposal-comparison';
+import { proposalScenarioKey, type ProposalReviewSubmission } from '@/src/application/proposal-review';
 import { subgraphResizeLimits } from '@/src/application/subgraph-resize';
 import { dynamicWorkerGroupResizeLimits } from '@/src/application/dynamic-worker-layout';
-import { validateGraph } from '@/src/domain';
+import { validateGraph, type BranchScenario } from '@/src/domain';
 import { AlignmentGuides } from '@/src/features/canvas/interactions/alignment-guides';
 import { useCanvasInteractions } from '@/src/features/canvas/interactions/use-canvas-node-interactions';
 import { CanvasFlowNode } from '@/src/features/canvas/canvas-node';
@@ -63,6 +64,7 @@ import {
 } from '@/src/features/proposals/proposal-overview';
 import {
   proposalCanvasFocusFor,
+  proposalCanvasFocusForScenario,
   proposalInitialCanvasFitNodeIds,
 } from '@/src/features/proposals/proposal-canvas-focus';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
@@ -201,6 +203,7 @@ export function GraphWorkspace() {
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceMarker | null>(null);
   const [selectedRelationshipId, setSelectedRelationshipId] = useState<string | null>(null);
   const [proposalFocusEntryKey, setProposalFocusEntryKey] = useState<string | null>(null);
+  const [proposalFocusScenario, setProposalFocusScenario] = useState<BranchScenario | null>(null);
   const [projectionFitRequest, setProjectionFitRequest] = useState<ProjectionFitRequest | null>(null);
   const [inspectorFocusRequest, setInspectorFocusRequest] = useState<InspectorFocusRequest | null>(null);
   const [graphSettingsRequest, setGraphSettingsRequest] = useState<GraphSettingsRequest | null>(null);
@@ -221,6 +224,7 @@ export function GraphWorkspace() {
     setSelectedRelationshipId(null);
     setScenarioSelection(null);
     setProposalFocusEntryKey(null);
+    setProposalFocusScenario(null);
   }, []);
   const isCompactWorkspace = useMediaQuery('(max-width: 1099px)');
   const stageRef = useRef<HTMLElement>(null);
@@ -292,13 +296,13 @@ export function GraphWorkspace() {
     ? proposalEntryByKey.get(proposalFocusEntryKey) ?? null
     : null;
   const proposalCanvasFocus = useMemo(
-    () => proposalCanvasFocusFor(
+    () => proposalCanvasFocusForScenario(proposalFocusScenario) ?? proposalCanvasFocusFor(
       proposalFocusEntry,
       proposalReview?.kind === 'comparable'
         ? [proposalReview.base, proposalReview.candidate]
         : [graph],
     ),
-    [graph, proposalFocusEntry, proposalReview],
+    [graph, proposalFocusEntry, proposalFocusScenario, proposalReview],
   );
   const reviewProjection = useMemo(
     () => proposalReviewToCanvasProjection(proposalReview),
@@ -654,8 +658,8 @@ export function GraphWorkspace() {
       setProjectionFitRequest({ key: `accepted-after-reject:${reviewedProposalId}`, mode: 'design' });
     }
   }, [proposal?.id, rejectProposal, resetPresentation]);
-  const handleRequestProposalChanges = useCallback((feedback: string) => {
-    const result = requestProposalChanges(feedback);
+  const handleRequestProposalChanges = useCallback((submission: string | ProposalReviewSubmission) => {
+    const result = requestProposalChanges(submission);
     if (result.ok) {
       setRequestedPresentationMode('proposal');
       setShowInspector(true);
@@ -1335,11 +1339,20 @@ export function GraphWorkspace() {
             <div className="workspace-inspector-content">
               {activeViewMode === 'proposal' ? (
                 <ProposalPanel
+                  key={proposal?.id ?? reviewRequest?.proposalId ?? 'proposal-empty'}
                   proposal={proposal}
                   review={proposalReview}
                   reviewRequest={reviewRequest}
                   activeEntryKey={proposalFocusEntryKey}
-                  onEntrySelect={(entry) => setProposalFocusEntryKey(entry?.key ?? null)}
+                  onEntrySelect={(entry) => {
+                    setProposalFocusScenario(null);
+                    setProposalFocusEntryKey(entry?.key ?? null);
+                  }}
+                  activePathKey={proposalFocusScenario ? proposalScenarioKey(proposalFocusScenario) : null}
+                  onPathSelect={(scenario) => {
+                    setProposalFocusEntryKey(null);
+                    setProposalFocusScenario(scenario);
+                  }}
                   onApprove={handleApproveProposal}
                   onRequestChanges={handleRequestProposalChanges}
                   onReject={handleRejectProposal}

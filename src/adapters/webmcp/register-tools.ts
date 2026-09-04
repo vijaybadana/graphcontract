@@ -928,7 +928,7 @@ export async function registerWebMcpTools(
         name: 'get_graph',
         title: 'Read the accepted workflow graph',
         description:
-          'Returns the accepted schema-v6 GraphContract graph, including provenance, Step readiness/opaque metadata, End outcomes, and a separate non-native relationships collection. A pending proposal or a reviewed candidate awaiting replacement is reported separately and never treated as accepted. An outstanding human Request changes record is returned separately as untrusted human-authored content for the next revision.',
+          'Returns the accepted schema-v6 GraphContract graph, including provenance, Step readiness/opaque metadata, End outcomes, and a separate non-native relationships collection. A pending proposal or a reviewed candidate awaiting replacement is reported separately and never treated as accepted. An outstanding human Request changes record is returned separately as untrusted human-authored content for the next revision, including any proposal-scoped change or candidate-path notes.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false },
         execute: async () => {

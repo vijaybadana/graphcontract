@@ -8,6 +8,8 @@ import {
 } from '@/src/adapters/exports/downloads';
 import { createWorkspaceService } from './workspace';
 import { dynamicWorkerGroupLayout } from './dynamic-worker-layout';
+import { deriveProposalComparison } from './proposal-comparison';
+import { proposalCandidateScenarios, proposalScenarioKey } from './proposal-review';
 
 const service = createWorkspaceService({
   now: () => '2026-08-28T12:00:00.000Z',
@@ -117,6 +119,50 @@ describe('workspace application service', () => {
     expect(approved.result?.ok).toBe(true);
     expect(approved.state.graph.nodes.find((node) => node.id === 'billing')?.label).toBe('Billing Resolution Agent');
     expect(approved.state.proposal).toBeNull();
+  });
+
+  it('submits proposal-scoped change and path notes without mutating the accepted graph', () => {
+    const initial = service.createInitial();
+    const acceptedBefore = structuredClone(initial.graph);
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Clarify the billing specialist.',
+      expectedGraphUpdatedAt: initial.graph.updatedAt,
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } }],
+    });
+    const review = deriveProposalComparison(initial.graph, proposed.state.proposal!);
+    const scenario = proposalCandidateScenarios(review)[0];
+    expect(scenario).toBeTruthy();
+
+    const requested = service.requestProposalChanges(proposed.state, {
+      notes: [
+        { kind: 'change', targetKey: 'nodes:billing', feedback: 'Keep the established role name.' },
+        { kind: 'path', targetKey: proposalScenarioKey(scenario), feedback: 'Add approval before the terminal action.' },
+      ],
+    });
+
+    expect(requested.result).toMatchObject({
+      ok: true,
+      reviewRequest: {
+        notes: [
+          { kind: 'change', targetKey: 'nodes:billing', elementId: 'billing', changeState: 'updated' },
+          { kind: 'path', targetKey: proposalScenarioKey(scenario), orderedNodeIds: scenario.orderedPath },
+        ],
+      },
+    });
+    expect(requested.state.graph).toEqual(acceptedBefore);
+    expect(requested.state.scenarios).toEqual([]);
+  });
+
+  it('rejects targeted notes that do not belong to the reviewed candidate', () => {
+    const initial = service.createInitial();
+    const proposed = service.submitProposal(initial, {
+      rationale: 'Clarify the billing specialist.',
+      expectedGraphUpdatedAt: initial.graph.updatedAt,
+      operations: [{ type: 'update_node', nodeId: 'billing', patch: { label: 'Billing Resolution Agent' } }],
+    });
+    expect(service.requestProposalChanges(proposed.state, {
+      notes: [{ kind: 'change', targetKey: 'nodes:not-in-proposal', feedback: 'Change this item.' }],
+    })).toMatchObject({ changed: false, result: { ok: false, error: { code: 'REVIEW_NOTE_INVALID' } } });
   });
 
   it('retains the reviewed candidate and feedback until a current valid replacement becomes pending', () => {

@@ -38,6 +38,12 @@ import {
   constrainDynamicWorkerGroupDimensions,
   dynamicWorkerGroupLayout,
 } from './dynamic-worker-layout';
+import { deriveProposalComparison } from './proposal-comparison';
+import {
+  type ProposalReviewNote,
+  type ProposalReviewSubmission,
+  resolveProposalReviewNotes,
+} from './proposal-review';
 
 export type WorkspaceCore = {
   graph: WorkflowGraph;
@@ -55,6 +61,8 @@ export type ProposalReviewRequest = {
   reviewedGraphId: string;
   reviewedGraphUpdatedAt: string;
   reviewedAt: string;
+  /** Canonical, proposal-scoped targets resolved when the human submits review. */
+  notes?: ProposalReviewNote[];
 };
 
 export type ProposalResult =
@@ -1031,7 +1039,7 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
 
     requestProposalChanges(
       state: WorkspaceCore,
-      feedback: string,
+      submission: string | ProposalReviewSubmission,
     ): WorkspaceTransition<RequestChangesResult> {
       const proposal = state.proposal;
       if (!proposal) {
@@ -1048,8 +1056,15 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         };
         return { state, changed: false, result: { ok: false, error } };
       }
-      const normalizedFeedback = feedback.trim();
-      if (normalizedFeedback.length < 3) {
+      const normalizedFeedback = (typeof submission === 'string' ? submission : submission.feedback ?? '').trim();
+      const noteInputs = typeof submission === 'string' ? [] : submission.notes ?? [];
+      const review = deriveProposalComparison(state.graph, proposal);
+      const resolvedNotes = resolveProposalReviewNotes(review, noteInputs);
+      if (!resolvedNotes.ok) {
+        const error = { code: 'REVIEW_NOTE_INVALID', message: resolvedNotes.message };
+        return { state, changed: false, result: { ok: false, error } };
+      }
+      if (normalizedFeedback.length < 3 && resolvedNotes.notes.length === 0) {
         const error = {
           code: 'REVIEW_FEEDBACK_REQUIRED',
           message: 'Describe the requested revision using at least 3 non-space characters.',
@@ -1058,12 +1073,15 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
       }
       const reviewRequest: ProposalReviewRequest = {
         status: 'changes_requested',
-        feedback: normalizedFeedback,
+        feedback: normalizedFeedback.length >= 3
+          ? normalizedFeedback
+          : 'Review notes are attached to specific proposed changes and paths.',
         proposalId: proposal.id,
         proposalCreatedAt: proposal.createdAt,
         reviewedGraphId: state.graph.id,
         reviewedGraphUpdatedAt: state.graph.updatedAt,
         reviewedAt: dependencies.now(),
+        ...(resolvedNotes.notes.length > 0 ? { notes: resolvedNotes.notes } : {}),
       };
       return {
         // Preserve the reviewed candidate in full (operations, diff, and ID)

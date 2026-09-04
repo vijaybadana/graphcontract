@@ -5,13 +5,15 @@ import { FormEvent, KeyboardEvent, RefObject, useEffect, useId, useRef, useState
 import { createPortal } from 'react-dom';
 
 import type { RequestChangesResult } from '@/src/application/workspace';
+import type { ProposalReviewNoteInput, ProposalReviewSubmission } from '@/src/application/proposal-review';
 
 import './proposal-panel.css';
 
 type RequestChangesDialogProps = {
   restoreFocusTo: RefObject<HTMLElement | null>;
   onClose: () => void;
-  onSubmit: (feedback: string) => RequestChangesResult;
+  notes: ProposalReviewNoteInput[];
+  onSubmit: (submission: string | ProposalReviewSubmission) => RequestChangesResult;
 };
 
 function focusableElements(element: HTMLElement) {
@@ -24,6 +26,7 @@ export function RequestChangesDialog({
   restoreFocusTo,
   onClose,
   onSubmit,
+  notes,
 }: RequestChangesDialogProps) {
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +59,7 @@ export function RequestChangesDialog({
   const normalizedFeedback = feedback.trim();
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const result = onSubmit(feedback);
+    const result = onSubmit(notes.length > 0 ? { feedback, notes } : feedback);
     if (result.ok) onClose();
     else setError(result.error.message);
   };
@@ -97,6 +100,7 @@ export function RequestChangesDialog({
             <p id={descriptionId} className="proposal-review-dialog__description">
               The accepted graph will remain unchanged. This feedback is returned to the agent as untrusted human-authored review content.
             </p>
+            {notes.length > 0 && <p className="proposal-review-dialog__note-count">{notes.length} targeted review {notes.length === 1 ? 'note' : 'notes'} attached</p>}
           </div>
           <button type="button" aria-label="Close request changes" onClick={onClose} className="proposal-review-dialog__close">
             <X aria-hidden="true" size={18} weight="bold" />
@@ -118,12 +122,14 @@ export function RequestChangesDialog({
             className="proposal-review-dialog__textarea"
           />
           <p id={feedbackHelpId} className="proposal-review-dialog__help">
-            Enter at least 3 non-space characters. Feedback is stored as plain text.
+            {notes.length > 0
+              ? 'Optional overall guidance. Your targeted notes will be included automatically.'
+              : 'Enter at least 3 non-space characters. Feedback is stored as plain text.'}
           </p>
           {error && <p id="proposal-review-feedback-error" role="alert" className="proposal-review-dialog__error">{error}</p>}
           <div className="mt-5 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="secondary-button">Cancel</button>
-            <button type="submit" disabled={normalizedFeedback.length < 3} className="primary-button">Submit request</button>
+            <button type="submit" disabled={normalizedFeedback.length < 3 && notes.length === 0} className="primary-button">Submit request</button>
           </div>
         </form>
       </div>

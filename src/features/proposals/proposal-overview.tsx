@@ -232,12 +232,17 @@ export function ProposalOverview({
   comparison,
   onChangeSelect,
   changeButtonRef,
+  visibleSections,
 }: {
   comparison: ProposalComparison;
   onChangeSelect?: (entry: ProposalReviewEntry, trigger: HTMLButtonElement) => void;
   changeButtonRef?: (entry: ProposalReviewEntry, element: HTMLButtonElement | null) => void;
+  visibleSections?: readonly string[];
 }) {
   const allEntries = proposalReviewEntries(comparison);
+  const visibleEntries = visibleSections
+    ? allEntries.filter((entry) => visibleSections.includes(entry.section))
+    : allEntries;
   const total = allEntries.length;
   const added = allEntries.filter(({ entry }) => entry.state === 'added').length;
   const updated = allEntries.filter(({ entry }) => entry.state === 'updated').length;
@@ -263,7 +268,7 @@ export function ProposalOverview({
         <h3>Changes</h3>
         {total === 0 && <p>No effective graph changes</p>}
         <div className="proposal-overview-change-list">
-          {allEntries.map((reviewEntry) => {
+          {visibleEntries.map((reviewEntry) => {
             const { sectionLabel: section, entry } = reviewEntry;
             return (
             <button

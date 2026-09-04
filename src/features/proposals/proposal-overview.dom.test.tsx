@@ -49,6 +49,8 @@ describe('ProposalPanel overview', () => {
     render(<ProposalPanel proposal={proposal} review={review} reviewRequest={null} onApprove={onApprove} onRequestChanges={vi.fn()} onReject={vi.fn()} />);
 
     expect(screen.getByRole('heading', { name: 'Proposal' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Changes 1/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Paths \d+/ })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Graph overview' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Changes' })).toBeTruthy();
     expect(screen.getByLabelText('Proposal diff summary').textContent).toContain(
@@ -67,6 +69,40 @@ describe('ProposalPanel overview', () => {
     expect(onApprove).toHaveBeenCalledOnce();
     expect(graph).toEqual(acceptedBefore);
   }, 30_000);
+
+  it('reviews candidate paths before approval and submits a targeted path note', () => {
+    const { graph, proposal } = labelProposal();
+    const acceptedBefore = structuredClone(graph);
+    const onRequestChanges = vi.fn(() => ({
+      ok: true as const,
+      reviewRequest: {
+        status: 'changes_requested' as const,
+        feedback: 'Review notes are attached to specific proposed changes and paths.',
+        proposalId: proposal.id,
+        proposalCreatedAt: proposal.createdAt,
+        reviewedGraphId: graph.id,
+        reviewedGraphUpdatedAt: graph.updatedAt,
+        reviewedAt: '2026-09-04T12:00:00.000Z',
+      },
+    }));
+    const onPathSelect = vi.fn();
+    render(<ProposalPanel proposal={proposal} review={deriveProposalComparison(graph, proposal)} reviewRequest={null} onApprove={vi.fn()} onRequestChanges={onRequestChanges} onReject={vi.fn()} onPathSelect={onPathSelect} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /Paths \d+/ }));
+    expect(screen.getByRole('list', { name: 'Candidate graph paths' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show details for path 1' }));
+    const note = screen.getByRole('textbox', { name: 'Add path note' });
+    fireEvent.change(note, { target: { value: 'Require approval before this terminal outcome.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+    expect(screen.getByText('Review notes')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Request changes (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit request' }));
+    expect(onRequestChanges).toHaveBeenCalledWith(expect.objectContaining({
+      notes: [expect.objectContaining({ kind: 'path', feedback: 'Require approval before this terminal outcome.' })],
+    }));
+    expect(graph).toEqual(acceptedBefore);
+  });
 
   it('opens an ordered change detail, presents Before to After, and restores row focus on Back', async () => {
     const { graph, proposal } = labelProposal();

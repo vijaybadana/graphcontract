@@ -1,4 +1,5 @@
 import { ProposalReviewRequest, WorkspaceCore } from '@/src/application/workspace';
+import type { ProposalReviewNote } from '@/src/application/proposal-review';
 import {
   enumerateScenariosBounded,
   graphEdgeSchema,
@@ -50,6 +51,33 @@ function normalizeReviewRequest(value: unknown): ProposalReviewRequest | null {
     || typeof value.reviewedGraphUpdatedAt !== 'string'
     || typeof value.reviewedAt !== 'string'
   ) return null;
+  const notes = Array.isArray(value.notes)
+    ? value.notes.flatMap((candidate): ProposalReviewNote[] => {
+        if (!isRecord(candidate) || typeof candidate.feedback !== 'string' || candidate.feedback.trim().length < 3 || typeof candidate.targetKey !== 'string') return [];
+        if (candidate.kind === 'change' && typeof candidate.section === 'string' && typeof candidate.elementId === 'string' && ['added', 'updated', 'removed'].includes(String(candidate.changeState))) {
+          return [{
+            kind: 'change',
+            targetKey: candidate.targetKey,
+            section: candidate.section,
+            elementId: candidate.elementId,
+            changeState: candidate.changeState as 'added' | 'updated' | 'removed',
+            feedback: candidate.feedback.trim(),
+          } as ProposalReviewNote];
+        }
+        if (candidate.kind === 'path' && Array.isArray(candidate.orderedNodeIds) && candidate.orderedNodeIds.every((id) => typeof id === 'string') && Array.isArray(candidate.traversedEdgeIds) && candidate.traversedEdgeIds.every((id) => typeof id === 'string') && typeof candidate.terminalNodeId === 'string' && isRecord(candidate.terminalOutcome)) {
+          return [{
+            kind: 'path',
+            targetKey: candidate.targetKey,
+            orderedNodeIds: candidate.orderedNodeIds,
+            traversedEdgeIds: candidate.traversedEdgeIds,
+            terminalNodeId: candidate.terminalNodeId,
+            terminalOutcome: candidate.terminalOutcome,
+            feedback: candidate.feedback.trim(),
+          } as ProposalReviewNote];
+        }
+        return [];
+      })
+    : [];
   return {
     status: 'changes_requested',
     feedback,
@@ -58,6 +86,7 @@ function normalizeReviewRequest(value: unknown): ProposalReviewRequest | null {
     reviewedGraphId: value.reviewedGraphId,
     reviewedGraphUpdatedAt: value.reviewedGraphUpdatedAt,
     reviewedAt: value.reviewedAt,
+    ...(notes.length > 0 ? { notes } : {}),
   };
 }
 
