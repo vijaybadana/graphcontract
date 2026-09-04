@@ -397,7 +397,7 @@ export function GraphWorkspace() {
     }
     openInspectorForSelection();
   }, [clearSelection, evidenceMarkerByTarget, openInspectorForSelection, setSelection]);
-  const selectSystemRelationship = useCallback((relationshipId: string) => {
+  const selectSystemRelationship = useCallback((relationshipId: string, revealInspector = true) => {
     if (activeViewMode === 'proposal') {
       const proposalEntry = proposalEntryByKey.get(`relationships:${relationshipId}`);
       if (proposalEntry?.entry.state !== 'unchanged') {
@@ -416,7 +416,7 @@ export function GraphWorkspace() {
         : null,
     );
     clearSelection();
-    openInspectorForSelection();
+    if (revealInspector) openInspectorForSelection();
   }, [activeViewMode, clearSelection, evidenceMarkerByTarget, evidenceOverlayVisible, graph.relationships, openInspectorForSelection, proposalEntryByKey, relationshipPreviewGraph.relationships]);
   const activateStepModifier = useCallback(
     (nodeId: string, modifier: StepModifierPresentation) => {
@@ -916,7 +916,7 @@ export function GraphWorkspace() {
       if (activeViewMode === 'proposal') return;
       const selectedSystemRelationship = edges.find(isCanvasSystemRelationshipEdge);
       if (selectedSystemRelationship) {
-        selectSystemRelationship(selectedSystemRelationship.data.relationship.id);
+        selectSystemRelationship(selectedSystemRelationship.data.relationship.id, false);
         return;
       }
       const selectedRuntimeNode = nodes.find(
@@ -930,9 +930,6 @@ export function GraphWorkspace() {
         edges,
         useGraphStore.getState().selection.primary,
       );
-      if (nextSelection.primary || selectedRuntimeNode) {
-        openInspectorForSelection();
-      }
       if (nextSelection.primary?.type === 'node' && evidenceOverlayVisible) {
         setSelectedEvidence(evidenceMarkerByTarget.get(`node:${nextSelection.primary.id}`) ?? null);
       } else if (nextSelection.primary?.type === 'edge' && evidenceOverlayVisible) {
@@ -970,20 +967,34 @@ export function GraphWorkspace() {
       }
       if (node.type === 'runtimeInstance') {
         setRuntimeSelection(node.data);
-        openInspectorForSelection();
         return;
       }
       setRuntimeSelection(null);
       setSelectedRelationshipId(null);
       makePrimary({ type: node.type === 'subgraph' ? 'subgraph' : 'node', id: node.id });
     },
-    [activeViewMode, makePrimary, openInspectorForSelection, proposalEntryByKey],
+    [activeViewMode, makePrimary, proposalEntryByKey],
+  );
+
+  const handleNodeDoubleClick = useCallback<NodeMouseHandler<CanvasFlowNode>>(
+    (_, node) => {
+      if (activeViewMode === 'proposal') return;
+      if (node.type === 'runtimeInstance') {
+        setRuntimeSelection(node.data);
+      } else {
+        setRuntimeSelection(null);
+        setSelectedRelationshipId(null);
+        makePrimary({ type: node.type === 'subgraph' ? 'subgraph' : 'node', id: node.id });
+      }
+      openInspectorForSelection();
+    },
+    [activeViewMode, makePrimary, openInspectorForSelection],
   );
 
   const handleEdgeClick = useCallback<EdgeMouseHandler<CanvasFlowEdge>>(
     (_, edge) => {
       if (isCanvasSystemRelationshipEdge(edge)) {
-        selectSystemRelationship(edge.data.relationship.id);
+        selectSystemRelationship(edge.data.relationship.id, false);
         return;
       }
       const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
@@ -999,6 +1010,21 @@ export function GraphWorkspace() {
       if (domainEdgeId) makePrimary({ type: 'edge', id: domainEdgeId });
     },
     [activeViewMode, makePrimary, proposalEntryByKey, selectSystemRelationship],
+  );
+
+  const handleEdgeDoubleClick = useCallback<EdgeMouseHandler<CanvasFlowEdge>>(
+    (_, edge) => {
+      if (activeViewMode === 'proposal') return;
+      if (isCanvasSystemRelationshipEdge(edge)) {
+        selectSystemRelationship(edge.data.relationship.id);
+        return;
+      }
+      const [domainEdgeId] = domainEdgeIdsForCanvasEdge(edge);
+      if (!domainEdgeId) return;
+      makePrimary({ type: 'edge', id: domainEdgeId });
+      openInspectorForSelection();
+    },
+    [activeViewMode, makePrimary, openInspectorForSelection, selectSystemRelationship],
   );
 
   const addPalettePayload = useCallback(
@@ -1228,7 +1254,9 @@ export function GraphWorkspace() {
             onSelectionStart={canvasInteractions.onSelectionStart}
             onSelectionEnd={canvasInteractions.onSelectionEnd}
             onNodeClick={handleNodeClick}
+            onNodeDoubleClick={handleNodeDoubleClick}
             onEdgeClick={handleEdgeClick}
+            onEdgeDoubleClick={handleEdgeDoubleClick}
             onPaneClick={() => {
               setRuntimeSelection(null);
               setSelectedEvidence(null);

@@ -150,6 +150,35 @@ test('manual Fit encloses the graph inside whichever desktop side rails are open
   await expectFitInsideOpenDesktopRails(app);
 });
 
+test('canvas selection stays unobtrusive until a node or edge is double-clicked', async ({ app }) => {
+  await app.setViewportSize({ width: 1440, height: 900 });
+  await loadResearchIntake(app);
+
+  const collapseInspector = app.getByRole('button', { name: 'Collapse inspector' });
+  if (await collapseInspector.isVisible()) await collapseInspector.click();
+  const openInspector = app.getByRole('button', { name: 'Open Inspector' });
+  await expect(openInspector).toBeVisible();
+
+  const node = app.getByTestId('rf__node-clarify-request');
+  await node.click();
+  await expect(node).toHaveClass(/selected/);
+  await expect(openInspector).toBeVisible();
+
+  await node.dblclick();
+  await expect(collapseInspector).toBeVisible();
+  await collapseInspector.click();
+  await expect(openInspector).toBeVisible();
+
+  const edge = app.getByTestId('rf__edge-clarify-write-brief');
+  const midpoint = await settledPathHitPoint(edge.locator('.react-flow__edge-interaction'));
+  await app.mouse.click(midpoint.x, midpoint.y);
+  await expect(edge).toHaveClass(/selected/);
+  await expect(openInspector).toBeVisible();
+
+  await app.mouse.dblclick(midpoint.x, midpoint.y);
+  await expect(collapseInspector).toBeVisible();
+});
+
 test('node and edge hover feedback stays visible without changing route patterns', async ({ app }) => {
   await app.emulateMedia({ reducedMotion: 'no-preference' });
   await app.setViewportSize({ width: 1440, height: 900 });
