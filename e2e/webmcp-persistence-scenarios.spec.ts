@@ -260,7 +260,8 @@ test('human review feedback survives reload and is consumed only by a valid revi
   const candidatePaths = proposalPanel.getByRole('list', { name: 'Candidate graph paths' });
   await expect(candidatePaths).toBeVisible();
   await candidatePaths.locator('.scenario-row__select').first().click();
-  await expect(app.locator('.workspace-canvas[data-proposal-focus-key^="path:"]')).toBeVisible();
+  await expect(app.locator('[data-proposal-focus-key^="path:"]')).toBeVisible();
+  await expect(app.locator('.routing-edge__scenario-motion').first()).toBeVisible();
   await proposalPanel.getByRole('button', { name: 'Show details for path 1' }).click();
   await proposalPanel.getByRole('textbox', { name: 'Add path note' }).fill(
     'Require explicit review before this terminal outcome.',

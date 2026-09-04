@@ -271,8 +271,12 @@ export function GraphWorkspace() {
     ? scenarios.find((scenario) => scenario.id === selectedScenarioId) ?? null
     : null;
   const scenarioPresentation = useMemo(
-    () => activeViewMode === 'scenario' ? scenarioPresentationFor(selectedScenario) : null,
-    [activeViewMode, selectedScenario],
+    () => activeViewMode === 'scenario'
+      ? scenarioPresentationFor(selectedScenario)
+      : activeViewMode === 'proposal'
+        ? scenarioPresentationFor(proposalFocusScenario)
+        : null,
+    [activeViewMode, proposalFocusScenario, selectedScenario],
   );
   const canvasEditable = editable && activeViewMode === 'design';
   const proposalReview = useMemo(
