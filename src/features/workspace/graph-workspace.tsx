@@ -103,6 +103,9 @@ import { CanvasReviewFocusProvider } from '@/src/features/canvas/canvas-review-f
 
 const snapGrid: [number, number] = [12, 12];
 const panOnDrag = [1];
+// Manual navigation may pull back farther than automatic fit/focus actions.
+// Those actions keep their separate readability floors below.
+const canvasMinZoom = 0.08;
 const defaultEdgeOptions: DefaultEdgeOptions = {
   type: 'smoothstep',
   pathOptions: { borderRadius: 16, offset: 28 },
@@ -1259,7 +1262,7 @@ export function GraphWorkspace() {
             multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
             snapToGrid
             snapGrid={snapGrid}
-            minZoom={0.18}
+            minZoom={canvasMinZoom}
             maxZoom={2.5}
             deleteKeyCode={null}
           >
