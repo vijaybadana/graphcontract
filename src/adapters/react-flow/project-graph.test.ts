@@ -187,7 +187,7 @@ describe('projectGraphToCanvas', () => {
     )).toBe(false);
   });
 
-  it('projects the canonical Researcher workflow as a movable nested subgraph', () => {
+  it('projects repository-faithful Supervisor tools spawning a nested Researcher workflow', () => {
     const graph = graphLibraryEntries.find((entry) => entry.id === 'hierarchical-deep-research')!.graph;
     const design = projectGraphToCanvas(graph, null);
     const supervisor = design.nodes.find((node) => node.id === 'research-cell');
@@ -202,9 +202,9 @@ describe('projectGraphToCanvas', () => {
       id: 'researcher-workflow',
       type: 'subgraph',
       parentId: 'research-cell',
-      position: { x: 230, y: 380 },
-      initialWidth: 1500,
-      initialHeight: 620,
+      position: { x: 250, y: 380 },
+      initialWidth: 1180,
+      initialHeight: 500,
       draggable: true,
       selectable: true,
       dragHandle: '.subgraph-node-drag-surface',
@@ -213,43 +213,11 @@ describe('projectGraphToCanvas', () => {
     expect(researcherAgent).toMatchObject({
       parentId: 'researcher-workflow',
       type: 'contractNode',
-      position: { x: 370, y: 302 },
-      zIndex: 3,
+      position: { x: 260, y: 160 },
       hidden: false,
     });
-    expect(design.nodes.find((node) => node.type === 'dynamicWorkerGroup')).toMatchObject({
-      parentId: 'researcher-workflow',
-      draggable: true,
-      selectable: false,
-      dragHandle: '.dynamic-worker-group-drag-surface',
-      zIndex: 2,
-      data: {
-        templateNodeId: 'researcher-agent',
-        mergeNodeId: 'research-merge',
-        memberNodeIds: [
-          'researcher-worker-start',
-          'researcher-agent',
-          'research-tools',
-          'compress-findings',
-          'researcher-worker-end',
-        ],
-      },
-    });
-    expect(design.edges.find((edge) => edge.id === 'dispatch-send')).toMatchObject({
-      source: 'dispatch-research',
-      target: 'dynamic-worker-group:dispatch-send',
-      data: {
-        edge: { mode: 'send', target: 'researcher-agent' },
-        projection: 'template-boundary',
-      },
-    });
-    expect(design.edges.find((edge) => edge.id === 'researcher-merge')).toMatchObject({
-      source: 'dynamic-worker-group:dispatch-send',
-      data: {
-        edge: { source: 'researcher-agent', target: 'research-merge' },
-        projection: 'template-boundary',
-      },
-    });
+    expect(design.nodes.some((node) => node.type === 'dynamicWorkerGroup')).toBe(false);
+    expect(design.nodes.some((node) => node.id === 'research-merge')).toBe(false);
     expect(design.edges.find((edge) => edge.id === 'enter-research-cell')).toMatchObject({
       source: 'write-brief',
       target: 'research-cell',
@@ -258,26 +226,30 @@ describe('projectGraphToCanvas', () => {
         projection: 'subgraph-boundary',
       },
     });
-    expect(design.edges.find((edge) => edge.id === 'frame-researcher')).toMatchObject({
-      source: 'frame-question',
+    expect(design.edges.find((edge) => edge.id === 'supervisor-call-tools')).toMatchObject({
+      source: 'supervisor-agent',
+      target: 'supervisor-tools',
+    });
+    expect(design.edges.find((edge) => edge.id === 'supervisor-continue')).toMatchObject({
+      source: 'supervisor-tools',
+      target: 'supervisor-agent',
+      data: { edge: { loopCap: 2 } },
+    });
+    expect(design.edges.find((edge) => edge.id === 'supervisor-conduct-research')).toMatchObject({
+      source: 'supervisor-tools',
       target: 'researcher-workflow',
       data: {
-        edge: { target: 'researcher-start' },
         projection: 'subgraph-boundary',
+        edge: { target: 'researcher-start', label: 'ConductResearch ×N' },
       },
     });
-    expect(design.edges.find((edge) => edge.id === 'researcher-supervisor-review')).toMatchObject({
+    expect(design.edges.find((edge) => edge.id === 'researcher-return')).toMatchObject({
       source: 'researcher-workflow',
-      target: 'review-findings',
+      target: 'supervisor-tools',
       data: {
-        edge: { source: 'researcher-end' },
         projection: 'subgraph-boundary',
+        edge: { source: 'researcher-end', loopCap: 2 },
       },
-    });
-    expect(design.edges.find((edge) => edge.id === 'researcher-supervisor-loop')).toMatchObject({
-      source: 'review-findings',
-      target: 'frame-question',
-      data: { edge: { loopCap: 5 } },
     });
 
     const researcherCollapsed = structuredClone(graph);

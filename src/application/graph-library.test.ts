@@ -63,7 +63,7 @@ describe('graph library registry', () => {
     expect(voice.nodes.some((node) => node.kind === 'step' && node.retry !== undefined)).toBe(false);
   });
 
-  it('models source-backed hierarchical research with a bounded nested worker pool', () => {
+  it('models source-backed supervisor tools spawning concurrent researcher subgraph runs', () => {
     const entry = graphLibraryEntries.find((candidate) => candidate.id === 'hierarchical-deep-research')!;
     const supervisor = entry.graph.subgraphs.find((subgraph) => subgraph.id === 'research-cell')!;
     const researcherSubgraph = entry.graph.subgraphs.find(
@@ -74,8 +74,7 @@ describe('graph library registry', () => {
       (node) => node.parentId === researcherSubgraph.id,
     );
     const researcher = entry.graph.nodes.find((node) => node.id === 'researcher-agent');
-    const merge = entry.graph.nodes.find((node) => node.id === 'research-merge');
-    const send = entry.graph.edges.find((edge) => edge.id === 'dispatch-send');
+    const supervisorTools = entry.graph.nodes.find((node) => node.id === 'supervisor-tools');
 
     expect(entry.graph.id).toBe('library-hierarchical-deep-research');
     expect(supervisor).toMatchObject({ label: 'Research Supervisor', collapsed: false });
@@ -83,7 +82,7 @@ describe('graph library registry', () => {
       label: 'Researcher ×N',
       parentId: 'research-cell',
       collapsed: false,
-      dimensions: { width: 1500, height: 620 },
+      dimensions: { width: 1180, height: 500 },
     });
     expect(entry.layout).toMatchObject({
       preserveGraphGeometry: true,
@@ -91,75 +90,67 @@ describe('graph library registry', () => {
     });
     expect(supervisorMembers.map((node) => node.id)).toEqual(expect.arrayContaining([
       'research-cell-start',
-      'frame-question',
-      'review-findings',
+      'supervisor-agent',
+      'supervisor-tools',
       'research-cell-end',
     ]));
     expect(researcherMembers.map((node) => node.id)).toEqual(expect.arrayContaining([
       'researcher-start',
-      'dispatch-research',
       'researcher-agent',
-      'research-merge',
+      'researcher-tools',
+      'compress-research',
       'researcher-end',
     ]));
     expect(researcher).toMatchObject({ kind: 'step', executor: 'ai', label: 'Researcher Agent' });
-    expect(merge).toMatchObject({
-      kind: 'merge',
-      merge: {
-        reducer: { name: 'merge_research_notes', aggregateState: 'researchNotes' },
-        completion: { mode: 'all' },
-        waitingForDynamicInputs: true,
-      },
+    expect(supervisorTools).toMatchObject({
+      kind: 'step',
+      executor: 'tool',
+      label: 'Supervisor Tools',
+      config: { maxConcurrentResearchUnits: 5 },
     });
-    expect(send).toMatchObject({
-      mode: 'send',
-      source: 'dispatch-research',
-      target: 'researcher-agent',
-      send: {
-        destinationTemplateId: 'researcher-agent',
-        multiplicity: 'dynamic',
-        payloadLabel: 'research task',
-        mergeNodeId: 'research-merge',
-        payloadSchemaRef: 'ConductResearch.research_topic',
-        templateAnatomy: {
-          canonicalTemplateNodeId: 'researcher-agent',
-          nodes: expect.arrayContaining([
-            expect.objectContaining({ id: 'researcher-worker-start', kind: 'start' }),
-            expect.objectContaining({ id: 'researcher-agent', kind: 'step', executor: 'ai' }),
-            expect.objectContaining({ id: 'research-tools', kind: 'step', executor: 'tool' }),
-            expect.objectContaining({ id: 'compress-findings', kind: 'step', executor: 'ai' }),
-            expect.objectContaining({ id: 'researcher-worker-end', kind: 'end' }),
-          ]),
-        },
-      },
-    });
-    expect(entry.graph.edges.find((edge) => edge.id === 'researcher-supervisor-loop')).toMatchObject({
-      source: 'review-findings',
-      target: 'frame-question',
-      label: 'research more',
-      loopCap: 5,
-    });
-    expect(entry.graph.edges.find((edge) => edge.id === 'frame-researcher')).toMatchObject({
-      source: 'frame-question',
+    expect(entry.graph.edges.find((edge) => edge.id === 'supervisor-conduct-research')).toMatchObject({
+      mode: 'command',
+      source: 'supervisor-tools',
       target: 'researcher-start',
-      label: 'conduct research',
+      label: 'ConductResearch ×N',
+      provenance: {
+        representation: 'derived-semantic',
+        evidence: { evidenceClass: 'imperative-async-subgraph-invocation', confidence: 'high' },
+      },
     });
-    expect(entry.graph.edges.find((edge) => edge.id === 'frame-complete')).toMatchObject({
-      source: 'review-findings',
+    expect(entry.graph.edges.find((edge) => edge.id === 'supervisor-call-tools')).toMatchObject({
+      source: 'supervisor-agent',
+      target: 'supervisor-tools',
+      label: 'tool calls',
+    });
+    expect(entry.graph.edges.find((edge) => edge.id === 'supervisor-continue')).toMatchObject({
+      source: 'supervisor-tools',
+      target: 'supervisor-agent',
+      label: 'continue',
+      loopCap: 2,
+    });
+    expect(entry.graph.edges.find((edge) => edge.id === 'supervisor-finish')).toMatchObject({
+      source: 'supervisor-tools',
       target: 'research-cell-end',
-      label: 'research complete',
+      label: 'finish research',
     });
-    expect(entry.graph.edges.some((edge) => (
-      edge.source === 'frame-question' && edge.target === 'research-cell-end'
-    ))).toBe(false);
-    expect(entry.graph.edges.find((edge) => edge.id === 'merge-researcher-end')).toMatchObject({
-      source: 'research-merge',
-      target: 'researcher-end',
+    expect(entry.graph.edges.find((edge) => edge.id === 'researcher-continue')).toMatchObject({
+      source: 'researcher-tools',
+      target: 'researcher-agent',
+      loopCap: 2,
     });
-    expect(entry.graph.edges.some((edge) => edge.id === 'merge-tools')).toBe(false);
-    expect(entry.graph.edges.some((edge) => edge.id === 'tools-compress')).toBe(false);
-    expect(supervisor.dimensions).toEqual({ width: 1930, height: 1080 });
-    expect(researcher?.position).toEqual({ x: 370, y: 302 });
+    expect(entry.graph.edges.find((edge) => edge.id === 'researcher-return')).toMatchObject({
+      source: 'researcher-end',
+      target: 'supervisor-tools',
+      loopCap: 2,
+      provenance: { representation: 'derived-semantic' },
+    });
+    expect(entry.graph.nodes.some((node) => node.kind === 'merge')).toBe(false);
+    expect(entry.graph.edges.some((edge) => edge.mode === 'send')).toBe(false);
+    expect(entry.graph.nodes.some((node) => node.id === 'dispatch-research')).toBe(false);
+    expect(entry.graph.nodes.some((node) => node.id === 'review-findings')).toBe(false);
+    expect(supervisor.dimensions).toEqual({ width: 1660, height: 1000 });
+    expect(researcher?.position).toEqual({ x: 260, y: 160 });
   });
 
   it('rejects duplicate IDs, unsafe sources, and invalid graph inputs', () => {
