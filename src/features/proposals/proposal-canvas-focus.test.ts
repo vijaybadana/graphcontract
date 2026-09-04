@@ -97,4 +97,26 @@ describe('proposalCanvasFocusFor', () => {
       cameraMode: 'context',
     });
   });
+
+  it('includes ancestor subgraph frames in path highlighting and fit bounds', () => {
+    const scenario = {
+      ...enumerateScenarios(sampleGraph)[0],
+      orderedPath: ['nested-step', 'end'],
+    };
+    const graph = {
+      nodes: [
+        { id: 'nested-step', parentId: 'inner' },
+        { id: 'end' },
+      ],
+      subgraphs: [
+        { id: 'outer' },
+        { id: 'inner', parentId: 'outer' },
+      ],
+    } as unknown as Pick<WorkflowGraph, 'nodes' | 'subgraphs'>;
+
+    expect(proposalCanvasFocusForScenario(scenario, graph)).toMatchObject({
+      nodeIds: ['nested-step', 'end', 'inner', 'outer'],
+      fitNodeIds: ['nested-step', 'end', 'inner', 'outer'],
+    });
+  });
 });

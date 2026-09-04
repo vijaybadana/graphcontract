@@ -18,16 +18,32 @@ export type ProposalCanvasFocus = {
 };
 
 /** Candidate scenario focus is presentation-only and cannot alter accepted state. */
-export function proposalCanvasFocusForScenario(scenario: BranchScenario | null): ProposalCanvasFocus | null {
+export function proposalCanvasFocusForScenario(
+  scenario: BranchScenario | null,
+  graph?: Pick<WorkflowGraph, 'nodes' | 'subgraphs'>,
+): ProposalCanvasFocus | null {
   if (!scenario) return null;
+  const nodeById = new Map(graph?.nodes.map((node) => [node.id, node]) ?? []);
+  const subgraphById = new Map(graph?.subgraphs.map((subgraph) => [subgraph.id, subgraph]) ?? []);
+  const ancestorSubgraphIds = new Set<string>();
+  for (const nodeId of scenario.orderedPath) {
+    const visited = new Set<string>();
+    let parentId = nodeById.get(nodeId)?.parentId;
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      ancestorSubgraphIds.add(parentId);
+      parentId = subgraphById.get(parentId)?.parentId;
+    }
+  }
+  const focusedNodeIds = [...new Set([...scenario.orderedPath, ...ancestorSubgraphIds])];
   return {
     key: proposalScenarioKey(scenario),
-    nodeIds: [...new Set(scenario.orderedPath)],
+    nodeIds: focusedNodeIds,
     edgeIds: [...new Set(scenario.traversedEdges.map((edge) => edge.id))],
     contextNodeIds: [],
     contextEdgeIds: [],
     relationshipId: null,
-    fitNodeIds: [...new Set(scenario.orderedPath)],
+    fitNodeIds: focusedNodeIds,
     cameraMode: 'context',
   };
 }

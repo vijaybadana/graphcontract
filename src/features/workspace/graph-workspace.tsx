@@ -300,7 +300,10 @@ export function GraphWorkspace() {
     ? proposalEntryByKey.get(proposalFocusEntryKey) ?? null
     : null;
   const proposalCanvasFocus = useMemo(
-    () => proposalCanvasFocusForScenario(proposalFocusScenario) ?? proposalCanvasFocusFor(
+    () => proposalCanvasFocusForScenario(
+      proposalFocusScenario,
+      proposalReview?.kind === 'comparable' ? proposalReview.candidate : graph,
+    ) ?? proposalCanvasFocusFor(
       proposalFocusEntry,
       proposalReview?.kind === 'comparable'
         ? [proposalReview.base, proposalReview.candidate]
