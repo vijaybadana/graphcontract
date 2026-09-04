@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowCounterClockwiseIcon,
+  CaretDownIcon,
   CaretLeftIcon,
   CaretRightIcon,
   DownloadSimpleIcon,
@@ -52,6 +53,7 @@ export function ScenarioPanel({
   onCollapse = () => {},
 }: ScenarioPanelProps) {
   const [localSelectedScenarioId, setLocalSelectedScenarioId] = useState<string | null>(null);
+  const [expandedScenarioId, setExpandedScenarioId] = useState<string | null>(null);
   const [requestedPageIndex, setRequestedPageIndex] = useState(0);
   const pageStatusRef = useRef<HTMLParagraphElement>(null);
   const focusPageStatusAfterRenderRef = useRef(false);
@@ -154,7 +156,8 @@ export function ScenarioPanel({
       )}
       <div className="scenario-panel__list" role="list" aria-label="Generated scenarios">
         {visibleScenarios.map((scenario, index) => {
-          const expanded = activeScenarioId === scenario.id;
+          const selected = activeScenarioId === scenario.id;
+          const expanded = expandedScenarioId === scenario.id;
           const detailsId = `scenario-details-${scenario.id}`;
           const decisions = scenarioDecisionsFor(scenario);
           const terminalLabel = scenarioTerminalLabelFor(graph, scenario);
@@ -162,27 +165,37 @@ export function ScenarioPanel({
           return (
             <article
               key={scenario.id}
-              className={`scenario-row ${expanded ? 'is-selected' : ''}`}
+              className={`scenario-row ${selected ? 'is-selected' : ''} ${expanded ? 'is-expanded' : ''}`}
               role="listitem"
             >
-              <button
-                type="button"
-                className="scenario-row__select"
-                data-scenario-id={scenario.id}
-                aria-pressed={expanded}
-                aria-expanded={expanded}
-                aria-controls={detailsId}
-                onClick={() => selectScenario(scenario.id)}
-              >
-                <span className="scenario-row__heading"><strong>Path {pageStart + index + 1}</strong><small>{terminalLabel}</small></span>
-                <span className={`scenario-row__path ${expanded ? 'is-expanded' : ''}`}>
-                  <ModePathStrip
-                    items={pathItems(scenario)}
-                    expanded={expanded}
-                    loopCount={loopCount}
-                  />
-                </span>
-              </button>
+              <div className="scenario-row__summary">
+                <button
+                  type="button"
+                  className="scenario-row__select"
+                  data-scenario-id={scenario.id}
+                  aria-pressed={selected}
+                  onClick={() => selectScenario(scenario.id)}
+                >
+                  <span className="scenario-row__heading"><strong>Path {pageStart + index + 1}</strong><small>{terminalLabel}</small></span>
+                  <span className={`scenario-row__path ${expanded ? 'is-expanded' : ''}`}>
+                    <ModePathStrip
+                      items={pathItems(scenario)}
+                      expanded={expanded}
+                      loopCount={loopCount}
+                    />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="scenario-row__disclosure"
+                  aria-label={`${expanded ? 'Hide' : 'Show'} details for path ${pageStart + index + 1}`}
+                  aria-expanded={expanded}
+                  aria-controls={detailsId}
+                  onClick={() => setExpandedScenarioId(expanded ? null : scenario.id)}
+                >
+                  <CaretDownIcon size={14} weight="bold" aria-hidden="true" />
+                </button>
+              </div>
               {expanded && (
                 <div id={detailsId} className="scenario-row__expanded" aria-label={`Path ${pageStart + index + 1} details`}>
                   <dl>

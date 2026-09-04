@@ -29,8 +29,9 @@ describe('ScenarioPanel', () => {
     );
 
     const row = screen.getByRole('button', { name: /Path 1/ });
+    const disclosure = screen.getByRole('button', { name: 'Show details for path 1' });
     expect(row.getAttribute('aria-pressed')).toBe('false');
-    expect(row.getAttribute('aria-expanded')).toBe('false');
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false');
     expect(row.querySelector('.mode-path-strip')).toBeTruthy();
     expect(row.textContent).toContain(graph.nodes.find((node) => node.id === scenario.expectedTerminalNode)?.label ?? scenario.expectedTerminalNode);
     expect(screen.getAllByRole('link', { name: /Download / })).toHaveLength(3);
@@ -42,8 +43,11 @@ describe('ScenarioPanel', () => {
 
     expect(onScenarioSelect).toHaveBeenCalledWith(scenario.id);
     expect(row.getAttribute('aria-pressed')).toBe('true');
-    expect(row.getAttribute('aria-expanded')).toBe('true');
-    expect(document.getElementById(row.getAttribute('aria-controls')!)).toBeTruthy();
+    expect(screen.queryByText('Decisions')).toBeNull();
+
+    fireEvent.click(disclosure);
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(disclosure.getAttribute('aria-controls')!)).toBeTruthy();
     expect(screen.getAllByLabelText(
       scenario.orderedPath
         .map((nodeId) => graph.nodes.find((node) => node.id === nodeId)?.label ?? nodeId)
@@ -51,7 +55,7 @@ describe('ScenarioPanel', () => {
     )).toHaveLength(1);
     expect(screen.getByText('Decisions')).toBeTruthy();
     expect(screen.getByText('Ends at')).toBeTruthy();
-    expect(document.getElementById(row.getAttribute('aria-controls')!)?.textContent).toContain(
+    expect(document.getElementById(disclosure.getAttribute('aria-controls')!)?.textContent).toContain(
       graph.nodes.find((node) => node.id === scenario.expectedTerminalNode)?.label ?? scenario.expectedTerminalNode,
     );
     expect(screen.getAllByRole('link', { name: /Download / }).map(
@@ -64,8 +68,9 @@ describe('ScenarioPanel', () => {
 
     fireEvent.click(row);
     expect(onScenarioSelect).toHaveBeenLastCalledWith(null);
-    expect(row.getAttribute('aria-expanded')).toBe('false');
-    expect(document.getElementById(row.getAttribute('aria-controls')!)).toBeNull();
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide details for path 1' }));
+    expect(document.getElementById(disclosure.getAttribute('aria-controls')!)).toBeNull();
     expect(screen.getAllByRole('link', { name: /Download / })).toHaveLength(3);
   });
 
@@ -91,6 +96,7 @@ describe('ScenarioPanel', () => {
     render(<ScenarioPanel graph={graph} scenarios={[scenario]} onScenarioReplay={onScenarioReplay} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Path 1/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show details for path 1' }));
 
     expect(screen.getByText('Recommend next action').parentElement?.textContent).toContain('Recommend next action — Disqualify');
     expect(onScenarioReplay).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -127,7 +133,8 @@ describe('ScenarioPanel', () => {
     expect(createObjectUrl).toHaveBeenCalledTimes(3);
 
     fireEvent.click(document.querySelector('[data-scenario-id="scenario-1"]')!);
-    expect(document.querySelector('[data-scenario-id="scenario-1"]')?.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Show details for path 1' }));
+    expect(screen.getByRole('button', { name: 'Hide details for path 1' }).getAttribute('aria-expanded')).toBe('true');
     expect(document.querySelector('[data-scenario-id="scenario-1"]')?.closest('.scenario-row')?.querySelector('.scenario-row__expanded')).toBeTruthy();
     expect(screen.getAllByRole('link', { name: /Download / })).toHaveLength(3);
     expect(createObjectUrl).toHaveBeenCalledTimes(3);
@@ -173,16 +180,20 @@ describe('ScenarioPanel', () => {
     render(<ScenarioPanel graph={graph} scenarios={[scenario]} />);
 
     const row = document.querySelector('[data-scenario-id="scenario-8"]')!;
-    const hiddenStepCount = scenario.orderedPath.length - 2;
+    const hiddenStepCount = scenario.orderedPath.length - 3;
     expect(row.querySelector('.mode-path-strip__overflow')?.textContent).toBe(`+${hiddenStepCount} more`);
     expect(row.querySelector('.mode-path-strip__overflow')?.getAttribute('aria-label')).toBe(
-      `${hiddenStepCount} intermediate path steps hidden`,
+      `${hiddenStepCount} remaining path steps hidden`,
     );
-    expect(row.querySelectorAll('.mode-path-strip__node')).toHaveLength(2);
+    expect(row.querySelectorAll('.mode-path-strip__node')).toHaveLength(3);
 
     fireEvent.click(row);
 
-    expect(row.getAttribute('aria-expanded')).toBe('true');
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.querySelector('.mode-path-strip__overflow')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show details for path 1' }));
+
     expect(row.querySelector('.mode-path-strip__overflow')).toBeNull();
     expect(row.querySelectorAll('.mode-path-strip__node')).toHaveLength(scenario.orderedPath.length);
     expect(row.closest('.scenario-row')?.querySelector('.scenario-row__path.is-expanded')).toBeTruthy();

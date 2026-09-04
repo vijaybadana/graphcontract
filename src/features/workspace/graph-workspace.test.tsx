@@ -271,6 +271,7 @@ describe('GraphWorkspace subgraph creation', () => {
     useGraphStore.getState().loadResearchIntakeRoutingDemo();
     renderWorkspace(false);
     await screen.findByRole('application');
+    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
 
     act(() => {
       useGraphStore.getState().setSelection({

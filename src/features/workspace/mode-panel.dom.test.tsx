@@ -47,15 +47,15 @@ describe('mode panel presentation contract', () => {
     }));
     const { rerender } = render(<ModePathStrip items={items} loopCount={2} />);
 
-    expect(document.querySelectorAll('.mode-path-strip__node')).toHaveLength(2);
-    expect(screen.getByText('+6 more').getAttribute('title')).toBe('6 intermediate path steps hidden');
-    expect(screen.getByLabelText('6 intermediate path steps hidden')).toBeTruthy();
+    expect(document.querySelectorAll('.mode-path-strip__node')).toHaveLength(3);
+    expect(screen.getByText('+5 more').getAttribute('title')).toBe('5 remaining path steps hidden');
+    expect(screen.getByLabelText('5 remaining path steps hidden')).toBeTruthy();
     expect(screen.getByText('Loop ×2')).toBeTruthy();
 
     rerender(<ModePathStrip items={items} expanded loopCount={2} />);
 
     expect(document.querySelectorAll('.mode-path-strip__node')).toHaveLength(8);
-    expect(screen.queryByText('+6 more')).toBeNull();
+    expect(screen.queryByText('+5 more')).toBeNull();
     expect(screen.queryByText('Loop ×2')).toBeNull();
     expect(document.querySelector('.mode-path-strip.is-expanded')).toBeTruthy();
   });

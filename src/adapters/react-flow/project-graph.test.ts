@@ -202,9 +202,9 @@ describe('projectGraphToCanvas', () => {
       id: 'researcher-workflow',
       type: 'subgraph',
       parentId: 'research-cell',
-      position: { x: 250, y: 380 },
-      initialWidth: 1180,
-      initialHeight: 500,
+      position: { x: 962, y: 50 },
+      initialWidth: 1672,
+      initialHeight: 477,
       draggable: true,
       selectable: true,
       dragHandle: '.subgraph-node-drag-surface',
@@ -213,7 +213,7 @@ describe('projectGraphToCanvas', () => {
     expect(researcherAgent).toMatchObject({
       parentId: 'researcher-workflow',
       type: 'contractNode',
-      position: { x: 260, y: 160 },
+      position: { x: 310, y: 103 },
       hidden: false,
     });
     expect(design.nodes.some((node) => node.type === 'dynamicWorkerGroup')).toBe(false);

@@ -932,34 +932,51 @@ describe('workspace application service', () => {
 
   it('persists dynamic worker movement and size through the canonical Send template owner', () => {
     const libraryGraph = structuredClone(
-      graphLibraryEntries.find((entry) => entry.id === 'hierarchical-deep-research')!.graph,
+      graphLibraryEntries.find((entry) => entry.id === 'dynamic-parallelism-merge-demo')!.graph,
     );
+    const sendEdge = libraryGraph.edges.find((edge) => edge.id === 'parallel-send-search');
+    if (!sendEdge || sendEdge.mode !== 'send') throw new Error('Expected Send fixture.');
+    sendEdge.send.templateAnatomy = {
+      id: 'search-worker-anatomy',
+      label: 'Search evidence ×N',
+      dimensions: { width: 620, height: 232 },
+      canonicalTemplateNodeId: 'search-evidence',
+      nodes: [
+        { id: 'worker-start', kind: 'start', label: 'Start', position: { x: 20, y: 80 }, dimensions: { width: 80, height: 60 } },
+        { id: 'search-evidence', kind: 'step', executor: 'tool', label: 'Search evidence', position: { x: 140, y: 50 }, dimensions: { width: 160, height: 120 } },
+        { id: 'worker-end', kind: 'end', label: 'End', position: { x: 340, y: 80 }, dimensions: { width: 60, height: 60 } },
+      ],
+      edges: [
+        { id: 'worker-start-search', source: 'worker-start', target: 'search-evidence' },
+        { id: 'worker-search-end', source: 'search-evidence', target: 'worker-end' },
+      ],
+    };
     const initial = service.createInitial();
     const state = { ...initial, graph: libraryGraph };
-    const before = dynamicWorkerGroupLayout(state.graph, 'dispatch-send')!;
+    const before = dynamicWorkerGroupLayout(state.graph, 'parallel-send-search')!;
 
-    const moved = service.moveDynamicWorkerGroup(state, 'dispatch-send', {
+    const moved = service.moveDynamicWorkerGroup(state, 'parallel-send-search', {
       x: before.position.x + 24,
       y: before.position.y - 18,
     });
-    expect(dynamicWorkerGroupLayout(moved.state.graph, 'dispatch-send')?.position).toEqual({
+    expect(dynamicWorkerGroupLayout(moved.state.graph, 'parallel-send-search')?.position).toEqual({
       x: before.position.x + 24,
       y: before.position.y - 18,
     });
-    expect(moved.state.graph.edges.find((edge) => edge.id === 'dispatch-send')?.send)
+    expect(moved.state.graph.edges.find((edge) => edge.id === 'parallel-send-search')?.send)
       .toMatchObject({ templateAnatomy: { dimensions: before.dimensions } });
 
-    const resized = service.resizeDynamicWorkerGroup(moved.state, 'dispatch-send', {
+    const resized = service.resizeDynamicWorkerGroup(moved.state, 'parallel-send-search', {
       width: before.dimensions.width + 18,
       height: before.dimensions.height,
     });
-    expect(dynamicWorkerGroupLayout(resized.state.graph, 'dispatch-send')?.dimensions).toEqual({
+    expect(dynamicWorkerGroupLayout(resized.state.graph, 'parallel-send-search')?.dimensions).toEqual({
       width: before.dimensions.width + 18,
       height: before.dimensions.height,
     });
 
     const frozen = { ...resized.state, graph: { ...resized.state.graph, status: 'frozen' as const } };
-    expect(service.moveDynamicWorkerGroup(frozen, 'dispatch-send', { x: 0, y: 0 }).changed).toBe(false);
-    expect(service.resizeDynamicWorkerGroup(frozen, 'dispatch-send', { width: 400, height: 300 }).changed).toBe(false);
+    expect(service.moveDynamicWorkerGroup(frozen, 'parallel-send-search', { x: 0, y: 0 }).changed).toBe(false);
+    expect(service.resizeDynamicWorkerGroup(frozen, 'parallel-send-search', { width: 400, height: 300 }).changed).toBe(false);
   });
 });

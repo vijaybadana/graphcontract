@@ -51,7 +51,8 @@ test('all native downloads preserve graph, route, loop, and scenario truth', asy
   const scenarioRow = app.locator(`button[data-scenario-id="${selected.id}"]`);
   await scenarioRow.click();
   await expect(scenarioRow).toHaveAttribute('aria-pressed', 'true');
-  await expect(scenarioRow).toHaveAttribute('aria-expanded', 'true');
+  await app.getByRole('button', { name: 'Show details for path 1' }).click();
+  await expect(app.getByRole('button', { name: 'Hide details for path 1' })).toHaveAttribute('aria-expanded', 'true');
   await expect(scenarioRow.locator('.mode-path-strip__node')).toHaveCount(selected.orderedPath.length);
   await expect(scenarioRow.locator('.mode-path-strip__overflow')).toHaveCount(0);
   await expect(app.locator('.scenario-row__expanded')).toHaveCount(1);

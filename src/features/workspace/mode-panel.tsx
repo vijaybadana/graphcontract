@@ -59,44 +59,22 @@ export function ModePathStrip({
   expanded?: boolean;
   loopCount?: number;
 }) {
-  // Two endpoint chips plus one bounded summary fit every supported inspector
-  // width. The policy is intentionally independent of labels and path length
-  // so every collapsed scenario renders identically and deterministically.
-  const collapsed = !expanded && items.length > 2;
-  const hiddenCount = Math.max(0, items.length - 2);
+  // Keep two real intermediate steps visible in the compact summary. The
+  // terminal outcome is already named in the scenario-row heading, so the
+  // remaining route can collapse into one bounded summary without repeating
+  // the end chip or forcing tokens to overlap at inspector widths.
+  const collapsed = !expanded && items.length > 4;
+  const hiddenCount = Math.max(0, items.length - 3);
   const visible = collapsed
-    ? [items[0], items.at(-1)!]
+    ? items.slice(0, 3)
     : items;
 
   return (
-    <ol className={`mode-path-strip ${expanded ? 'is-expanded' : ''}`} aria-label={items.map((item) => item.label).join(' to ')}>
+    <ol className={`mode-path-strip ${collapsed ? 'is-collapsed' : ''} ${expanded ? 'is-expanded' : ''}`} aria-label={items.map((item) => item.label).join(' to ')}>
       {visible.map((item, index) => {
-        const insertOverflow = collapsed && index === 1;
         return (
           <li key={`${item.id}:${index}`}>
-            {insertOverflow && (
-              <>
-                <ArrowRightIcon className="mode-path-strip__arrow" size={12} aria-hidden="true" />
-                <span
-                  className="mode-path-strip__overflow"
-                  aria-label={`${hiddenCount} intermediate path steps hidden`}
-                  title={`${hiddenCount} intermediate path steps hidden`}
-                >
-                  +{hiddenCount} more
-                </span>
-                {loopCount > 0 && (
-                  <span
-                    className="mode-path-strip__loop"
-                    aria-label={`Loop traversed ${loopCount} times`}
-                    title={`Loop traversed ${loopCount} times within the configured bound`}
-                  >
-                    Loop ×{loopCount}
-                  </span>
-                )}
-                <ArrowRightIcon className="mode-path-strip__arrow" size={12} aria-hidden="true" />
-              </>
-            )}
-            {index > 0 && !insertOverflow && <ArrowRightIcon className="mode-path-strip__arrow" size={12} aria-hidden="true" />}
+            {index > 0 && <ArrowRightIcon className="mode-path-strip__arrow" size={12} aria-hidden="true" />}
             <span className="mode-path-strip__node" data-path-tone={item.tone} title={item.label}>
               {item.icon}
               <span>{item.label}</span>
@@ -104,6 +82,27 @@ export function ModePathStrip({
           </li>
         );
       })}
+      {collapsed && (
+        <li className="mode-path-strip__summary">
+          <ArrowRightIcon className="mode-path-strip__arrow" size={12} aria-hidden="true" />
+          <span
+            className="mode-path-strip__overflow"
+            aria-label={`${hiddenCount} remaining path steps hidden`}
+            title={`${hiddenCount} remaining path steps hidden`}
+          >
+            +{hiddenCount} more
+          </span>
+          {loopCount > 0 && (
+            <span
+              className="mode-path-strip__loop"
+              aria-label={`Loop traversed ${loopCount} times`}
+              title={`Loop traversed ${loopCount} times within the configured bound`}
+            >
+              Loop ×{loopCount}
+            </span>
+          )}
+        </li>
+      )}
     </ol>
   );
 }

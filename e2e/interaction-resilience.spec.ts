@@ -337,15 +337,17 @@ test('scenario accordions and repeated compact downloads remain valid without st
   const firstRow = app.locator(`button[data-scenario-id="${firstScenario.id}"]`);
   const secondRow = app.locator(`button[data-scenario-id="${secondScenario.id}"]`);
   await firstRow.click();
-  await expect(firstRow).toHaveAttribute('aria-expanded', 'true');
+  await app.getByRole('button', { name: 'Show details for path 1' }).click();
+  await expect(app.getByRole('button', { name: 'Hide details for path 1' })).toHaveAttribute('aria-expanded', 'true');
   await expectFitInsideOpenDesktopRails(app, firstScenario.orderedPath);
   await expect(firstRow.locator('.mode-path-strip.is-expanded')).toBeVisible();
   await expect(firstRow.locator('.mode-path-strip__overflow')).toHaveCount(0);
   await expect(firstRow.locator('.mode-path-strip__node')).toHaveCount(firstScenario.orderedPath.length);
 
   await secondRow.click();
-  await expect(firstRow).toHaveAttribute('aria-expanded', 'false');
-  await expect(secondRow).toHaveAttribute('aria-expanded', 'true');
+  await app.getByRole('button', { name: 'Show details for path 2' }).click();
+  await expect(app.getByRole('button', { name: 'Show details for path 1' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(app.getByRole('button', { name: 'Hide details for path 2' })).toHaveAttribute('aria-expanded', 'true');
   await expect(app.locator('.scenario-row__expanded')).toHaveCount(1);
 
   const globalFilenames = [

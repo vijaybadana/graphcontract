@@ -113,7 +113,8 @@ test('390 compact freeze and unfreeze retain accessible action names', async ({ 
   await expect(scenario).toBeVisible();
   await scenario.click();
   await expect(scenario).toHaveAttribute('aria-pressed', 'true');
-  await expect(scenario).toHaveAttribute('aria-expanded', 'true');
+  await app.getByRole('button', { name: 'Show details for path 1' }).click();
+  await expect(app.getByRole('button', { name: 'Hide details for path 1' })).toHaveAttribute('aria-expanded', 'true');
   await expect(app.getByLabel('Path 1 details')).toBeVisible();
   await expect(app.getByLabel('Contract downloads')).toBeVisible();
   await expect(app.getByRole('button', { name: 'Collapse scenarios panel' })).toBeVisible();
