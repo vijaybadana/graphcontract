@@ -853,6 +853,62 @@ describe('projectGraphToCanvas', () => {
     expect(proposedNode.initialHeight).toBe(acceptedNode.initialHeight);
   });
 
+  it('preserves accepted hierarchical geometry while previewing downstream additions', () => {
+    const graph = structuredClone(
+      graphLibraryEntries.find((entry) => entry.id === 'hierarchical-deep-research')!.graph,
+    );
+    const addedPosition = { x: 3210, y: 360 };
+    const proposal = createProposal(graph, {
+      rationale: 'Rename existing research steps and add one downstream review step.',
+      operations: [
+        {
+          type: 'update_node',
+          nodeId: 'supervisor-agent',
+          patch: { label: 'Research Supervisor Agent' },
+        },
+        {
+          type: 'update_node',
+          nodeId: 'researcher-agent',
+          patch: { description: 'Research one delegated topic with cited evidence.' },
+        },
+        { type: 'remove_edge', edgeId: 'brief-complete' },
+        {
+          type: 'add_node',
+          node: {
+            id: 'review-report',
+            kind: 'step',
+            executor: 'human',
+            label: 'Review report',
+            position: addedPosition,
+          },
+        },
+        {
+          type: 'add_edge',
+          edge: { id: 'brief-review', source: 'final-report', target: 'review-report', mode: 'normal' },
+        },
+        {
+          type: 'add_edge',
+          edge: { id: 'review-complete', source: 'review-report', target: 'research-complete', mode: 'normal' },
+        },
+      ],
+    }).proposal!;
+
+    const canvas = projectGraphToCanvas(graph, proposalProjection(graph, proposal));
+    const canvasNodes = new Map(canvas.nodes.map((node) => [node.id, node]));
+
+    for (const node of graph.nodes) {
+      expect(canvasNodes.get(node.id)?.position, node.id).toEqual(node.position);
+    }
+    for (const subgraph of graph.subgraphs) {
+      expect(canvasNodes.get(subgraph.id), subgraph.id).toMatchObject({
+        position: subgraph.position,
+        initialWidth: subgraph.dimensions.width,
+        initialHeight: subgraph.dimensions.height,
+      });
+    }
+    expect(canvasNodes.get('review-report')?.position).toEqual(addedPosition);
+  });
+
   it('projects the fully applied candidate when a proposal reparents a node into a new subgraph', () => {
     const graph = structuredClone(sampleGraph);
     const proposal = createProposal(graph, {

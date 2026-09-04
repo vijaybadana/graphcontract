@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import type { WorkflowGraph } from '@/src/domain';
+import { deriveProposalComparison } from '@/src/application/proposal-comparison';
+import { createProposal, sampleGraph, type WorkflowGraph } from '@/src/domain';
 import type { ProposalReviewEntry } from './proposal-overview';
-import { proposalCanvasFocusFor } from './proposal-canvas-focus';
+import { proposalCanvasFocusFor, proposalInitialCanvasFitNodeIds } from './proposal-canvas-focus';
 
 const entry = (
   section: string,
@@ -63,5 +64,27 @@ describe('proposalCanvasFocusFor', () => {
     }))).toMatchObject({
       nodeIds: ['agent', 'external-system:runner%2Fapi'], relationshipId: 'external-run',
     });
+  });
+
+  it('frames added proposal elements instead of fitting the full candidate', () => {
+    const proposal = createProposal(sampleGraph, {
+      rationale: 'Add a reviewed downstream check and rename an existing node.',
+      operations: [
+        { type: 'update_node', nodeId: 'classifier', patch: { label: 'Updated classifier' } },
+        {
+          type: 'add_node',
+          node: {
+            id: 'reviewed-check',
+            kind: 'step',
+            executor: 'deterministic',
+            label: 'Reviewed check',
+            position: { x: 1180, y: 320 },
+          },
+        },
+      ],
+    }).proposal!;
+    const review = deriveProposalComparison(sampleGraph, proposal);
+
+    expect(proposalInitialCanvasFitNodeIds(review)).toEqual(['reviewed-check']);
   });
 });

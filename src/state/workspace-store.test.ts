@@ -184,7 +184,7 @@ describe('workspace subgraph actions', () => {
     expect(useGraphStore.getState().graph.nodes.find((node) => node.id === firstId)?.position.x).toBeLessThan(5000);
   });
 
-  it('lays out proposal candidates ephemerally without mutating the accepted graph', async () => {
+  it('keeps proposal-authored positions without mutating or re-laying out the accepted graph', () => {
     const accepted = structuredClone(useGraphStore.getState().graph);
     const result = useGraphStore.getState().submitProposal({
       rationale: 'Insert a reviewed fraud check.',
@@ -206,13 +206,8 @@ describe('workspace subgraph actions', () => {
     });
 
     expect(result.ok).toBe(true);
-    await vi.waitFor(() => {
-      expect(useGraphStore.getState().proposalPreviewGraph).not.toBeNull();
-    });
     expect(useGraphStore.getState().graph).toEqual(accepted);
-    expect(useGraphStore.getState().proposalPreviewGraph?.nodes.find(
-      (node) => node.id === 'fraud-check',
-    )?.position).not.toEqual({ x: 5000, y: 5000 });
+    expect(useGraphStore.getState().proposalPreviewGraph).toBeNull();
     useGraphStore.getState().rejectProposal();
   });
 

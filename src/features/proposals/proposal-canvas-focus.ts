@@ -1,5 +1,7 @@
+import type { ProposalReview } from '@/src/application/proposal-comparison';
 import type { GraphEdge, NonNativeRelationship, WorkflowGraph } from '@/src/domain';
 import type { ProposalReviewEntry } from '@/src/features/proposals/proposal-overview';
+import { proposalReviewEntries } from '@/src/features/proposals/proposal-overview';
 
 export type ProposalCanvasFocus = {
   key: string;
@@ -89,4 +91,21 @@ export function proposalCanvasFocusFor(
     fitNodeIds: [],
     cameraMode: 'context',
   };
+}
+
+/**
+ * Proposal entry starts by framing the added region, not the entire candidate.
+ * If a proposal only updates or removes existing elements, frame those changes
+ * at their accepted coordinates instead. Per-change navigation subsequently
+ * replaces this aggregate focus with the selected review row.
+ */
+export function proposalInitialCanvasFitNodeIds(review: ProposalReview | null): string[] {
+  if (review?.kind !== 'comparable') return [];
+  const changed = proposalReviewEntries(review, false)
+    .filter(({ entry }) => entry.state !== 'unchanged');
+  const added = changed.filter(({ entry }) => entry.state === 'added');
+  const targets = added.length > 0 ? added : changed;
+  return [...new Set(targets.flatMap((entry) => (
+    proposalCanvasFocusFor(entry, [review.base, review.candidate])?.fitNodeIds ?? []
+  )))];
 }

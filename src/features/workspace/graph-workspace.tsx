@@ -61,7 +61,10 @@ import { ProposalPanel } from '@/src/features/proposals/proposal-panel';
 import {
   proposalReviewEntries,
 } from '@/src/features/proposals/proposal-overview';
-import { proposalCanvasFocusFor } from '@/src/features/proposals/proposal-canvas-focus';
+import {
+  proposalCanvasFocusFor,
+  proposalInitialCanvasFitNodeIds,
+} from '@/src/features/proposals/proposal-canvas-focus';
 import { ScenarioPanel } from '@/src/features/scenarios/scenario-panel';
 import { scenarioPresentationFor } from '@/src/features/scenarios/scenario-presentation';
 import { GraphLibrarySheet } from '@/src/features/library/graph-library-sheet';
@@ -143,7 +146,6 @@ export function reconcileProjectionSelection(
 export function GraphWorkspace() {
   const graph = useGraphStore((state) => state.graph);
   const proposal = useGraphStore((state) => state.proposal);
-  const proposalPreviewGraph = useGraphStore((state) => state.proposalPreviewGraph);
   const layoutPending = useGraphStore((state) => state.layoutPending);
   const reviewRequest = useGraphStore((state) => state.reviewRequest ?? null);
   const scenarios = useGraphStore((state) => state.scenarios);
@@ -279,6 +281,9 @@ export function GraphWorkspace() {
       : [],
     [proposalReview],
   );
+  const proposalInitialFitNodeIds = useMemo(() => {
+    return proposalInitialCanvasFitNodeIds(proposalReview);
+  }, [proposalReview]);
   const proposalEntryByKey = useMemo(
     () => new Map(proposalEntries.map((entry) => [entry.key, entry])),
     [proposalEntries],
@@ -290,18 +295,14 @@ export function GraphWorkspace() {
     () => proposalCanvasFocusFor(
       proposalFocusEntry,
       proposalReview?.kind === 'comparable'
-        ? [proposalReview.base, proposalPreviewGraph ?? proposalReview.candidate]
+        ? [proposalReview.base, proposalReview.candidate]
         : [graph],
     ),
-    [graph, proposalFocusEntry, proposalPreviewGraph, proposalReview],
+    [graph, proposalFocusEntry, proposalReview],
   );
   const reviewProjection = useMemo(
-    () => {
-      const projection = proposalReviewToCanvasProjection(proposalReview);
-      if (projection?.kind !== 'comparable' || !proposalPreviewGraph) return projection;
-      return { ...projection, candidate: proposalPreviewGraph };
-    },
-    [proposalPreviewGraph, proposalReview],
+    () => proposalReviewToCanvasProjection(proposalReview),
+    [proposalReview],
   );
   const acceptedReviewGraph = reviewProjection?.accepted ?? graph;
   const relationshipPreviewGraph = useMemo(
@@ -748,13 +749,17 @@ export function GraphWorkspace() {
     if (completedProjectionFitKeyRef.current === projectionFitRequest.key) return;
     if (projectionFitRequest.mode === 'proposal' && (!proposalId || !inspectorVisible)) return;
     if (projectionFitRequest.mode === 'design' && proposalId) return;
-    if (!fitProjection(canvas.nodes)) return;
+    if (projectionFitRequest.mode === 'proposal') {
+      if (proposalInitialFitNodeIds.length > 0 && !fitFocus(proposalInitialFitNodeIds)) return;
+    } else if (!fitProjection(canvas.nodes)) return;
     completedProjectionFitKeyRef.current = projectionFitRequest.key;
   }, [
     activeViewMode,
     canvas.nodes,
     fitProjection,
+    fitFocus,
     inspectorVisible,
+    proposalInitialFitNodeIds,
     projectionFitRequest,
     proposalId,
   ]);

@@ -961,9 +961,6 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
         };
         return { state, changed: false, result: { ok: false, error } };
       }
-      const proposalLayoutPromise = result.proposal.operations.some(isLayoutAffectingProposalOperation)
-        ? layoutWorkflowGraph(applyGraphOperations(state.graph, result.proposal.operations).graph)
-        : undefined;
       return {
         state: {
           ...state,
@@ -979,7 +976,6 @@ export function createWorkspaceService(dependencies: WorkspaceDependencies) {
             ? 'A new agent proposal is ready for human review.'
             : 'The agent proposal is invalid. Review its validation issues.',
         result: { ok: true, proposal: result.proposal },
-        ...(proposalLayoutPromise ? { proposalLayoutPromise } : {}),
       };
     },
 
