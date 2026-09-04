@@ -135,7 +135,12 @@ export function useCoalescedFitView<
     /** Fits an explicit authored path through the same panel-aware viewport. */
     fitNodes: useCallback((nodeIds: readonly string[]) => {
       if (!enabled || nodeIds.length === 0) return false;
-      scheduleFit(true, nodeIds);
+      // Explicit path fitting prioritizes keeping the complete authored path
+      // inside the usable canvas. Large/nested workflows can span much wider
+      // than the general graph readability floor allows, especially with an
+      // inspector rail open. The canvas itself already supports this minimum;
+      // short paths still resolve to their natural (larger) fit zoom.
+      scheduleFit(true, nodeIds, 48, { minZoom: 0.08, maxZoom: BASE_FIT_VIEW_OPTIONS.maxZoom });
       return true;
     }, [enabled, scheduleFit]),
     /** Fits proposal-review targets with a modest readable detail zoom. */

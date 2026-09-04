@@ -364,3 +364,18 @@ test('scenario accordions and repeated compact downloads remain valid without st
     expect(first.text.length).toBeGreaterThan(40);
   }
 });
+
+test('wide hierarchical scenario paths fit inside the canvas beside the scenario rail', async ({ app }) => {
+  await app.setViewportSize({ width: 1440, height: 900 });
+  await loadGraphLibraryEntry(app, 'Hierarchical Deep Research', 'library-hierarchical-deep-research');
+  await app.getByRole('button', { name: /confirm (?:and|&) freeze/i }).click();
+  await app.getByRole('radio', { name: 'Scenario', exact: true }).click();
+
+  const scenarioRead = await callWebMcpTool<ScenarioRead>(app, 'get_branch_scenarios', {});
+  expect(scenarioRead.scenarios.length).toBeGreaterThan(2);
+
+  for (const scenario of scenarioRead.scenarios.slice(1, 3)) {
+    await app.locator(`button[data-scenario-id="${scenario.id}"]`).click();
+    await expectFitInsideOpenDesktopRails(app, scenario.orderedPath);
+  }
+});

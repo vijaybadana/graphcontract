@@ -4001,6 +4001,40 @@ function normalizeScenarioEnumerationBudget(
   };
 }
 
+function orderScenariosByOutcomeThenLength(
+  scenarios: readonly BranchScenario[],
+): BranchScenario[] {
+  const outcomeKey = (scenario: BranchScenario) => scenario.humanOutcomes.length > 0
+    ? `human:${scenario.humanOutcomes
+        .map((outcome) => `${outcome.nodeId}:${outcome.outcomeId}`)
+        .join('|')}`
+    : `terminal:${scenario.expectedTerminalNode}`;
+  const outcomeOrder = new Map<string, number>();
+  scenarios.forEach((scenario) => {
+    const key = outcomeKey(scenario);
+    if (!outcomeOrder.has(key)) {
+      outcomeOrder.set(key, outcomeOrder.size);
+    }
+  });
+
+  return scenarios
+    .map((scenario, traversalIndex) => ({ scenario, traversalIndex }))
+    .sort((left, right) =>
+      (outcomeOrder.get(outcomeKey(left.scenario)) ?? 0) -
+        (outcomeOrder.get(outcomeKey(right.scenario)) ?? 0) ||
+      left.scenario.orderedPath.length - right.scenario.orderedPath.length ||
+      left.traversalIndex - right.traversalIndex,
+    )
+    .map(({ scenario }, index) => {
+      const number = index + 1;
+      return {
+        ...scenario,
+        id: `scenario-${number}`,
+        name: scenario.name.replace(/^Path \d+:/, `Path ${number}:`),
+      };
+    });
+}
+
 export function enumerateScenariosBounded(
   graph: WorkflowGraph,
   requestedBudget: ScenarioEnumerationBudget = DEFAULT_SCENARIO_ENUMERATION_BUDGET,
@@ -4224,7 +4258,12 @@ export function enumerateScenariosBounded(
   };
 
   walk(start.id, [], [], [], [], [], [], new Map());
-  return budgetFailure ?? { ok: true, scenarios, expansions, budget };
+  return budgetFailure ?? {
+    ok: true,
+    scenarios: orderScenariosByOutcomeThenLength(scenarios),
+    expansions,
+    budget,
+  };
 }
 
 /**

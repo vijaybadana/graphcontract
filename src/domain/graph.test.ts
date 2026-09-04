@@ -733,6 +733,28 @@ describe('routing edge semantics', () => {
 
     expect(scenarios).toEqual(enumerateScenarios(researchIntakeRoutingGraph));
     expect(scenarios).toHaveLength(5);
+    expect(scenarios.map((scenario) => scenario.id)).toEqual([
+      'scenario-1',
+      'scenario-2',
+      'scenario-3',
+      'scenario-4',
+      'scenario-5',
+    ]);
+    expect(scenarios.every((scenario, index) => scenario.name.startsWith(`Path ${index + 1}:`))).toBe(true);
+    const outcomeGroups = [...new Set(scenarios.map((scenario) => scenario.expectedTerminalNode))];
+    for (const outcome of outcomeGroups) {
+      const lengths = scenarios
+        .filter((scenario) => scenario.expectedTerminalNode === outcome)
+        .map((scenario) => scenario.orderedPath.length);
+      expect(lengths).toEqual(lengths.slice().sort((left, right) => left - right));
+    }
+    expect(scenarios.map((scenario) => scenario.expectedTerminalNode)).toEqual(
+      outcomeGroups.flatMap((outcome) =>
+        scenarios
+          .filter((scenario) => scenario.expectedTerminalNode === outcome)
+          .map(() => outcome),
+      ),
+    );
 
     const loopScenario = scenarios.find((scenario) =>
       scenario.traversedEdges.some((edge) => edge.id === 'researcher-continue'),
